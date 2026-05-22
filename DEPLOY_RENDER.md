@@ -26,11 +26,18 @@
 
 在 Render 的 Environment 页面加入：
 
+- `DATABASE_URL`: Render PostgreSQL 提供的 External Database URL 或 Internal Database URL
 - `GEMINI_API_KEY`: 你的 Gemini API Key
 - `TG_TOKEN`: 你的 Telegram Bot Token
 - `TG_CHAT_ID`: 你的 Telegram Chat ID
 - `APP_URL`: Render 给你的公网网址，例如 `https://your-app.onrender.com`
 - `GEMINI_MODEL`: 可留空；若要固定模型，可填 `gemini-3-flash-preview`
+
+## PostgreSQL 说明
+
+如果设置了 `DATABASE_URL`，系统会自动使用 PostgreSQL 保存教材和设置。
+
+如果没有设置 `DATABASE_URL`，系统会退回本地 `database.csv` 和 `settings.json`。这个方式只适合本机开发，不适合 Render 免费版长期保存资料。
 
 ## 4. 部署完成
 

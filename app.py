@@ -18,6 +18,7 @@ app = Flask(__name__, template_folder=".")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_FILE = os.path.join(BASE_DIR, "database.csv")
 SETTINGS_FILE = os.path.join(BASE_DIR, "settings.json")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 # 公网部署时请在云端平台设置这些环境变量，不要把金钥写死在公开代码里。
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -59,20 +60,101 @@ def today_string():
 
 
 def ensure_database():
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS materials (
+                        id BIGSERIAL PRIMARY KEY,
+                        date TEXT NOT NULL,
+                        vocab_word TEXT DEFAULT '',
+                        vocab_reading TEXT DEFAULT '',
+                        vocab_meaning TEXT DEFAULT '',
+                        verb_base TEXT DEFAULT '',
+                        verb_te TEXT DEFAULT '',
+                        verb_ta TEXT DEFAULT '',
+                        verb_nai TEXT DEFAULT '',
+                        verb_ba TEXT DEFAULT '',
+                        verb_causative TEXT DEFAULT '',
+                        verb_passive TEXT DEFAULT '',
+                        verb_causative_passive TEXT DEFAULT '',
+                        grammar_title TEXT DEFAULT '',
+                        grammar_exp TEXT DEFAULT '',
+                        grammar_examples TEXT DEFAULT '',
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                    )
+                    """
+                )
+            conn.commit()
+        return
+
     if not os.path.exists(DATABASE_FILE):
         pd.DataFrame(columns=COLUMNS).to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig")
 
 
+def get_db_connection():
+    import psycopg
+
+    return psycopg.connect(DATABASE_URL)
+
+
 def read_database():
     ensure_database()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT {', '.join(COLUMNS)} FROM materials ORDER BY id"
+                )
+                rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
+
     return pd.read_csv(DATABASE_FILE, dtype=str, keep_default_na=False, encoding="utf-8-sig")
 
 
 def write_database(df):
+    if DATABASE_URL:
+        ensure_database()
+        placeholders = ", ".join(["%s"] * len(COLUMNS))
+        columns_sql = ", ".join(COLUMNS)
+        rows = [
+            tuple("" if pd.isna(row[col]) else str(row[col]) for col in COLUMNS)
+            for _, row in df.iterrows()
+        ]
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM materials")
+                if rows:
+                    cur.executemany(
+                        f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})",
+                        rows,
+                    )
+            conn.commit()
+        return
+
     df.to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
 
 
 def load_settings():
+    if DATABASE_URL:
+        ensure_database()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT key, value FROM app_settings")
+                saved = dict(cur.fetchall())
+        settings = DEFAULT_SETTINGS.copy()
+        settings.update({k: str(v) for k, v in saved.items() if k in settings})
+        return settings
+
     if not os.path.exists(SETTINGS_FILE):
         return DEFAULT_SETTINGS.copy()
     try:
@@ -90,6 +172,24 @@ def save_settings_file(settings):
     for key in DEFAULT_SETTINGS:
         if key in settings and settings[key] != "":
             current[key] = str(settings[key])
+
+    if DATABASE_URL:
+        ensure_database()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for key, value in current.items():
+                    cur.execute(
+                        """
+                        INSERT INTO app_settings (key, value)
+                        VALUES (%s, %s)
+                        ON CONFLICT (key)
+                        DO UPDATE SET value = EXCLUDED.value
+                        """,
+                        (key, value),
+                    )
+            conn.commit()
+        return current
+
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
     return current
@@ -323,9 +423,7 @@ def sample_material(settings=None):
 
 
 def save_material_for_today(material):
-    df = read_database()
     date = today_string()
-    df = df[df["date"] != date]
 
     vocab_list = material.get("vocab") or []
     verb_list = material.get("verbs") or []
@@ -358,6 +456,23 @@ def save_material_for_today(material):
             }
         )
 
+    if DATABASE_URL:
+        ensure_database()
+        placeholders = ", ".join(["%s"] * len(COLUMNS))
+        columns_sql = ", ".join(COLUMNS)
+        rows = [tuple(row[col] for col in COLUMNS) for row in new_rows]
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM materials WHERE date = %s", (date,))
+                cur.executemany(
+                    f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})",
+                    rows,
+                )
+            conn.commit()
+        return date
+
+    df = read_database()
+    df = df[df["date"] != date]
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     write_database(output[COLUMNS])
     return date

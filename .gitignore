@@ -3,3 +3,5 @@ __pycache__/
 .env
 database.csv
 settings.json
+.git-broken/
+flask-japanese-public-deploy.zip
