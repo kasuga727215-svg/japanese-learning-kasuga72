@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日语学习自动化系统</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #0d0e15;
+      --text-color: #e8e8e8;
+      --primary: #00ffcc;
+      --secondary: #ff4fd8;
+      --panel-bg: #1a1c29;
+      --border-color: #2a2d40;
+    }
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      padding-bottom: 50px;
+    }
+    .text-success { color: var(--primary) !important; text-shadow: 0 0 10px rgba(0,255,204,0.3); }
+    .card { background-color: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.45); margin-bottom: 20px; }
+    .nav-pills .nav-link { color: var(--text-color); border-radius: 0; padding: 10px 20px; cursor: pointer; background: transparent; border: 0; }
+    .nav-pills .nav-link.active { border-bottom: 2px solid var(--primary); color: var(--primary); }
+    .form-select, .form-control { background-color: var(--bg-color); border: 1px solid var(--border-color); color: var(--text-color); }
+    .form-select option { background-color: var(--bg-color); color: var(--text-color); }
+    .form-control:focus, .form-select:focus { background-color: var(--bg-color); color: var(--text-color); border-color: var(--primary); box-shadow: 0 0 5px rgba(0,255,204,0.5); }
+    .table { color: var(--text-color); }
+    .table thead th { border-bottom-color: var(--primary); color: var(--primary); }
+    .neon-btn { background: transparent; color: var(--primary); border: 1px solid var(--primary); border-radius: 5px; padding: 10px 22px; transition: all 0.2s; cursor: pointer; }
+    .neon-btn:hover:not(:disabled) { background: var(--primary); color: #000; box-shadow: 0 0 10px var(--primary); }
+    .neon-btn:disabled { opacity: 0.6; cursor: wait; }
+    .error-text { color: var(--secondary); font-weight: bold; border: 1px dashed var(--secondary); padding: 15px; border-radius: 5px; text-align: center; }
+    .example-box { background-color: rgba(255,255,255,0.08); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 8px; border-radius: 4px; }
+    .meaning-text { color: #f8f9fa; font-size: 0.95em; margin-top: 4px; display: inline-block; }
+    .app-shell { width: min(100% - 32px, 1320px); margin: 0 auto; }
+    .app-header { gap: 16px; }
+    .app-title { font-size: 2rem; line-height: 1.2; }
+    .archive-select { width: min(100%, 220px); }
+    .main-nav { gap: 4px; }
+    .settings-actions { gap: 14px; }
+    .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-scroll table { min-width: 980px; }
+    input, select, button { min-height: 44px; }
+
+    @media (max-width: 768px) {
+      body { padding-bottom: 28px; }
+      .app-shell { width: min(100% - 20px, 1320px); }
+      .app-header { align-items: stretch !important; margin-bottom: 18px !important; }
+      .app-title { width: 100%; font-size: 1.55rem; }
+      .archive-select { width: 100%; max-width: none !important; }
+      .main-nav { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; position: sticky; top: 0; z-index: 10; background: rgba(13,14,21,0.96); padding: 8px 0; }
+      .main-nav .nav-item, .main-nav .nav-link { width: 100%; }
+      .main-nav .nav-link { padding: 12px 6px; text-align: center; }
+      .card { margin-bottom: 14px; }
+      .card.p-3, .card.p-4 { padding: 16px !important; }
+      .settings-actions { display: grid !important; grid-template-columns: 1fr; }
+      .settings-actions .neon-btn { width: 100%; }
+      .error-text { text-align: left; word-break: break-word; }
+      #vocab-list .p-3 { min-height: 94px; }
+      #quiz-container .p-4 { padding: 16px !important; }
+    }
+
+    @media (min-width: 769px) and (max-width: 1100px) {
+      .app-shell { width: min(100% - 28px, 1320px); }
+      .settings-actions .neon-btn { flex: 1 1 180px; }
+    }
+  </style>
+</head>
+<body>
+<div class="app-shell mt-4">
+  <div class="app-header d-flex justify-content-between align-items-center mb-4 flex-wrap">
+    <h2 class="app-title fw-bold text-success mb-0">日语学习自动化系统</h2>
+    <select id="dateSelect" class="archive-select form-select" onchange="loadSpecificDate()">
+      <option value="">选择历史日期</option>
+    </select>
+  </div>
+
+  <ul class="main-nav nav nav-pills mb-4 justify-content-center">
+    <li class="nav-item"><button class="nav-link active" onclick="showTab(event, 'tab-daily')">每日教材</button></li>
+    <li class="nav-item"><button class="nav-link" onclick="startQuiz(event)">累计测验</button></li>
+    <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-settings')">设置</button></li>
+  </ul>
+
+  <div id="tab-daily" class="content-tab">
+    <div id="content-loader" class="text-center py-5 text-muted">正在读取学习材料...</div>
+    <div id="material-content" style="display:none;">
+      <div class="card p-3"><h5 class="fw-bold text-success mb-3">单词</h5><div id="vocab-list" class="row g-2"></div></div>
+      <div class="card p-3">
+        <h5 class="fw-bold text-success mb-3">动词变化表</h5>
+        <div class="table-scroll">
+          <table class="table text-nowrap">
+            <thead><tr><th>辞书形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被动形</th><th>使役被动形</th></tr></thead>
+            <tbody id="verb-list"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card p-3"><h5 class="fw-bold text-success" id="grammar-title"></h5><p id="grammar-exp" style="color:#ddd; font-size:1.05em;"></p><div id="example-list"></div></div>
+    </div>
+  </div>
+
+  <div id="tab-quiz" class="content-tab" style="display:none;">
+    <div class="card p-4">
+      <h4 class="mb-4 text-success" style="border-bottom:1px solid var(--border-color); padding-bottom:15px;">累计测验</h4>
+      <div id="quiz-container"><div class="text-center text-muted py-4">点击上方测验后，系统会从 database.csv 产生题目。</div></div>
+      <button class="neon-btn mt-4 w-100 fw-bold" onclick="checkAnswers()" style="display:none; font-size:1.1em;" id="submit-btn">检查答案</button>
+    </div>
+  </div>
+
+  <div id="tab-settings" class="content-tab" style="display:none;">
+    <div class="card p-4">
+      <h4 class="mb-4 text-success" style="border-bottom:1px solid var(--border-color); padding-bottom:15px;">生成设置</h4>
+      <div class="row">
+        <div class="col-md-4 mb-3"><label class="form-label" style="color:var(--primary);">每次生成单词数量</label><input type="number" id="setting-vocab" class="form-control" min="1" value="3"></div>
+        <div class="col-md-4 mb-3"><label class="form-label" style="color:var(--primary);">每次生成动词数量</label><input type="number" id="setting-verb" class="form-control" min="0" value="1"></div>
+        <div class="col-md-4 mb-3"><label class="form-label" style="color:var(--primary);">预定生成时间</label><select id="setting-hour" class="form-select"></select></div>
+      </div>
+      <h5 class="mt-3 mb-3 text-success" style="border-bottom:1px solid var(--border-color); padding-bottom:15px;">测验设置</h5>
+      <div class="row">
+        <div class="col-md-6 mb-3"><label class="form-label" style="color:var(--primary);">选择题数量</label><input type="number" id="setting-quiz-mcq" class="form-control" min="0" max="10" value="3"></div>
+        <div class="col-md-6 mb-3"><label class="form-label" style="color:var(--primary);">填空题数量</label><input type="number" id="setting-quiz-fill" class="form-control" min="0" max="10" value="2"></div>
+      </div>
+      <div class="settings-actions d-flex mt-4 flex-wrap">
+        <button class="neon-btn" onclick="saveSettingsUI()" id="save-btn">保存设置</button>
+        <button class="neon-btn" onclick="triggerNowUI(false)" id="trigger-btn" style="color:var(--secondary); border-color:var(--secondary);">立即用 AI 生成</button>
+        <button class="neon-btn" onclick="triggerNowUI(true)" id="sample-btn">生成示例资料</button>
+        <button class="neon-btn" onclick="testTelegram()" id="tg-btn">测试 Telegram</button>
+      </div>
+      <div id="save-msg" class="mt-3"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentQuiz = [];
+
+  function todayString() {
+    const d = new Date();
+    return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  }
+
+  async function api(url, options = {}) {
+    const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "请求失败，请稍后再试。");
+    return data;
+  }
+
+  window.onload = async () => {
+    const hourSelect = document.getElementById("setting-hour");
+    for (let h = 0; h < 24; h++) hourSelect.add(new Option(`${h}:00 到 ${h + 1}:00`, h));
+    await loadArchiveList();
+    await loadDaily();
+    await loadSettings();
+  };
+
+  function showTab(event, id) {
+    document.querySelectorAll(".content-tab").forEach(t => t.style.display = "none");
+    document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
+    document.getElementById(id).style.display = "block";
+    if (event) event.currentTarget.classList.add("active");
+  }
+
+  async function loadSettings() {
+    const settings = await api("/api/settings");
+    document.getElementById("setting-vocab").value = settings.vocabCount;
+    document.getElementById("setting-verb").value = settings.verbCount;
+    document.getElementById("setting-hour").value = settings.triggerHour;
+    document.getElementById("setting-quiz-mcq").value = settings.quizMcqCount;
+    document.getElementById("setting-quiz-fill").value = settings.quizFillCount;
+  }
+
+  async function saveSettingsUI() {
+    const btn = document.getElementById("save-btn");
+    const msg = document.getElementById("save-msg");
+    btn.innerText = "保存中...";
+    try {
+      await api("/api/settings", {
+        method: "POST",
+        body: JSON.stringify({
+          vocabCount: document.getElementById("setting-vocab").value,
+          verbCount: document.getElementById("setting-verb").value,
+          triggerHour: document.getElementById("setting-hour").value,
+          quizMcqCount: document.getElementById("setting-quiz-mcq").value,
+          quizFillCount: document.getElementById("setting-quiz-fill").value
+        })
+      });
+      msg.className = "mt-3 text-success fw-bold";
+      msg.innerText = "设置已经保存。";
+      setTimeout(() => msg.innerText = "", 3000);
+    } catch (error) {
+      msg.className = "mt-3 error-text";
+      msg.innerText = error.message;
+    } finally {
+      btn.innerText = "保存设置";
+    }
+  }
+
+  async function triggerNowUI(useSample) {
+    const btn = useSample ? document.getElementById("sample-btn") : document.getElementById("trigger-btn");
+    const msg = document.getElementById("save-msg");
+    const currentSettings = {
+      vocabCount: document.getElementById("setting-vocab").value,
+      verbCount: document.getElementById("setting-verb").value,
+      triggerHour: document.getElementById("setting-hour").value,
+      quizMcqCount: document.getElementById("setting-quiz-mcq").value,
+      quizFillCount: document.getElementById("setting-quiz-fill").value
+    };
+    btn.innerText = useSample ? "正在生成示例..." : "AI 生成中...";
+    btn.disabled = true;
+    msg.className = "mt-3 text-muted";
+    msg.innerText = useSample ? "正在写入示例资料，并发送 Telegram 通知..." : "AI 正在生成日语教材，并会发送 Telegram 通知。";
+    try {
+      const result = await api(`/api/generate${useSample ? "?sample=1" : ""}`, {
+        method: "POST",
+        body: JSON.stringify(currentSettings)
+      });
+      msg.className = "mt-3 text-success fw-bold";
+      msg.innerText = result.message;
+      await loadDaily();
+      await loadArchiveList();
+    } catch (error) {
+      msg.className = "mt-3 error-text";
+      msg.innerText = error.message;
+    } finally {
+      btn.disabled = false;
+      btn.innerText = useSample ? "生成示例资料" : "立即用 AI 生成";
+    }
+  }
+
+  async function testTelegram() {
+    const btn = document.getElementById("tg-btn");
+    const msg = document.getElementById("save-msg");
+    btn.disabled = true;
+    btn.innerText = "测试中...";
+    msg.className = "mt-3 text-muted";
+    msg.innerText = "正在发送 Telegram 测试消息...";
+    try {
+      const result = await api("/api/test-telegram", { method: "POST" });
+      msg.className = "mt-3 text-success fw-bold";
+      msg.innerText = result.message;
+    } catch (error) {
+      msg.className = "mt-3 error-text";
+      msg.innerText = error.message;
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "测试 Telegram";
+    }
+  }
+
+  async function loadArchiveList() {
+    try {
+      const dates = await api("/api/archive-dates");
+      const select = document.getElementById("dateSelect");
+      select.innerHTML = '<option value="">选择历史日期</option>';
+      dates.forEach(date => select.add(new Option(date, date)));
+    } catch (error) {
+      handleError(error);
+    }
+  }
+
+  async function loadDaily() {
+    document.getElementById("content-loader").innerHTML = "正在读取今天的学习材料...";
+    document.getElementById("content-loader").style.display = "block";
+    document.getElementById("material-content").style.display = "none";
+    try {
+      const data = await api(`/api/materials?date=${encodeURIComponent(todayString())}`);
+      renderMaterial(data);
+    } catch (error) {
+      handleError(error);
+    }
+  }
+
+  async function loadSpecificDate() {
+    const date = document.getElementById("dateSelect").value;
+    if (!date) return;
+    document.getElementById("content-loader").innerHTML = "正在读取历史学习材料...";
+    document.getElementById("content-loader").style.display = "block";
+    document.getElementById("material-content").style.display = "none";
+    try {
+      const data = await api(`/api/materials?date=${encodeURIComponent(date)}`);
+      renderMaterial(data);
+    } catch (error) {
+      handleError(error);
+    }
+  }
+
+  function renderMaterial(data) {
+    document.getElementById("content-loader").style.display = "none";
+    if (!data) {
+      document.getElementById("content-loader").innerHTML = "<div class='error-text'>这一天还没有学习材料。请到设置页面点击“立即用 AI 生成”，或先产生示例资料。</div>";
+      document.getElementById("content-loader").style.display = "block";
+      return;
+    }
+    document.getElementById("material-content").style.display = "block";
+    document.getElementById("vocab-list").innerHTML = data.vocabulary.map(v => `
+      <div class="col-12 col-md-6"><div class="p-3 border rounded" style="border-color:var(--border-color)!important; background-color:rgba(255,255,255,0.02);">
+        <strong style="color:var(--primary); font-size:1.2em;">${escapeHtml(v.word)}</strong>
+        <small style="color:#aaa; margin-left:8px;">${escapeHtml(v.reading)}</small><br>
+        <span class="meaning-text">${escapeHtml(v.meaning)}</span>
+      </div></div>
+    `).join("");
+    document.getElementById("verb-list").innerHTML = data.verbs.map(v => `
+      <tr>
+        <td style="color:var(--secondary); font-weight:bold;">${escapeHtml(v.base || "-")}</td>
+        <td>${escapeHtml(v.te || "-")}</td><td>${escapeHtml(v.ta || "-")}</td><td>${escapeHtml(v.nai || "-")}</td>
+        <td>${escapeHtml(v.ba || "-")}</td><td>${escapeHtml(v.causative || "-")}</td><td>${escapeHtml(v.passive || "-")}</td><td>${escapeHtml(v.causativePassive || "-")}</td>
+      </tr>
+    `).join("");
+    document.getElementById("grammar-title").innerText = data.grammar.title || "文法";
+    document.getElementById("grammar-exp").innerText = data.grammar.exp || "";
+    document.getElementById("example-list").innerHTML = (data.grammar.examples || []).map(ex => `
+      <div class="example-box">
+        <span style="color:var(--primary); font-weight:bold;">日文：</span><span style="color:#fff; font-size:1.05em;">${escapeHtml(ex.jp)}</span><br>
+        <span style="color:var(--secondary); font-weight:bold;">中文：</span><span style="color:#ccc;">${escapeHtml(ex.cn)}</span>
+      </div>
+    `).join("");
+  }
+
+  async function startQuiz(event) {
+    showTab(event, "tab-quiz");
+    document.getElementById("quiz-container").innerHTML = "<div class='text-center text-muted py-4'>正在产生测验...</div>";
+    document.getElementById("submit-btn").style.display = "none";
+    try {
+      const questions = await api("/api/quiz");
+      if (questions.error) {
+        document.getElementById("quiz-container").innerHTML = `<div class='error-text'>${escapeHtml(questions.error)}</div>`;
+        return;
+      }
+      currentQuiz = questions;
+      document.getElementById("quiz-container").innerHTML = questions.map((q, i) => {
+        let html = `<div id="qwrap${i}" class="mb-4 p-4 rounded" style="background:rgba(255,255,255,0.02); border:1px solid var(--border-color);"><strong style="color:var(--primary); font-size:1.1em;">第 ${i + 1} 题：${escapeHtml(q.q)}</strong><br>`;
+        if (q.type === "MCQ") {
+          html += '<div class="mt-3">';
+          q.options.forEach(opt => {
+            html += `<label class="d-block mb-2 p-2 rounded" style="background:rgba(255,255,255,0.05); cursor:pointer;"><input type="radio" name="q${i}" value="${escapeHtml(opt)}"><span style="margin-left:8px; color:#fff;">${escapeHtml(opt)}</span></label>`;
+          });
+          html += "</div>";
+        } else {
+          html += `<input type="text" id="ans${i}" class="form-control mt-3" placeholder="请在这里输入答案">`;
+        }
+        return html + "</div>";
+      }).join("");
+      document.getElementById("submit-btn").style.display = "block";
+    } catch (error) {
+      document.getElementById("quiz-container").innerHTML = `<div class='error-text'>${escapeHtml(error.message)}</div>`;
+    }
+  }
+
+  function checkAnswers() {
+    let score = 0;
+    currentQuiz.forEach((q, i) => {
+      let userAns = "";
+      if (q.type === "MCQ") {
+        const checked = document.querySelector(`input[name="q${i}"]:checked`);
+        userAns = checked ? checked.value : "";
+      } else {
+        userAns = document.getElementById(`ans${i}`).value.trim();
+      }
+      const qWrap = document.getElementById(`qwrap${i}`);
+      if (userAns === q.ans) {
+        score++;
+        qWrap.style.borderLeft = "4px solid var(--primary)";
+        qWrap.style.borderColor = "var(--primary)";
+      } else {
+        qWrap.style.borderLeft = "4px solid var(--secondary)";
+        qWrap.style.borderColor = "var(--secondary)";
+        const feedback = document.createElement("div");
+        feedback.className = "mt-3 p-2 rounded fw-bold";
+        feedback.style.background = "rgba(255,79,216,0.1)";
+        feedback.style.color = "var(--secondary)";
+        feedback.innerText = `正确答案：${q.ans}`;
+        qWrap.appendChild(feedback);
+      }
+    });
+    const resultDiv = document.createElement("div");
+    resultDiv.className = "mt-4 p-4 rounded text-center fw-bold";
+    resultDiv.style.backgroundColor = "rgba(0,255,204,0.05)";
+    resultDiv.style.border = "1px solid var(--primary)";
+    resultDiv.style.fontSize = "1.2em";
+    resultDiv.innerHTML = `测验完成：<span style="color:var(--primary); font-size:1.5em;">${score}</span> / ${currentQuiz.length}`;
+    document.getElementById("quiz-container").appendChild(resultDiv);
+    document.getElementById("submit-btn").style.display = "none";
+  }
+
+  function handleError(error) {
+    document.getElementById("content-loader").innerHTML = `<div class='error-text'>发生错误：${escapeHtml(error.message)}</div>`;
+    document.getElementById("content-loader").style.display = "block";
+    document.getElementById("material-content").style.display = "none";
+  }
+</script>
+</body>
+</html>
