@@ -467,6 +467,7 @@ def api_generate():
         return jsonify(
             {
                 "message": f"{date} 的学习材料已经生成并保存到 database.csv。{telegram_status}",
+                "date": date,
                 "telegram": telegram_status,
             }
         )

@@ -223,7 +223,11 @@
       });
       msg.className = "mt-3 text-success fw-bold";
       msg.innerText = result.message;
-      await loadDaily();
+      if (result.date) {
+        await loadMaterialByDate(result.date);
+      } else {
+        await loadDaily();
+      }
       await loadArchiveList();
     } catch (error) {
       msg.className = "mt-3 error-text";
@@ -270,7 +274,20 @@
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
     try {
-      const data = await api(`/api/materials?date=${encodeURIComponent(todayString())}`);
+      const data = await api("/api/materials");
+      renderMaterial(data);
+    } catch (error) {
+      handleError(error);
+    }
+  }
+
+  async function loadMaterialByDate(date) {
+    document.getElementById("content-loader").innerHTML = "正在读取刚生成的学习材料...";
+    document.getElementById("content-loader").style.display = "block";
+    document.getElementById("material-content").style.display = "none";
+    showTab(null, "tab-daily");
+    try {
+      const data = await api(`/api/materials?date=${encodeURIComponent(date)}`);
       renderMaterial(data);
     } catch (error) {
       handleError(error);
