@@ -7,6 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
@@ -53,7 +54,8 @@ DEFAULT_SETTINGS = {
 
 
 def today_string():
-    return f"{datetime.now().year}/{datetime.now().month}/{datetime.now().day}"
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    return f"{now.year}/{now.month}/{now.day}"
 
 
 def ensure_database():
