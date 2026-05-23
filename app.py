@@ -478,6 +478,33 @@ def save_material_for_today(material):
     return date
 
 
+def generate_daily_material(use_sample=False, posted_settings=None, app_url=None):
+    if posted_settings:
+        save_settings_file(posted_settings)
+
+    if use_sample:
+        raw_material = sample_material(load_settings())
+    else:
+        settings = load_settings()
+        ai_text = call_gemini(build_prompt(settings))
+        raw_material = parse_json_from_ai(ai_text)
+
+    date = save_material_for_today(raw_material)
+    material = material_by_date(date)
+    telegram_status = "未发送"
+    try:
+        send_telegram_message(build_telegram_notification(material, date, app_url))
+        telegram_status = "Telegram 通知已发送"
+    except Exception as e:
+        telegram_status = f"Telegram 通知发送失败：{e}"
+
+    return {
+        "message": f"{date} 的学习材料已经生成并保存到 database.csv。{telegram_status}",
+        "date": date,
+        "telegram": telegram_status,
+    }
+
+
 def material_by_date(target_date):
     df = read_database()
     rows = df[df["date"] == target_date]
@@ -560,31 +587,12 @@ def api_generate():
     use_sample = request.args.get("sample") == "1"
     try:
         posted_settings = request.get_json(silent=True) or {}
-        if posted_settings:
-            save_settings_file(posted_settings)
-
-        if use_sample:
-            raw_material = sample_material(load_settings())
-        else:
-            settings = load_settings()
-            ai_text = call_gemini(build_prompt(settings))
-            raw_material = parse_json_from_ai(ai_text)
-
-        date = save_material_for_today(raw_material)
-        material = material_by_date(date)
-        telegram_status = "未发送"
-        try:
-            send_telegram_message(build_telegram_notification(material, date, request.host_url.rstrip("/")))
-            telegram_status = "Telegram 通知已发送"
-        except Exception as e:
-            telegram_status = f"Telegram 通知发送失败：{e}"
-
         return jsonify(
-            {
-                "message": f"{date} 的学习材料已经生成并保存到 database.csv。{telegram_status}",
-                "date": date,
-                "telegram": telegram_status,
-            }
+            generate_daily_material(
+                use_sample=use_sample,
+                posted_settings=posted_settings,
+                app_url=request.host_url.rstrip("/"),
+            )
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
