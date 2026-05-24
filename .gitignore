@@ -3,5 +3,6 @@ __pycache__/
 .env
 database.csv
 settings.json
+state.sqlite3
 .git-broken/
 flask-japanese-public-deploy.zip
