@@ -33,6 +33,7 @@ COLUMNS = [
     "vocab_reading",
     "vocab_meaning",
     "verb_base",
+    "verb_masu_stem",
     "verb_te",
     "verb_ta",
     "verb_nai",
@@ -72,6 +73,7 @@ def ensure_database():
                         vocab_reading TEXT DEFAULT '',
                         vocab_meaning TEXT DEFAULT '',
                         verb_base TEXT DEFAULT '',
+                        verb_masu_stem TEXT DEFAULT '',
                         verb_te TEXT DEFAULT '',
                         verb_ta TEXT DEFAULT '',
                         verb_nai TEXT DEFAULT '',
@@ -94,6 +96,7 @@ def ensure_database():
                     )
                     """
                 )
+                cur.execute("ALTER TABLE materials ADD COLUMN IF NOT EXISTS verb_masu_stem TEXT DEFAULT ''")
             conn.commit()
         return
 
@@ -342,6 +345,7 @@ JSON 格式如下：
   "verbs": [
     {{
       "base": "辞书形（假名） - 简体中文意思",
+      "masuStem": "连用形，也就是ます形去掉ます后的形态（假名）",
       "te": "て形（假名）",
       "ta": "た形（假名）",
       "nai": "ない形（假名）",
@@ -379,6 +383,7 @@ def sample_material(settings=None):
     verbs = [
             {
                 "base": "決める（きめる） - 决定",
+                "masuStem": "決め（きめ）",
                 "te": "決めて（きめて）",
                 "ta": "決めた（きめた）",
                 "nai": "決めない（きめない）",
@@ -389,6 +394,7 @@ def sample_material(settings=None):
             },
             {
                 "base": "確認する（かくにんする） - 确认",
+                "masuStem": "確認し（かくにんし）",
                 "te": "確認して（かくにんして）",
                 "ta": "確認した（かくにんした）",
                 "nai": "確認しない（かくにんしない）",
@@ -399,6 +405,7 @@ def sample_material(settings=None):
             },
             {
                 "base": "進める（すすめる） - 推进",
+                "masuStem": "進め（すすめ）",
                 "te": "進めて（すすめて）",
                 "ta": "進めた（すすめた）",
                 "nai": "進めない（すすめない）",
@@ -441,6 +448,7 @@ def save_material_for_today(material):
                 "vocab_reading": vocab.get("reading", ""),
                 "vocab_meaning": vocab.get("meaning", ""),
                 "verb_base": verb.get("base", ""),
+                "verb_masu_stem": verb.get("masuStem", ""),
                 "verb_te": verb.get("te", ""),
                 "verb_ta": verb.get("ta", ""),
                 "verb_nai": verb.get("nai", ""),
@@ -522,6 +530,7 @@ def material_by_date(target_date):
             verbs.append(
                 {
                     "base": row["verb_base"],
+                    "masuStem": row.get("verb_masu_stem", ""),
                     "te": row["verb_te"],
                     "ta": row["verb_ta"],
                     "nai": row["verb_nai"],
@@ -649,6 +658,7 @@ def api_quiz():
         )
 
     forms = [
+        ("连用形", "verb_masu_stem"),
         ("て形", "verb_te"),
         ("た形", "verb_ta"),
         ("ない形", "verb_nai"),

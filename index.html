@@ -42,7 +42,7 @@
     .main-nav { gap: 4px; }
     .settings-actions { gap: 14px; }
     .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .table-scroll table { min-width: 980px; }
+    .table-scroll table { min-width: 1080px; }
     input, select, button { min-height: 44px; }
 
     @media (max-width: 768px) {
@@ -92,7 +92,7 @@
         <h5 class="fw-bold text-success mb-3">动词变化表</h5>
         <div class="table-scroll">
           <table class="table text-nowrap">
-            <thead><tr><th>辞书形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被动形</th><th>使役被动形</th></tr></thead>
+            <thead><tr><th>辞书形</th><th>连用形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被动形</th><th>使役被动形</th></tr></thead>
             <tbody id="verb-list"></tbody>
           </table>
         </div>
@@ -326,6 +326,7 @@
     document.getElementById("verb-list").innerHTML = data.verbs.map(v => `
       <tr>
         <td style="color:var(--secondary); font-weight:bold;">${escapeHtml(v.base || "-")}</td>
+        <td>${escapeHtml(v.masuStem || "-")}</td>
         <td>${escapeHtml(v.te || "-")}</td><td>${escapeHtml(v.ta || "-")}</td><td>${escapeHtml(v.nai || "-")}</td>
         <td>${escapeHtml(v.ba || "-")}</td><td>${escapeHtml(v.causative || "-")}</td><td>${escapeHtml(v.passive || "-")}</td><td>${escapeHtml(v.causativePassive || "-")}</td>
       </tr>
