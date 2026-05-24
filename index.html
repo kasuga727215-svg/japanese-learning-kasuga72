@@ -32,7 +32,10 @@
     .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .table-scroll table { min-width: 1120px; color: var(--text-color); }
     .table thead th { color: var(--primary); border-bottom-color: var(--primary); }
-    .example-box, .question-box { background: rgba(255,255,255,.06); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 10px; border-radius: 4px; }
+    #grammar-exp { color: #f2f5ff; line-height: 1.75; font-size: 1.04rem; background: rgba(255,255,255,.045); border: 1px solid rgba(0,255,204,.16); border-radius: 6px; padding: 12px 14px; }
+    .example-box, .question-box { background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.08); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 10px; border-radius: 4px; }
+    .example-jp { color: #ffffff; font-weight: 600; }
+    .example-cn { color: #e9ecff; font-weight: 600; }
     .range-value { color: var(--secondary); font-weight: 800; min-width: 34px; display: inline-block; text-align: right; }
     .answer-ok { border-left-color: var(--primary) !important; box-shadow: inset 0 0 0 1px rgba(0,255,204,.4); }
     .answer-bad { border-left-color: var(--secondary) !important; box-shadow: inset 0 0 0 1px rgba(255,0,255,.35); }
@@ -288,8 +291,8 @@
     document.getElementById("grammar-title").innerText = `${data.targetLevel || ""} ${data.grammar.title || "文法"}`;
     document.getElementById("grammar-exp").innerText = data.grammar.exp || "";
     document.getElementById("example-list").innerHTML = (data.grammar.examples || []).map(ex => `
-      <div class="example-box"><span style="color:var(--primary);font-weight:bold;">日文：</span>${escapeHtml(ex.jp)}<br>
-      <span style="color:var(--secondary);font-weight:bold;">中文：</span>${escapeHtml(ex.cn)}</div>`).join("");
+      <div class="example-box"><span style="color:var(--primary);font-weight:bold;">日文：</span><span class="example-jp">${escapeHtml(ex.jp)}</span><br>
+      <span style="color:var(--secondary);font-weight:bold;">中文：</span><span class="example-cn">${escapeHtml(ex.cn)}</span></div>`).join("");
   }
 
   async function startQuiz(event) {
