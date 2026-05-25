@@ -33,7 +33,7 @@
 <main class="shell">
   <h1>錯題複習</h1>
   <nav class="nav">
-    <a href="/">每日教材</a><a href="/verb-practice">動詞練習</a><a href="/grammar-analyzer">文法拆解</a><a href="/sns-practice">SNS語感</a>
+    <a href="/">每日教材</a><a href="/verb-practice">動詞練習</a><a href="/grammar-analyzer">文法拆解</a><a href="/sns-practice">SNS語感</a><a href="/learning-report">學習報告</a>
   </nav>
   <section class="stats" id="statsCards">
     <div class="card"><div class="stat-label">今日應複習</div><div class="stat-value" id="dueCount">-</div></div>
@@ -92,7 +92,9 @@ async function loadMistakes(){
             <button onclick="retryMistake(${row.id})">送出</button>
             <button class="danger" onclick="markMastered(${row.id})">標記為已掌握</button>
           </div>
+          <button style="margin-top:12px;" onclick="generateSimilar(${row.id})">生成類似題</button>
           <div id="result-${row.id}" style="margin-top:10px;"></div>
+          <div id="similar-${row.id}" style="margin-top:10px;"></div>
         </details>
       </article>
     `).join("");
@@ -121,6 +123,42 @@ async function markMastered(id){
   await api(`/api/mistakes/${id}/mastered`, {method:"POST"});
   document.getElementById(`mistake-${id}`).remove();
   await loadStats();
+}
+
+function cleanAnswer(value) {
+  return String(value ?? "").trim().replace(/[（(][ぁ-ゖー\s　]+[）)]/g, "").replace(/[\s　\u200b\u200c\u200d\ufeff]+/g, "");
+}
+
+async function generateSimilar(id){
+  const box = document.getElementById(`similar-${id}`);
+  box.innerHTML = "<p class='muted'>生成類似題中...</p>";
+  try {
+    const data = await api("/api/mistakes/generate-similar", {method:"POST", body:JSON.stringify({mistake_id:id})});
+    if (!data.items || !data.items.length) { box.innerHTML = `<p class='muted'>${esc(data.message || "此題暫無法自動生成類似題")}</p>`; return; }
+    box.innerHTML = data.items.map((item, index) => `
+      <div class="card" id="similar-${id}-${index}">
+        <strong>${esc(item.prompt)}</strong>
+        ${item.type === "sns" ? `<p class="muted">語氣：${esc(item.tone_category)}</p><p>參考翻譯：${esc(item.reference_translation)}</p><p>直翻陷阱：${esc(item.literal_translation_trap)}</p>` : ""}
+        <input id="similar-input-${id}-${index}" placeholder="${item.type === "sns" ? "請輸入自然繁中翻譯" : "請輸入答案"}">
+        <button style="margin-top:10px;" onclick='checkSimilar(${id}, ${index}, ${JSON.stringify(item).replaceAll("'", "&#039;")})'>送出判斷</button>
+        <div id="similar-result-${id}-${index}" style="margin-top:8px;"></div>
+      </div>
+    `).join("");
+  } catch(error) { box.innerHTML = `<p class='error'>${esc(error.message)}</p>`; }
+}
+
+async function checkSimilar(parentId, index, item){
+  const input = document.getElementById(`similar-input-${parentId}-${index}`);
+  const result = document.getElementById(`similar-result-${parentId}-${index}`);
+  const answer = input.value.trim();
+  if (!answer) { result.innerHTML = "<p class='error'>請先輸入答案。</p>"; return; }
+  if (item.type === "verb") {
+    const data = await api("/api/verb-practice/check", {method:"POST", body:JSON.stringify({verb_id:item.verb_id, question_type:item.question_type, answer})});
+    result.innerHTML = data.correct ? "<p class='ok'>答對了。</p>" : `<p class='error'>答錯了，已加入錯題。正確答案：${esc(data.correct_answer)}</p>`;
+    await loadStats();
+    return;
+  }
+  result.innerHTML = `<p class='muted'>請自行對照參考翻譯。若覺得直翻不自然，可到 SNS 語感頁加強練習。</p>`;
 }
 
 async function loadStats(){

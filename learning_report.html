@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>學習報告</title>
+  <style>
+    :root { --bg-color:#0d0e15; --text-color:#e8e8e8; --primary:#00ffcc; --secondary:#ff00ff; --panel-bg:#1a1c29; --border-color:#2a2d40; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg-color); color:var(--text-color); font-family:Arial,"Microsoft JhengHei",sans-serif; }
+    .shell { width:min(100% - 24px, 1040px); margin:24px auto; }
+    a { color:var(--primary); text-decoration:none; }
+    .nav { display:flex; gap:10px; overflow-x:auto; white-space:nowrap; padding-bottom:8px; margin:16px 0 24px; -webkit-overflow-scrolling:touch; }
+    .nav a { flex:0 0 auto; border:1px solid var(--border-color); padding:10px 12px; border-radius:6px; }
+    .card { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:16px; overflow-wrap:anywhere; word-wrap:break-word; }
+    h1,h2,h3,strong { color:var(--primary); }
+    .grid { display:grid; gap:12px; }
+    .metric { color:var(--primary); font-size:1.6rem; font-weight:800; }
+    .muted { color:#aeb4c8; }
+    .warn { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
+    .chip { display:inline-block; padding:5px 10px; border:1px solid var(--border-color); border-radius:999px; margin:4px 6px 4px 0; }
+    @media (min-width:760px){ .grid.three { grid-template-columns:repeat(3,1fr); } .grid.two { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <h1>學習報告</h1>
+  <nav class="nav">
+    <a href="/">每日教材</a>
+    <a href="/verb-practice">動詞練習</a>
+    <a href="/mistake-review">錯題複習</a>
+    <a href="/grammar-analyzer">文法拆解</a>
+    <a href="/sns-practice">SNS語感</a>
+  </nav>
+  <section id="status" class="card muted">讀取學習報告中...</section>
+  <section id="report"></section>
+</main>
+<script>
+const statusBox = document.getElementById("status");
+const report = document.getElementById("report");
+function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+async function api(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "請求失敗");
+  return data;
+}
+function pct(value){ return value === null || value === undefined ? "資料不足" : `${value}%`; }
+function chips(items, keyName, countName){
+  if (!items || !items.length) return "<span class='muted'>資料不足</span>";
+  return items.map(item => `<span class="chip">${esc(item[keyName])}｜${esc(item[countName])}</span>`).join("");
+}
+function render(data){
+  const missing = Object.entries(data.data_health).filter(([,v]) => v === "missing").map(([k]) => k);
+  statusBox.className = missing.length ? "card warn" : "card muted";
+  statusBox.innerText = missing.length ? "目前資料不足，請持續練習以解鎖教練分析。" : "資料來源正常，以下為 UTC+8 台灣時間統計。";
+  report.innerHTML = `
+    <section class="grid three">
+      <div class="card"><h2>今日</h2><div class="metric">${data.today.has_material ? "已生成" : "尚無教材"}</div><p>完成題數：${data.today.completed_questions}</p><p>答對率：${pct(data.today.accuracy)}</p><p>新增錯題：${data.today.new_mistakes}</p><p>應複習：${data.today.due_reviews}</p></div>
+      <div class="card"><h2>最近 7 天</h2><div class="metric">${data.rolling_7_days.learning_days} 天</div><p>完成題數：${data.rolling_7_days.completed_questions}</p><p>整體答對率：${pct(data.rolling_7_days.accuracy)}</p><p>新增錯題：${data.rolling_7_days.new_mistakes}</p><p>已掌握錯題：${data.rolling_7_days.mastered_mistakes}</p></div>
+      <div class="card"><h2>最近 30 天</h2><div class="metric">${data.rolling_30_days.learning_days} 天</div><p>完成題數：${data.rolling_30_days.completed_questions}</p><p>整體答對率：${pct(data.rolling_30_days.accuracy)}</p><p>${esc(data.rolling_30_days.progress_trend_summary)}</p></div>
+    </section>
+    <section class="grid two">
+      <div class="card"><h2>弱點分析</h2><h3>最常錯類型</h3>${chips(data.rolling_7_days.top_error_categories, "category", "count")}<h3>最常錯動詞變化</h3>${chips(data.rolling_7_days.most_missed_verb_forms, "form", "count")}<p>SNS 語感最弱：${esc(data.rolling_7_days.weakest_sns_tone)}</p><p>翻譯自然度問題：${esc(data.rolling_7_days.translation_issue)}</p></div>
+      <div class="card"><h2>教練建議</h2>${data.coach_suggestion.map(item => `<p>${esc(item)}</p>`).join("")}<h3>資料來源</h3>${Object.entries(data.data_health).map(([k,v]) => `<span class="chip">${esc(k)}：${esc(v)}</span>`).join("")}</div>
+    </section>
+  `;
+}
+api("/api/learning-report").then(render).catch(error => {
+  statusBox.className = "card warn";
+  statusBox.innerText = error.message;
+});
+</script>
+</body>
+</html>

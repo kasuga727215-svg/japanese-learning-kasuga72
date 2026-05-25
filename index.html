@@ -59,8 +59,9 @@
     @media (max-width: 768px) {
       .app-shell { width: min(100% - 20px, 1320px); }
       .app-title { font-size: 1.55rem; }
-      .main-nav { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
-      .main-nav .nav-link { width: 100%; padding: 12px 6px; }
+      .main-nav { display: flex; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start !important; -webkit-overflow-scrolling: touch; }
+      .main-nav .nav-item { flex: 0 0 auto; }
+      .main-nav .nav-link { width: max-content; padding: 12px 14px; }
       .settings-actions { display: grid !important; grid-template-columns: 1fr; }
       .settings-actions .neon-btn { width: 100%; }
       .card.p-3, .card.p-4 { padding: 16px !important; }
@@ -87,6 +88,7 @@
     <li class="nav-item"><a class="nav-link" href="/mistake-review">錯題複習</a></li>
     <li class="nav-item"><a class="nav-link" href="/grammar-analyzer">文法拆解</a></li>
     <li class="nav-item"><a class="nav-link" href="/sns-practice">SNS語感</a></li>
+    <li class="nav-item"><a class="nav-link" href="/learning-report">學習報告</a></li>
   </ul>
 
   <div id="tab-daily" class="content-tab">
