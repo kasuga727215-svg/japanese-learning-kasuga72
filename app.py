@@ -801,6 +801,13 @@ def form_rule_explanation(verb, question_type):
     return f"{label}。請比較題目指定形態與正確答案，注意假名與送假名。"
 
 
+def clean_answer_value(value):
+    text = str(value or "").strip()
+    text = re.sub(r"[（(][ぁ-ゖー\s\u3000]+[）)]", "", text)
+    text = re.sub(r"[\s\u3000\u200b\u200c\u200d\ufeff]+", "", text)
+    return text
+
+
 def normalize_error_category(value):
     return value if value in ERROR_CATEGORIES else "動詞變化錯"
 
@@ -1113,20 +1120,20 @@ def api_verb_check():
     data = request.get_json(silent=True) or {}
     verb_id = data.get("verb_id")
     question_type = data.get("question_type")
-    answer = str(data.get("answer", "")).strip()
+    answer = clean_answer_value(data.get("answer", ""))
     if not verb_id or question_type not in QUESTION_TYPES or not answer:
         return jsonify({"error": "題目或答案不完整。"}), 400
     verb = sqlite_one("SELECT * FROM verbs WHERE id = ?", (verb_id,))
     if not verb:
         return jsonify({"error": "找不到動詞題目。"}), 404
     correct = verb[question_type]
-    is_correct = answer == correct
+    is_correct = answer == clean_answer_value(correct)
     if not is_correct:
         add_mistake(int(verb_id), question_type, answer)
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": correct,
+            "correct_answer": clean_answer_value(correct),
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
             "mistake_added": not is_correct,
@@ -1180,7 +1187,7 @@ def query_mistakes(args=None, limit=None):
     )
     for row in rows:
         row["question_label"] = VERB_FORM_LABELS.get(row["question_type"], row["question_type"])
-        row["correct_answer"] = row[row["question_type"]]
+        row["correct_answer"] = clean_answer_value(row[row["question_type"]])
         row["verb_group_label"] = group_label(row["verb_group"])
     return rows
 
@@ -1243,7 +1250,7 @@ def api_mark_mistake_mastered(mistake_id):
 @app.post("/api/mistakes/<int:mistake_id>/retry")
 def api_retry_mistake(mistake_id):
     data = request.get_json(silent=True) or {}
-    answer = str(data.get("answer", "")).strip()
+    answer = clean_answer_value(data.get("answer", ""))
     error_category = normalize_error_category(data.get("error_category", "動詞變化錯"))
     if not answer:
         return jsonify({"error": "請先輸入答案。"}), 400
@@ -1261,7 +1268,7 @@ def api_retry_mistake(mistake_id):
     if not row:
         return jsonify({"error": "找不到錯題紀錄。"}), 404
     correct = row[row["question_type"]]
-    is_correct = answer == correct
+    is_correct = answer == clean_answer_value(correct)
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         if is_correct:
@@ -1298,7 +1305,7 @@ def api_retry_mistake(mistake_id):
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": correct,
+            "correct_answer": clean_answer_value(correct),
             "rule": form_rule_explanation(row, row["question_type"]),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
@@ -1394,6 +1401,14 @@ def api_dashboard():
         """,
         (today_iso,),
     )
+    due_review = sqlite_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM mistake_logs
+        WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
+        """,
+        (today_iso_date(), today_iso_date()),
+    )
     review_items = query_mistakes({}, limit=5)
     return jsonify(
         {
@@ -1404,6 +1419,7 @@ def api_dashboard():
             "verb_count": len(today_material["verbs"]) if today_material else 0,
             "quiz_total": int(settings["mcq_count"]) + int(settings["fill_count"]),
             "today_new_mistakes": len(today_mistakes),
+            "due_review_count": int(due_review["count"] if due_review else 0),
             "last_7_days": [{"date": date, "studied": date in material_dates} for date in reversed(last_7_dates)],
             "streak_days": len(active_days),
             "review_items": review_items,
@@ -1464,7 +1480,7 @@ def api_quiz():
         row = verb_rows.sample(1).iloc[0]
         form_name, column = random.choice(forms)
         base = row["verb_base"].split("-")[0].strip()
-        questions.append({"type": "FILL", "q": f"請寫出「{base}」的 {form_name}。", "ans": row[column]})
+        questions.append({"type": "FILL", "q": f"請寫出「{base}」的 {form_name}。", "ans": clean_answer_value(row[column])})
 
     return jsonify(questions if questions else {"error": "目前沒有足夠資料可以產生測驗。"})
 

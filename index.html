@@ -206,6 +206,13 @@
     localStorage.setItem(`quizStats:${todayKey()}`, JSON.stringify({ completed: total, total, correct }));
   }
 
+  function normalizeQuizAnswer(value) {
+    return String(value ?? "")
+      .trim()
+      .replace(/[（(][ぁ-ゖー\s　]+[）)]/g, "")
+      .replace(/[\s　\u200b\u200c\u200d\ufeff]+/g, "");
+  }
+
   function currentSettings() {
     return {
       target_level: document.getElementById("setting-level").value,
@@ -329,9 +336,9 @@
       const label = day.date.split("/").slice(1).join("/");
       return `<div class="streak-day ${day.studied ? "active" : ""}">${escapeHtml(label)}</div>`;
     }).join("");
-    document.getElementById("dash-mistakes").innerText = `${data.today_new_mistakes} 題`;
-    document.getElementById("dash-review").innerHTML = data.review_items.length
-      ? data.review_items.map(item => `<span class="review-chip">${escapeHtml(item.dictionary_form)}｜${escapeHtml(item.question_label)}｜錯 ${item.mistake_count} 次</span>`).join("")
+    document.getElementById("dash-mistakes").innerText = `${data.due_review_count || 0} 題`;
+    document.getElementById("dash-review").innerHTML = (data.due_review_count || 0) > 0
+      ? "請前往「錯題複習」頁面完成今日複習。"
       : "目前沒有待複習錯題。";
   }
 
@@ -418,9 +425,9 @@
         const checked = document.querySelector(`input[name="q${i}"]:checked`);
         userAns = checked ? checked.value : "";
       } else {
-        userAns = document.getElementById(`ans${i}`).value.trim();
+        userAns = document.getElementById(`ans${i}`).value;
       }
-      const ok = userAns === q.ans;
+      const ok = normalizeQuizAnswer(userAns) === normalizeQuizAnswer(q.ans);
       wrap.classList.toggle("answer-ok", ok);
       wrap.classList.toggle("answer-bad", !ok);
       if (ok) score++;
