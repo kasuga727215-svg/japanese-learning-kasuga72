@@ -807,7 +807,8 @@ def analyze_with_mecab(text):
         import MeCab
         import unidic_lite
 
-        tagger = MeCab.Tagger(f"-d {unidic_lite.DICDIR}")
+        mecabrc = "nul" if os.name == "nt" else "/dev/null"
+        tagger = MeCab.Tagger(f"-r {mecabrc} -d {unidic_lite.DICDIR}")
     except Exception as e:
         return None, f"MeCab 初始化失敗，請檢查依賴：{e}"
 
