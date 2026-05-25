@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNS 語感訓練</title>
+  <style>
+    :root { --bg-color:#0d0e15; --text-color:#e8e8e8; --primary:#00ffcc; --secondary:#ff00ff; --panel-bg:#1a1c29; --border-color:#2a2d40; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg-color); color:var(--text-color); font-family:Arial,"Microsoft JhengHei",sans-serif; }
+    .shell { width:min(100% - 24px, 920px); margin:24px auto; }
+    a { color:var(--primary); text-decoration:none; }
+    .nav { display:flex; gap:10px; overflow-x:auto; white-space:nowrap; padding-bottom:8px; margin:16px 0 24px; -webkit-overflow-scrolling:touch; }
+    .nav a { flex:0 0 auto; border:1px solid var(--border-color); padding:10px 12px; border-radius:6px; }
+    .card { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:16px; overflow-wrap:anywhere; word-wrap:break-word; }
+    h1,h2,h3,strong,label,summary { color:var(--primary); }
+    textarea,button { width:100%; min-height:44px; border-radius:6px; border:1px solid var(--border-color); background:#080910; color:#fff; padding:10px; }
+    textarea { min-height:120px; resize:vertical; line-height:1.7; }
+    button { color:var(--primary); border-color:var(--primary); background:transparent; font-weight:700; cursor:pointer; }
+    button:hover:not(:disabled) { background:var(--primary); color:#000; box-shadow:0 0 10px var(--primary); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .accent { color:var(--secondary); border-color:var(--secondary); }
+    .accent:hover:not(:disabled) { background:var(--secondary); color:#000; box-shadow:0 0 10px var(--secondary); }
+    .row { display:grid; gap:12px; }
+    .tag { display:inline-block; color:#00110d; background:var(--primary); border-radius:999px; padding:4px 10px; font-weight:800; margin:4px 6px 4px 0; }
+    .muted { color:#aeb4c8; }
+    .error { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
+    .ok { color:var(--primary); border-left:4px solid var(--primary); padding-left:10px; }
+    .jp { font-size:1.35rem; line-height:1.8; font-weight:800; color:#fff; }
+    details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; margin-top:10px; }
+    ul { padding-left:20px; }
+    @media (min-width:760px){ .row.three { grid-template-columns:repeat(3,1fr); } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <h1>SNS 語感訓練</h1>
+  <nav class="nav">
+    <a href="/">每日教材</a>
+    <a href="/verb-practice">動詞練習</a>
+    <a href="/mistake-review">錯題複習</a>
+    <a href="/grammar-analyzer">文法拆解</a>
+  </nav>
+
+  <section class="card">
+    <h2>日文原句</h2>
+    <p id="jpCard" class="jp">讀取題目中...</p>
+    <p class="muted">請先用自己的繁體中文翻譯，再查看語感解析。</p>
+    <label for="userTranslation">你的繁體中文翻譯</label>
+    <textarea id="userTranslation" placeholder="請寫下你覺得自然的中文意思"></textarea>
+    <button id="revealBtn" style="margin-top:12px;">查看解析</button>
+    <div id="status" class="muted" style="margin-top:12px;"></div>
+  </section>
+
+  <section id="analysis"></section>
+</main>
+
+<script>
+let currentExample = null;
+const jpCard = document.getElementById("jpCard");
+const statusBox = document.getElementById("status");
+const analysis = document.getElementById("analysis");
+const userTranslation = document.getElementById("userTranslation");
+
+function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+async function api(url, options={}) {
+  const res = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "請求失敗");
+  return data;
+}
+function list(items) {
+  return (items || []).map(item => `<li>${esc(item)}</li>`).join("");
+}
+async function loadQuestion() {
+  statusBox.innerText = "讀取題目中...";
+  analysis.innerHTML = "";
+  userTranslation.value = "";
+  try {
+    currentExample = await api("/api/sns/random");
+    jpCard.innerText = currentExample.japanese;
+    statusBox.innerText = "";
+  } catch (error) {
+    jpCard.innerText = "題庫讀取失敗";
+    statusBox.innerHTML = `<span class="error">${esc(error.message)}</span>`;
+  }
+}
+function renderAnalysis() {
+  const answer = userTranslation.value.trim();
+  if (!answer) {
+    statusBox.innerHTML = "<span class='error'>請先輸入自己的繁體中文翻譯。</span>";
+    return;
+  }
+  statusBox.innerText = "解析已展開。";
+  analysis.innerHTML = `
+    <article class="card">
+      <h2>語感解析</h2>
+      <p><span class="tag">${esc(currentExample.tone_category)}</span></p>
+      <p><strong>自然繁中翻譯：</strong>${esc(currentExample.zh_tw_translation)}</p>
+      <p><strong>平假名讀音：</strong>${esc(currentExample.reading_hiragana)}</p>
+      <p><strong>你的翻譯：</strong>${esc(answer)}</p>
+      <details open><summary>直翻陷阱</summary><p>${esc(currentExample.literal_translation_trap)}</p></details>
+      <details open><summary>詞彙重點</summary><ul>${list(currentExample.vocabulary_points)}</ul></details>
+      <details open><summary>文法重點</summary><ul>${list(currentExample.grammar_points)}</ul></details>
+      <details open><summary>自然改寫</summary><p>${esc(currentExample.natural_rewrite)}</p></details>
+      <details><summary>使用注意事項</summary><p>${esc(currentExample.usage_note)}</p></details>
+      <div class="row three" style="margin-top:16px;">
+        <button class="accent" onclick="addMistake()">加入錯題</button>
+        <button onclick="favoriteExample()">收藏例句</button>
+        <button onclick="loadQuestion()">下一題</button>
+      </div>
+      <div id="actionResult" class="muted" style="margin-top:12px;"></div>
+    </article>
+  `;
+}
+async function addMistake() {
+  const result = document.getElementById("actionResult");
+  result.innerText = "寫入錯題中...";
+  try {
+    const data = await api("/api/sns/add_mistake", {
+      method:"POST",
+      body:JSON.stringify({id:currentExample.id, user_translation:userTranslation.value.trim()})
+    });
+    result.innerHTML = `<span class="ok">${esc(data.message)}</span>`;
+  } catch (error) {
+    result.innerHTML = `<span class="error">${esc(error.message)}</span>`;
+  }
+}
+async function favoriteExample() {
+  const result = document.getElementById("actionResult");
+  result.innerText = "收藏中...";
+  try {
+    const data = await api("/api/sns/favorite", {
+      method:"POST",
+      body:JSON.stringify({id:currentExample.id, note:userTranslation.value.trim()})
+    });
+    result.innerHTML = `<span class="ok">${esc(data.message)}</span>`;
+  } catch (error) {
+    result.innerHTML = `<span class="error">${esc(error.message)}</span>`;
+  }
+}
+document.getElementById("revealBtn").addEventListener("click", renderAnalysis);
+loadQuestion();
+</script>
+</body>
+</html>

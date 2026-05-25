@@ -21,6 +21,7 @@ app = Flask(__name__, template_folder=".")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_FILE = os.path.join(BASE_DIR, "database.csv")
 SQLITE_SETTINGS_FILE = os.path.join(BASE_DIR, "state.sqlite3")
+SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -263,6 +264,17 @@ def ensure_settings_store():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sns_favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sns_id TEXT NOT NULL,
+                japanese TEXT NOT NULL,
+                user_note TEXT DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
         migrate_mistake_logs(conn)
         conn.commit()
     seed_verbs_if_empty()
@@ -332,6 +344,22 @@ def sqlite_dicts(query, params=()):
 def sqlite_one(query, params=()):
     rows = sqlite_dicts(query, params)
     return rows[0] if rows else None
+
+
+def load_sns_examples():
+    try:
+        with open(SNS_EXAMPLES_FILE, "r", encoding="utf-8") as file:
+            examples = json.load(file)
+    except (OSError, json.JSONDecodeError):
+        return []
+    return [item for item in examples if item.get("id") and item.get("japanese")]
+
+
+def find_sns_example(example_id):
+    for item in load_sns_examples():
+        if item.get("id") == example_id:
+            return item
+    return None
 
 
 def load_settings():
@@ -992,6 +1020,11 @@ def grammar_analyzer_page():
     return render_template("grammar_analyzer.html")
 
 
+@app.get("/sns-practice")
+def sns_practice_page():
+    return render_template("sns_practice.html")
+
+
 @app.get("/api/settings")
 def api_get_settings():
     return jsonify(load_settings())
@@ -1296,6 +1329,51 @@ def api_analyze_japanese():
             "notes": notes,
         }
     )
+
+
+@app.get("/api/sns/random")
+def api_sns_random():
+    examples = load_sns_examples()
+    if not examples:
+        return jsonify({"error": "SNS 題庫尚未建立。"}), 404
+    return jsonify(random.choice(examples))
+
+
+@app.post("/api/sns/add_mistake")
+def api_sns_add_mistake():
+    data = request.get_json(silent=True) or {}
+    example_id = str(data.get("id", "")).strip()
+    user_translation = str(data.get("user_translation", "")).strip()
+    if not example_id or not user_translation:
+        return jsonify({"error": "請先輸入自己的繁體中文翻譯。"}), 400
+    example = find_sns_example(example_id)
+    if not example:
+        return jsonify({"error": "找不到 SNS 例句。"}), 404
+    wrong_answer = f"{example['japanese']}｜使用者翻譯：{user_translation}"
+    add_mistake(0, "sns_translation", wrong_answer, "直翻不自然")
+    return jsonify({"success": True, "message": "已加入錯題紀錄。"})
+
+
+@app.post("/api/sns/favorite")
+def api_sns_favorite():
+    data = request.get_json(silent=True) or {}
+    example_id = str(data.get("id", "")).strip()
+    note = str(data.get("note", "")).strip()
+    example = find_sns_example(example_id)
+    if not example:
+        return jsonify({"error": "找不到 SNS 例句。"}), 404
+    now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    ensure_settings_store()
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.execute(
+            """
+            INSERT INTO sns_favorites (sns_id, japanese, user_note, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (example_id, example["japanese"], note, now),
+        )
+        conn.commit()
+    return jsonify({"success": True, "message": "已收藏此 SNS 例句。"})
 
 
 @app.get("/api/dashboard")
