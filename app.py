@@ -51,6 +51,24 @@ ERROR_CATEGORIES = [
     "其他",
 ]
 REVIEW_INTERVAL_STEPS = [3, 7, 14, 30]
+ANSWER_READING_FALLBACKS = {
+    "断れば": "ことわれば",
+    "断る": "ことわる",
+    "断り": "ことわり",
+    "断って": "ことわって",
+    "断った": "ことわった",
+    "断らない": "ことわらない",
+    "断られる": "ことわられる",
+    "断らせる": "ことわらせる",
+    "吹かれる": "ふかれる",
+    "吹けば": "ふけば",
+    "吹く": "ふく",
+    "降れば": "ふれば",
+    "降る": "ふる",
+    "降って": "ふって",
+    "降った": "ふった",
+    "降らない": "ふらない",
+}
 
 SEED_VERBS = [
     {
@@ -808,6 +826,64 @@ def clean_answer_value(value):
     return text
 
 
+def parenthetical_reading(value):
+    match = re.search(r"[（(]([ぁ-ゖー\s\u3000]+)[）)]", str(value or ""))
+    return clean_answer_value(match.group(1)) if match else ""
+
+
+def contains_kanji(text):
+    return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+
+
+def answer_reading_hiragana(value):
+    explicit_reading = parenthetical_reading(value)
+    if explicit_reading:
+        return kana_to_hiragana(explicit_reading)
+    text = clean_answer_value(value)
+    if not text:
+        return ""
+    if text in ANSWER_READING_FALLBACKS:
+        return ANSWER_READING_FALLBACKS[text]
+    if not contains_kanji(text):
+        return kana_to_hiragana(text)
+    try:
+        import MeCab
+        import unidic_lite
+
+        mecabrc = "nul" if os.name == "nt" else "/dev/null"
+        tagger = MeCab.Tagger(f"-r {mecabrc} -d {unidic_lite.DICDIR}")
+        readings = []
+        for line in tagger.parse(text).splitlines():
+            if not line or line == "EOS":
+                continue
+            surface, _, feature_text = line.partition("\t")
+            features = feature_text.split(",") if feature_text else []
+            readings.append(pick_reading(surface, features))
+        return clean_answer_value("".join(readings))
+    except Exception:
+        return kana_to_hiragana(text)
+
+
+def smart_answer_equal(user_input, correct_answer):
+    user_clean = clean_answer_value(user_input)
+    correct_clean = clean_answer_value(correct_answer)
+    if not user_clean or not correct_clean:
+        return False
+    if user_clean == correct_clean:
+        return True
+    user_reading = answer_reading_hiragana(user_clean)
+    correct_reading = answer_reading_hiragana(correct_clean)
+    return bool(user_reading and correct_reading and user_reading == correct_reading)
+
+
+def answer_display_value(correct_answer):
+    clean = clean_answer_value(correct_answer)
+    reading = answer_reading_hiragana(clean)
+    if contains_kanji(clean) and reading and reading != clean:
+        return f"{clean}（{reading}）"
+    return clean
+
+
 def normalize_error_category(value):
     return value if value in ERROR_CATEGORIES else "動詞變化錯"
 
@@ -1127,13 +1203,13 @@ def api_verb_check():
     if not verb:
         return jsonify({"error": "找不到動詞題目。"}), 404
     correct = verb[question_type]
-    is_correct = answer == clean_answer_value(correct)
+    is_correct = smart_answer_equal(answer, correct)
     if not is_correct:
         add_mistake(int(verb_id), question_type, answer)
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": clean_answer_value(correct),
+            "correct_answer": answer_display_value(correct),
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
             "mistake_added": not is_correct,
@@ -1187,7 +1263,7 @@ def query_mistakes(args=None, limit=None):
     )
     for row in rows:
         row["question_label"] = VERB_FORM_LABELS.get(row["question_type"], row["question_type"])
-        row["correct_answer"] = clean_answer_value(row[row["question_type"]])
+        row["correct_answer"] = answer_display_value(row[row["question_type"]])
         row["verb_group_label"] = group_label(row["verb_group"])
     return rows
 
@@ -1268,7 +1344,7 @@ def api_retry_mistake(mistake_id):
     if not row:
         return jsonify({"error": "找不到錯題紀錄。"}), 404
     correct = row[row["question_type"]]
-    is_correct = answer == clean_answer_value(correct)
+    is_correct = smart_answer_equal(answer, correct)
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         if is_correct:
@@ -1305,7 +1381,7 @@ def api_retry_mistake(mistake_id):
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": clean_answer_value(correct),
+            "correct_answer": answer_display_value(correct),
             "rule": form_rule_explanation(row, row["question_type"]),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
@@ -1480,9 +1556,34 @@ def api_quiz():
         row = verb_rows.sample(1).iloc[0]
         form_name, column = random.choice(forms)
         base = row["verb_base"].split("-")[0].strip()
-        questions.append({"type": "FILL", "q": f"請寫出「{base}」的 {form_name}。", "ans": clean_answer_value(row[column])})
+        questions.append({"type": "FILL", "q": f"請寫出「{base}」的 {form_name}。", "ans": clean_answer_value(row[column]), "displayAns": answer_display_value(row[column])})
 
     return jsonify(questions if questions else {"error": "目前沒有足夠資料可以產生測驗。"})
+
+
+@app.post("/api/quiz/submit")
+def api_quiz_submit():
+    data = request.get_json(silent=True) or {}
+    questions = data.get("questions") or []
+    answers = data.get("answers") or []
+    if not isinstance(questions, list) or not isinstance(answers, list):
+        return jsonify({"error": "測驗資料格式不正確。"}), 400
+
+    results = []
+    score = 0
+    for index, question in enumerate(questions):
+        user_answer = answers[index] if index < len(answers) else ""
+        correct_answer = question.get("ans", "")
+        is_correct = smart_answer_equal(user_answer, correct_answer)
+        if is_correct:
+            score += 1
+        results.append(
+            {
+                "correct": is_correct,
+                "correct_answer": question.get("displayAns") or answer_display_value(correct_answer),
+            }
+        )
+    return jsonify({"score": score, "total": len(questions), "results": results})
 
 
 if __name__ == "__main__":

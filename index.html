@@ -415,35 +415,48 @@
     document.getElementById("submit-btn").style.display = "block";
   }
 
-  function checkAnswers() {
-    let score = 0;
+  async function checkAnswers() {
+    const userAnswers = currentQuiz.map((q, i) => {
+      if (q.type === "MCQ") {
+        const checked = document.querySelector(`input[name="q${i}"]:checked`);
+        return checked ? checked.value : "";
+      }
+      return document.getElementById(`ans${i}`).value;
+    });
+    const submitBtn = document.getElementById("submit-btn");
+    submitBtn.disabled = true;
+    submitBtn.innerText = "批改中...";
+    let data;
+    try {
+      data = await api("/api/quiz/submit", { method: "POST", body: JSON.stringify({ questions: currentQuiz, answers: userAnswers }) });
+    } catch (error) {
+      document.getElementById("quiz-container").insertAdjacentHTML("beforeend", `<div class='error-text'>${escapeHtml(error.message)}</div>`);
+      submitBtn.disabled = false;
+      submitBtn.innerText = "檢查答案";
+      return;
+    }
     currentQuiz.forEach((q, i) => {
       const wrap = document.getElementById(`qwrap${i}`);
       wrap.querySelectorAll(".feedback").forEach(el => el.remove());
-      let userAns = "";
-      if (q.type === "MCQ") {
-        const checked = document.querySelector(`input[name="q${i}"]:checked`);
-        userAns = checked ? checked.value : "";
-      } else {
-        userAns = document.getElementById(`ans${i}`).value;
-      }
-      const ok = normalizeQuizAnswer(userAns) === normalizeQuizAnswer(q.ans);
+      const item = data.results[i] || {};
+      const ok = Boolean(item.correct);
       wrap.classList.toggle("answer-ok", ok);
       wrap.classList.toggle("answer-bad", !ok);
-      if (ok) score++;
       const feedback = document.createElement("div");
       feedback.className = "feedback";
       feedback.style.color = ok ? "var(--primary)" : "var(--secondary)";
-      feedback.innerText = ok ? "答對了。" : `答錯了。正確答案：${q.ans}`;
+      feedback.innerText = ok ? "答對了。" : `答錯了。正確答案：${item.correct_answer || q.displayAns || q.ans}`;
       wrap.appendChild(feedback);
     });
     const result = document.createElement("div");
     result.className = "mt-4 p-4 rounded text-center fw-bold";
     result.style.border = "1px solid var(--primary)";
-    result.innerHTML = `測驗完成：<span style="color:var(--primary);font-size:1.5em;">${score}</span> / ${currentQuiz.length}`;
+    result.innerHTML = `測驗完成：<span style="color:var(--primary);font-size:1.5em;">${data.score}</span> / ${data.total}`;
     document.getElementById("quiz-container").appendChild(result);
-    document.getElementById("submit-btn").style.display = "none";
-    saveTodayQuizStats(score, currentQuiz.length);
+    submitBtn.style.display = "none";
+    submitBtn.disabled = false;
+    submitBtn.innerText = "檢查答案";
+    saveTodayQuizStats(data.score, data.total);
     loadDashboard();
   }
 </script>
