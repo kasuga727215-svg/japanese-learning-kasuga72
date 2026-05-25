@@ -9,7 +9,7 @@ from collections import Counter
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -375,7 +375,7 @@ def parse_json_from_ai(text):
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start == -1 or end == -1:
-        raise ValueError("AI 没有返回可读取的 JSON 内容。")
+        raise ValueError("AI 沒有回傳可讀取的 JSON 內容。")
     return json.loads(cleaned[start : end + 1])
 
 
@@ -421,7 +421,7 @@ def choose_gemini_model():
 
 def call_gemini(prompt):
     if not GEMINI_API_KEY:
-        raise RuntimeError("没有设置 Gemini API Key。")
+        raise RuntimeError("尚未設定 Gemini API Key。")
 
     model_name = choose_gemini_model()
     url = (
@@ -440,62 +440,62 @@ def call_gemini(prompt):
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"AI 服务请求失败：{detail}") from e
+        raise RuntimeError(f"AI 服務請求失敗：{detail}") from e
     except urllib.error.URLError as e:
-        raise RuntimeError(f"无法连接 AI 服务：{e.reason}") from e
+        raise RuntimeError(f"無法連接 AI 服務：{e.reason}") from e
 
     if "error" in data:
-        raise RuntimeError(data["error"].get("message", "AI 服务返回错误。"))
+        raise RuntimeError(data["error"].get("message", "AI 服務回傳錯誤。"))
 
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError, TypeError) as e:
-        raise RuntimeError("AI 返回格式不正确。") from e
+        raise RuntimeError("AI 回傳格式不正確。") from e
 
 
 def build_prompt(settings):
     level = settings["target_level"]
-    topics = ["日常生活", "学校学习", "工作会话", "旅行交通", "购物点餐", "天气季节", "人际关系", "新闻社会", "抽象议题"]
+    topics = ["日常生活", "學校學習", "工作會話", "旅行交通", "購物點餐", "天氣季節", "人際關係", "新聞社會", "抽象議題"]
     topic = random.choice(topics)
     seed = random.randint(100000, 999999)
 
     return f"""
-你是一位专业日语老师。请为中文母语学习者生成一份 JLPT {level} 难度的日语教材。
+你是一位專業日語老師。請為繁體中文母語學習者生成一份 JLPT {level} 難度的日語教材。
 
-主题：{topic}
-随机编号：{seed}
+主題：{topic}
+隨機編號：{seed}
 
-请严格只输出 JSON，不要输出 Markdown，不要解释。所有中文说明必须使用简体中文。
-难度必须符合 {level}，不要混入过高或过低级别的内容。
+請嚴格只輸出 JSON，不要輸出 Markdown，不要解釋。所有中文說明必須使用繁體中文。
+難度必須符合 {level}，不要混入過高或過低級別的內容。
 
 JSON 格式：
 {{
   "vocab": [
-    {{"word": "日本语单词", "reading": "假名读音", "meaning": "简体中文意思"}}
+    {{"word": "日語單字", "reading": "假名讀音", "meaning": "繁體中文意思"}}
   ],
   "verbs": [
     {{
-      "base": "辞书形（假名） - 简体中文意思",
-      "masuStem": "连用形，也就是ます形去掉ます后的形态（假名）",
+      "base": "辭書形（假名） - 繁體中文意思",
+      "masuStem": "連用形，也就是ます形去掉ます後的形態（假名）",
       "te": "て形（假名）",
       "ta": "た形（假名）",
       "nai": "ない形（假名）",
       "ba": "ば形（假名）",
       "causative": "使役形（假名）",
-      "passive": "被动形（假名）",
-      "causativePassive": "使役被动形（假名）"
+      "passive": "被動形（假名）",
+      "causativePassive": "使役被動形（假名）"
     }}
   ],
   "grammar": {{
-    "title": "文法标题",
-    "exp": "简体中文说明",
+    "title": "文法標題",
+    "exp": "繁體中文說明",
     "examples": [
-      {{"jp": "日文例句", "cn": "简体中文翻译"}}
+      {{"jp": "日文例句", "cn": "繁體中文翻譯"}}
     ]
   }}
 }}
 
-请严格生成刚好 {settings["vocab_count"]} 个单词、刚好 {settings["verb_count"]} 个动词、1 个文法点，并至少给 2 个例句。
+請嚴格生成剛好 {settings["vocab_count"]} 個單字、剛好 {settings["verb_count"]} 個動詞、1 個文法點，並至少給 2 個例句。
 """.strip()
 
 
@@ -504,16 +504,16 @@ def sample_material(settings=None):
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
     vocab = [
-        {"word": "予定", "reading": "よてい", "meaning": "计划；预定"},
-        {"word": "準備", "reading": "じゅんび", "meaning": "准备"},
-        {"word": "確認", "reading": "かくにん", "meaning": "确认"},
-        {"word": "資料", "reading": "しりょう", "meaning": "资料"},
-        {"word": "進捗", "reading": "しんちょく", "meaning": "进度"},
+        {"word": "予定", "reading": "よてい", "meaning": "計畫；預定"},
+        {"word": "準備", "reading": "じゅんび", "meaning": "準備"},
+        {"word": "確認", "reading": "かくにん", "meaning": "確認"},
+        {"word": "資料", "reading": "しりょう", "meaning": "資料"},
+        {"word": "進捗", "reading": "しんちょく", "meaning": "進度"},
         {"word": "提案", "reading": "ていあん", "meaning": "提案"},
     ]
     verbs = [
         {
-            "base": "決める（きめる） - 决定",
+            "base": "決める（きめる） - 決定",
             "masuStem": "決め（きめ）",
             "te": "決めて（きめて）",
             "ta": "決めた（きめた）",
@@ -524,7 +524,7 @@ def sample_material(settings=None):
             "causativePassive": "決めさせられる（きめさせられる）",
         },
         {
-            "base": "確認する（かくにんする） - 确认",
+            "base": "確認する（かくにんする） - 確認",
             "masuStem": "確認し（かくにんし）",
             "te": "確認して（かくにんして）",
             "ta": "確認した（かくにんした）",
@@ -540,10 +540,10 @@ def sample_material(settings=None):
         "verbs": verbs[:verb_count],
         "grammar": {
             "title": "〜ようにする",
-            "exp": "表示努力养成某个习惯，或尽量做到某件事。",
+            "exp": "表示努力養成某個習慣，或盡量做到某件事。",
             "examples": [
-                {"jp": "毎日日本語を聞くようにしています。", "cn": "我尽量每天听日语。"},
-                {"jp": "忘れないようにメモしてください。", "cn": "请做笔记，以免忘记。"},
+                {"jp": "毎日日本語を聞くようにしています。", "cn": "我盡量每天聽日語。"},
+                {"jp": "忘れないようにメモしてください。", "cn": "請做筆記，以免忘記。"},
             ],
         },
     }
@@ -648,18 +648,18 @@ def build_telegram_notification(material, date, app_url=None):
     grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
     level = html.escape(material.get("targetLevel", ""))
     return (
-        f"<b>日语学习自动化系统</b>\n"
+        f"<b>日語學習自動化系統</b>\n"
         f"日期：{html.escape(date)}\n"
-        f"等级：{level}\n\n"
-        f"<b>今日单词：</b>{words or '暂无'}\n"
+        f"等級：{level}\n\n"
+        f"<b>今日單字：</b>{words or '暫無'}\n"
         f"<b>今日文法：</b>{grammar_title}\n\n"
-        f'<a href="{link}">点击打开学习页面</a>'
+        f'<a href="{link}">點擊開啟學習頁面</a>'
     )
 
 
 def send_telegram_message(text):
     if not TG_TOKEN or not TG_CHAT_ID:
-        raise RuntimeError("Telegram Token 或 Chat ID 没有设置。")
+        raise RuntimeError("Telegram Token 或 Chat ID 尚未設定。")
 
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = urllib.parse.urlencode(
@@ -669,7 +669,7 @@ def send_telegram_message(text):
     with urllib.request.urlopen(req, timeout=30) as response:
         data = json.loads(response.read().decode("utf-8"))
     if not data.get("ok"):
-        raise RuntimeError(f"Telegram 返回错误：{data}")
+        raise RuntimeError(f"Telegram 回傳錯誤：{data}")
     return data
 
 
@@ -679,15 +679,15 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     date = save_material_for_today(raw_material, settings)
     material = material_by_date(date)
 
-    telegram_status = "未发送"
+    telegram_status = "未發送"
     try:
         send_telegram_message(build_telegram_notification(material, date, app_url))
-        telegram_status = "Telegram 通知已发送"
+        telegram_status = "Telegram 通知已發送"
     except Exception as e:
-        telegram_status = f"Telegram 通知发送失败：{e}"
+        telegram_status = f"Telegram 通知發送失敗：{e}"
 
     return {
-        "message": f"{date} 的 {settings['target_level']} 学习材料已经生成并保存。{telegram_status}",
+        "message": f"{date} 的 {settings['target_level']} 學習材料已經生成並保存。{telegram_status}",
         "date": date,
         "telegram": telegram_status,
     }
@@ -968,9 +968,9 @@ def api_cron_daily_push():
 def api_test_telegram():
     try:
         send_telegram_message(
-            f"<b>Telegram 测试成功</b>\nFlask 日语学习系统可以发送消息。\n时间：{datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y-%m-%d %H:%M:%S')}"
+            f"<b>Telegram 測試成功</b>\nFlask 日語學習系統可以發送訊息。\n時間：{datetime.now(ZoneInfo('Asia/Taipei')).strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        return jsonify({"message": "Telegram 测试消息已经发送成功。"})
+        return jsonify({"message": "Telegram 測試訊息已經發送成功。"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1140,11 +1140,46 @@ def api_analyze_japanese():
     )
 
 
+@app.get("/api/dashboard")
+def api_dashboard():
+    settings = load_settings()
+    today = today_string()
+    today_material = material_by_date(today)
+    df = read_database()
+    now = datetime.now(ZoneInfo("Asia/Taipei"))
+    last_7_dates = [f"{(now - timedelta(days=i)).year}/{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}" for i in range(7)]
+    material_dates = set(d for d in df["date"].drop_duplicates().tolist() if d)
+    active_days = [date for date in last_7_dates if date in material_dates]
+    today_iso = now.date().isoformat()
+    today_mistakes = sqlite_dicts(
+        """
+        SELECT id FROM mistake_logs
+        WHERE status = 'learning' AND substr(last_reviewed_at, 1, 10) = ?
+        """,
+        (today_iso,),
+    )
+    review_items = api_mistakes().get_json()[:5]
+    return jsonify(
+        {
+            "today": today,
+            "has_today_material": bool(today_material),
+            "target_level": settings["target_level"],
+            "vocab_count": len(today_material["vocabulary"]) if today_material else 0,
+            "verb_count": len(today_material["verbs"]) if today_material else 0,
+            "quiz_total": int(settings["mcq_count"]) + int(settings["fill_count"]),
+            "today_new_mistakes": len(today_mistakes),
+            "last_7_days": [{"date": date, "studied": date in material_dates} for date in reversed(last_7_dates)],
+            "streak_days": len(active_days),
+            "review_items": review_items,
+        }
+    )
+
+
 @app.get("/api/quiz")
 def api_quiz():
     df = read_database()
     if len(df) < 2:
-        return jsonify({"error": "资料太少，先生成或累积几天学习材料后再测验。"})
+        return jsonify({"error": "資料太少，請先生成或累積幾天學習材料後再測驗。"})
 
     settings = load_settings()
     mcq_count = int(settings["mcq_count"])
@@ -1171,21 +1206,21 @@ def api_quiz():
         questions.append(
             {
                 "type": "MCQ",
-                "q": f"「{row['vocab_word']}」的正确读音是哪一个？",
+                "q": f"「{row['vocab_word']}」的正確讀音是哪一個？",
                 "options": shuffled(options),
                 "ans": row["vocab_reading"],
             }
         )
 
     forms = [
-        ("连用形", "verb_masu_stem"),
+        ("連用形", "verb_masu_stem"),
         ("て形", "verb_te"),
         ("た形", "verb_ta"),
         ("ない形", "verb_nai"),
         ("ば形", "verb_ba"),
         ("使役形", "verb_causative"),
-        ("被动形", "verb_passive"),
-        ("使役被动形", "verb_causative_passive"),
+        ("被動形", "verb_passive"),
+        ("使役被動形", "verb_causative_passive"),
     ]
     for _ in range(fill_count):
         if verb_rows.empty:
@@ -1193,9 +1228,9 @@ def api_quiz():
         row = verb_rows.sample(1).iloc[0]
         form_name, column = random.choice(forms)
         base = row["verb_base"].split("-")[0].strip()
-        questions.append({"type": "FILL", "q": f"请写出「{base}」的 {form_name}。", "ans": row[column]})
+        questions.append({"type": "FILL", "q": f"請寫出「{base}」的 {form_name}。", "ans": row[column]})
 
-    return jsonify(questions if questions else {"error": "目前没有足够资料可以产生测验。"})
+    return jsonify(questions if questions else {"error": "目前沒有足夠資料可以產生測驗。"})
 
 
 if __name__ == "__main__":

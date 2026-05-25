@@ -1,8 +1,8 @@
-# Render 公网部署步骤
+# Render 公網部署步驟
 
-## 1. 上传代码到 GitHub
+## 1. 上傳程式碼到 GitHub
 
-如果电脑没有安装 Git，可以直接用 GitHub 网页建立一个新仓库，然后上传这些文件：
+如果電腦沒有安裝 Git，可以直接用 GitHub 網頁建立一個新倉庫，然後上傳這些檔案：
 
 - app.py
 - index.html
@@ -10,39 +10,39 @@
 - Procfile
 - runtime.txt
 
-不要上传 `.env`、`database.csv`、`settings.json`。
+不要上傳 `.env`、`database.csv`、`settings.json`。
 
 ## 2. 在 Render 建立 Web Service
 
-到 Render 建立新的 Web Service，并连接刚才的 GitHub 仓库。
+到 Render 建立新的 Web Service，並連接剛才的 GitHub 倉庫。
 
-设置如下：
+設定如下：
 
 - Language: Python 3
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `gunicorn app:app`
 
-## 3. 设置环境变量
+## 3. 設定環境變數
 
-在 Render 的 Environment 页面加入：
+在 Render 的 Environment 頁面加入：
 
 - `DATABASE_URL`: Render PostgreSQL 提供的 External Database URL 或 Internal Database URL
 - `GEMINI_API_KEY`: 你的 Gemini API Key
 - `TG_TOKEN`: 你的 Telegram Bot Token
 - `TG_CHAT_ID`: 你的 Telegram Chat ID
-- `APP_URL`: Render 给你的公网网址，例如 `https://your-app.onrender.com`
+- `APP_URL`: Render 給你的公網網址，例如 `https://your-app.onrender.com`
 - `GEMINI_MODEL`: 可留空；若要固定模型，可填 `gemini-3-flash-preview`
 
-## PostgreSQL 说明
+## PostgreSQL 說明
 
-如果设置了 `DATABASE_URL`，系统会自动使用 PostgreSQL 保存教材和设置。
+如果設定了 `DATABASE_URL`，系統會自動使用 PostgreSQL 保存教材和設定。
 
-如果没有设置 `DATABASE_URL`，系统会退回本地 `database.csv` 和 `settings.json`。这个方式只适合本机开发，不适合 Render 免费版长期保存资料。
+如果沒有設定 `DATABASE_URL`，系統會退回本地 `database.csv` 和 `settings.json`。這個方式只適合本機開發，不適合 Render 免費版長期保存資料。
 
 ## 4. 部署完成
 
-部署成功后，Render 会提供一个公网网址：
+部署成功後，Render 會提供一個公網網址：
 
-`https://你的服务名.onrender.com`
+`https://你的服務名.onrender.com`
 
-手机和电脑都可以直接打开这个网址。
+手機和電腦都可以直接開啟這個網址。

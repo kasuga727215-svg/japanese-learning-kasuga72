@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-Hant">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>日语学习自动化系统</title>
+  <title>日語學習自動化系統</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <style>
     :root {
@@ -14,7 +14,7 @@
       --panel-bg: #1a1c29;
       --border-color: #2a2d40;
     }
-    body { background: var(--bg-color); color: var(--text-color); font-family: Arial, "Microsoft YaHei", sans-serif; padding-bottom: 48px; }
+    body { background: var(--bg-color); color: var(--text-color); font-family: Arial, "Microsoft JhengHei", sans-serif; padding-bottom: 48px; }
     .app-shell { width: min(100% - 32px, 1320px); margin: 0 auto; }
     .app-title { color: var(--primary); text-shadow: 0 0 12px rgba(0,255,204,.35); font-weight: 800; }
     .card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.45); margin-bottom: 20px; }
@@ -47,6 +47,15 @@
     .quiz-option-text { color: #f4f7ff; margin-left: 8px; font-weight: 700; letter-spacing: 0; }
     .quiz-input { color: #ffffff; background: #080910; border-color: rgba(255,0,255,.6); font-weight: 700; }
     .quiz-input::placeholder { color: #9ea3b8; }
+    .dashboard-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 20px; }
+    .metric-card { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; overflow-wrap: anywhere; word-wrap: break-word; }
+    .metric-label { color: #aeb4c8; font-size: .92rem; margin-bottom: 8px; }
+    .metric-value { color: var(--primary); font-size: 1.65rem; font-weight: 800; line-height: 1.2; }
+    .metric-note { color: #e9ecff; margin-top: 8px; font-size: .95rem; }
+    .streak-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 10px; }
+    .streak-day { min-height: 42px; border: 1px solid var(--border-color); border-radius: 6px; display: grid; place-items: center; color: #aeb4c8; font-size: .75rem; }
+    .streak-day.active { color: #00110d; background: var(--primary); border-color: var(--primary); font-weight: 800; }
+    .review-chip { display: block; color: #f4f7ff; border-left: 3px solid var(--secondary); background: rgba(255,255,255,.07); border-radius: 6px; padding: 10px; margin-top: 8px; }
     @media (max-width: 768px) {
       .app-shell { width: min(100% - 20px, 1320px); }
       .app-title { font-size: 1.55rem; }
@@ -56,20 +65,23 @@
       .settings-actions .neon-btn { width: 100%; }
       .card.p-3, .card.p-4 { padding: 16px !important; }
     }
+    @media (min-width: 768px) {
+      .dashboard-grid { grid-template-columns: repeat(4, 1fr); }
+    }
   </style>
 </head>
 <body>
 <div class="app-shell mt-4">
   <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-    <h1 class="app-title mb-0">日语学习自动化系统</h1>
+    <h1 class="app-title mb-0">日語學習自動化系統</h1>
     <select id="dateSelect" class="form-select" style="max-width:240px" onchange="loadSpecificDate()">
-      <option value="">选择历史日期</option>
+      <option value="">選擇歷史日期</option>
     </select>
   </div>
 
   <ul class="main-nav nav nav-pills mb-4 justify-content-center">
     <li class="nav-item"><button class="nav-link active" onclick="showTab(event, 'tab-daily')">每日教材</button></li>
-    <li class="nav-item"><button class="nav-link" onclick="startQuiz(event)">累计测验</button></li>
+    <li class="nav-item"><button class="nav-link" onclick="startQuiz(event)">累計測驗</button></li>
     <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-settings')">控制中心</button></li>
     <li class="nav-item"><a class="nav-link" href="/verb-practice">動詞練習</a></li>
     <li class="nav-item"><a class="nav-link" href="/mistake-review">錯題複習</a></li>
@@ -77,14 +89,36 @@
   </ul>
 
   <div id="tab-daily" class="content-tab">
-    <div id="content-loader" class="text-center py-5 text-muted">正在读取今天的学习材料...</div>
+    <section class="dashboard-grid" id="dashboard">
+      <div class="metric-card">
+        <div class="metric-label">今日教材狀態</div>
+        <div class="metric-value" id="dash-material">讀取中</div>
+        <div class="metric-note" id="dash-material-note">正在檢查今日教材。</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">測驗完成度</div>
+        <div class="metric-value" id="dash-quiz">0 / 0</div>
+        <div class="metric-note" id="dash-accuracy">今日答對率：尚無紀錄</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">最近 7 日學習紀錄</div>
+        <div class="metric-value" id="dash-streak">0 天</div>
+        <div class="streak-row" id="dash-streak-row"></div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">今日建議複習</div>
+        <div class="metric-value" id="dash-mistakes">0 題</div>
+        <div id="dash-review" class="metric-note">目前沒有待複習錯題。</div>
+      </div>
+    </section>
+    <div id="content-loader" class="text-center py-5 text-muted">正在讀取今日學習材料...</div>
     <div id="material-content" style="display:none;">
-      <div class="card p-3"><h5 class="fw-bold mb-3" style="color:var(--primary)">单词</h5><div id="vocab-list" class="row g-2"></div></div>
+      <div class="card p-3"><h5 class="fw-bold mb-3" style="color:var(--primary)">單字</h5><div id="vocab-list" class="row g-2"></div></div>
       <div class="card p-3">
-        <h5 class="fw-bold mb-3" style="color:var(--primary)">动词变化表</h5>
+        <h5 class="fw-bold mb-3" style="color:var(--primary)">動詞變化表</h5>
         <div class="table-scroll">
           <table class="table text-nowrap">
-            <thead><tr><th>辞书形</th><th>连用形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被动形</th><th>使役被动形</th></tr></thead>
+            <thead><tr><th>辭書形</th><th>連用形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被動形</th><th>使役被動形</th></tr></thead>
             <tbody id="verb-list"></tbody>
           </table>
         </div>
@@ -95,9 +129,9 @@
 
   <div id="tab-quiz" class="content-tab" style="display:none;">
     <div class="card p-4">
-      <h4 class="mb-4" style="color:var(--primary); border-bottom:1px solid var(--border-color); padding-bottom:15px;">智能测验</h4>
-      <div id="quiz-container"><div class="text-center text-muted py-4">点击“累计测验”后会从已生成教材产生题目。</div></div>
-      <button class="neon-btn mt-4 w-100 fw-bold" onclick="checkAnswers()" style="display:none;" id="submit-btn">检查答案</button>
+      <h4 class="mb-4" style="color:var(--primary); border-bottom:1px solid var(--border-color); padding-bottom:15px;">智慧測驗</h4>
+      <div id="quiz-container"><div class="text-center text-muted py-4">點擊「累計測驗」後會從已生成教材產生題目。</div></div>
+      <button class="neon-btn mt-4 w-100 fw-bold" onclick="checkAnswers()" style="display:none;" id="submit-btn">檢查答案</button>
     </div>
   </div>
 
@@ -106,33 +140,33 @@
       <h4 class="mb-4" style="color:var(--primary); border-bottom:1px solid var(--border-color); padding-bottom:15px;">控制中心</h4>
       <div class="row g-4">
         <div class="col-md-4">
-          <label class="form-label">目标等级</label>
+          <label class="form-label">目標等級</label>
           <select id="setting-level" class="form-select">
             <option>N5</option><option>N4</option><option>N3</option><option>N2</option><option>N1</option>
           </select>
         </div>
         <div class="col-md-4">
-          <label class="control-label">单词数量 <span class="range-value" id="vocab-value">8</span></label>
+          <label class="control-label">單字數量 <span class="range-value" id="vocab-value">8</span></label>
           <input type="range" id="setting-vocab" class="form-range" min="1" max="30" value="8" oninput="syncRangeLabels()">
         </div>
         <div class="col-md-4">
-          <label class="control-label">动词数量 <span class="range-value" id="verb-value">4</span></label>
+          <label class="control-label">動詞數量 <span class="range-value" id="verb-value">4</span></label>
           <input type="range" id="setting-verb" class="form-range" min="0" max="20" value="4" oninput="syncRangeLabels()">
         </div>
         <div class="col-md-6">
-          <label class="control-label">选择题数量 <span class="range-value" id="mcq-value">5</span></label>
+          <label class="control-label">選擇題數量 <span class="range-value" id="mcq-value">5</span></label>
           <input type="range" id="setting-mcq" class="form-range" min="0" max="30" value="5" oninput="syncRangeLabels()">
         </div>
         <div class="col-md-6">
-          <label class="control-label">填充题数量 <span class="range-value" id="fill-value">5</span></label>
+          <label class="control-label">填充題數量 <span class="range-value" id="fill-value">5</span></label>
           <input type="range" id="setting-fill" class="form-range" min="0" max="30" value="5" oninput="syncRangeLabels()">
         </div>
       </div>
       <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
-        <button class="neon-btn" onclick="saveSettingsUI()" id="save-btn">保存设定</button>
+        <button class="neon-btn" onclick="saveSettingsUI()" id="save-btn">保存設定</button>
         <button class="neon-btn accent-btn" onclick="triggerNowUI(false)" id="trigger-btn">立即 AI 生成</button>
-        <button class="neon-btn" onclick="triggerNowUI(true)" id="sample-btn">生成示例资料</button>
-        <button class="neon-btn" onclick="testTelegram()" id="tg-btn">测试 Telegram</button>
+        <button class="neon-btn" onclick="triggerNowUI(true)" id="sample-btn">生成範例資料</button>
+        <button class="neon-btn" onclick="testTelegram()" id="tg-btn">測試 Telegram</button>
       </div>
       <div id="save-msg" class="mt-3"></div>
     </div>
@@ -149,8 +183,26 @@
   async function api(url, options = {}) {
     const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "请求失败，请稍后再试。");
+    if (!res.ok) throw new Error(data.error || "請求失敗，請稍後再試。");
     return data;
+  }
+
+  function todayKey() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+
+  function getTodayQuizStats() {
+    const empty = { completed: 0, total: 0, correct: 0 };
+    try {
+      return JSON.parse(localStorage.getItem(`quizStats:${todayKey()}`)) || empty;
+    } catch {
+      return empty;
+    }
+  }
+
+  function saveTodayQuizStats(correct, total) {
+    localStorage.setItem(`quizStats:${todayKey()}`, JSON.stringify({ completed: total, total, correct }));
   }
 
   function currentSettings() {
@@ -174,6 +226,7 @@
     await loadArchiveList();
     await loadDaily();
     await loadSettings();
+    await loadDashboard();
   };
 
   function showTab(event, id) {
@@ -201,13 +254,14 @@
     try {
       await api("/api/settings", { method: "POST", body: JSON.stringify(currentSettings()) });
       msg.className = "mt-3 success-text";
-      msg.innerText = "设定已经保存。Render Cron 下次会读取这组参数。";
+      msg.innerText = "設定已經保存。Render Cron 下次會讀取這組參數。";
+      await loadDashboard();
     } catch (error) {
       msg.className = "mt-3 error-text";
       msg.innerText = error.message;
     } finally {
       btn.disabled = false;
-      btn.innerText = "保存设定";
+      btn.innerText = "保存設定";
     }
   }
 
@@ -215,21 +269,22 @@
     const btn = useSample ? document.getElementById("sample-btn") : document.getElementById("trigger-btn");
     const msg = document.getElementById("save-msg");
     btn.disabled = true;
-    btn.innerText = useSample ? "生成示例中..." : "AI 生成中...";
+    btn.innerText = useSample ? "生成範例中..." : "AI 生成中...";
     msg.className = "mt-3 text-muted";
-    msg.innerText = "正在生成教材，并发送 Telegram 通知...";
+    msg.innerText = "正在生成教材，並發送 Telegram 通知...";
     try {
       const result = await api(`/api/generate${useSample ? "?sample=1" : ""}`, { method: "POST", body: JSON.stringify(currentSettings()) });
       msg.className = "mt-3 success-text";
       msg.innerText = result.message;
       await loadMaterialByDate(result.date);
       await loadArchiveList();
+      await loadDashboard();
     } catch (error) {
       msg.className = "mt-3 error-text";
       msg.innerText = error.message;
     } finally {
       btn.disabled = false;
-      btn.innerText = useSample ? "生成示例资料" : "立即 AI 生成";
+      btn.innerText = useSample ? "生成範例資料" : "立即 AI 生成";
     }
   }
 
@@ -237,7 +292,7 @@
     const btn = document.getElementById("tg-btn");
     const msg = document.getElementById("save-msg");
     btn.disabled = true;
-    btn.innerText = "测试中...";
+    btn.innerText = "測試中...";
     try {
       const result = await api("/api/test-telegram", { method: "POST" });
       msg.className = "mt-3 success-text";
@@ -247,19 +302,40 @@
       msg.innerText = error.message;
     } finally {
       btn.disabled = false;
-      btn.innerText = "测试 Telegram";
+      btn.innerText = "測試 Telegram";
     }
   }
 
   async function loadArchiveList() {
     const dates = await api("/api/archive-dates");
     const select = document.getElementById("dateSelect");
-    select.innerHTML = '<option value="">选择历史日期</option>';
+    select.innerHTML = '<option value="">選擇歷史日期</option>';
     dates.forEach(date => select.add(new Option(date, date)));
   }
 
+  async function loadDashboard() {
+    const data = await api("/api/dashboard");
+    const stats = getTodayQuizStats();
+    document.getElementById("dash-material").innerText = data.has_today_material ? "已生成" : "尚未生成";
+    document.getElementById("dash-material-note").innerText = data.has_today_material
+      ? `${data.today}｜${data.target_level}｜${data.vocab_count} 個單字、${data.verb_count} 個動詞`
+      : "今日尚無學習材料，可由控制中心手動生成或等待 Render Cron。";
+    document.getElementById("dash-quiz").innerText = `${stats.completed || 0} / ${data.quiz_total || 0}`;
+    const accuracy = stats.total ? Math.round((stats.correct / stats.total) * 100) : null;
+    document.getElementById("dash-accuracy").innerText = accuracy === null ? "今日答對率：尚無紀錄" : `今日答對率：${accuracy}%`;
+    document.getElementById("dash-streak").innerText = `${data.streak_days} 天`;
+    document.getElementById("dash-streak-row").innerHTML = data.last_7_days.map(day => {
+      const label = day.date.split("/").slice(1).join("/");
+      return `<div class="streak-day ${day.studied ? "active" : ""}">${escapeHtml(label)}</div>`;
+    }).join("");
+    document.getElementById("dash-mistakes").innerText = `${data.today_new_mistakes} 題`;
+    document.getElementById("dash-review").innerHTML = data.review_items.length
+      ? data.review_items.map(item => `<span class="review-chip">${escapeHtml(item.dictionary_form)}｜${escapeHtml(item.question_label)}｜錯 ${item.mistake_count} 次</span>`).join("")
+      : "目前沒有待複習錯題。";
+  }
+
   async function loadDaily() {
-    document.getElementById("content-loader").innerHTML = "正在读取今天的学习材料...";
+    document.getElementById("content-loader").innerHTML = "正在讀取今日學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
     renderMaterial(await api("/api/materials"));
@@ -267,7 +343,7 @@
 
   async function loadMaterialByDate(date) {
     showTab(null, "tab-daily");
-    document.getElementById("content-loader").innerHTML = "正在读取刚生成的学习材料...";
+    document.getElementById("content-loader").innerHTML = "正在讀取剛生成的學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
     renderMaterial(await api(`/api/materials?date=${encodeURIComponent(date)}`));
@@ -282,7 +358,7 @@
   function renderMaterial(data) {
     document.getElementById("content-loader").style.display = "none";
     if (!data) {
-      document.getElementById("content-loader").innerHTML = "<div class='error-text'>这一天还没有学习材料。请到控制中心生成，或等待 Render Cron 自动生成。</div>";
+      document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日尚無學習材料。請到控制中心生成，或等待 Render Cron 自動生成。</div>";
       document.getElementById("content-loader").style.display = "block";
       return;
     }
@@ -307,7 +383,7 @@
 
   async function startQuiz(event) {
     showTab(event, "tab-quiz");
-    document.getElementById("quiz-container").innerHTML = "<div class='text-center text-muted py-4'>正在产生测验...</div>";
+    document.getElementById("quiz-container").innerHTML = "<div class='text-center text-muted py-4'>正在產生測驗...</div>";
     document.getElementById("submit-btn").style.display = "none";
     const questions = await api("/api/quiz");
     if (questions.error) {
@@ -316,7 +392,7 @@
     }
     currentQuiz = questions;
     document.getElementById("quiz-container").innerHTML = questions.map((q, i) => {
-      let html = `<div id="qwrap${i}" class="question-box"><strong class="quiz-title">第 ${i + 1} 题：${escapeHtml(q.q)}</strong>`;
+      let html = `<div id="qwrap${i}" class="question-box"><strong class="quiz-title">第 ${i + 1} 題：${escapeHtml(q.q)}</strong>`;
       if (q.type === "MCQ") {
         html += '<div class="mt-3">';
         q.options.forEach(opt => {
@@ -324,7 +400,7 @@
         });
         html += "</div>";
       } else {
-        html += `<input type="text" id="ans${i}" class="form-control quiz-input mt-3" placeholder="请在这里输入答案">`;
+        html += `<input type="text" id="ans${i}" class="form-control quiz-input mt-3" placeholder="請在這裡輸入答案">`;
       }
       return html + "</div>";
     }).join("");
@@ -350,15 +426,17 @@
       const feedback = document.createElement("div");
       feedback.className = "feedback";
       feedback.style.color = ok ? "var(--primary)" : "var(--secondary)";
-      feedback.innerText = ok ? "答对了。" : `答错了。正确答案：${q.ans}`;
+      feedback.innerText = ok ? "答對了。" : `答錯了。正確答案：${q.ans}`;
       wrap.appendChild(feedback);
     });
     const result = document.createElement("div");
     result.className = "mt-4 p-4 rounded text-center fw-bold";
     result.style.border = "1px solid var(--primary)";
-    result.innerHTML = `测验完成：<span style="color:var(--primary);font-size:1.5em;">${score}</span> / ${currentQuiz.length}`;
+    result.innerHTML = `測驗完成：<span style="color:var(--primary);font-size:1.5em;">${score}</span> / ${currentQuiz.length}`;
     document.getElementById("quiz-container").appendChild(result);
     document.getElementById("submit-btn").style.display = "none";
+    saveTodayQuizStats(score, currentQuiz.length);
+    loadDashboard();
   }
 </script>
 </body>
