@@ -18,12 +18,15 @@
     button { color:var(--primary); border-color:var(--primary); background:transparent; font-weight:700; cursor:pointer; }
     .danger { color:var(--secondary); border-color:var(--secondary); }
     .row { display:grid; gap:12px; }
+    .stats { display:grid; grid-template-columns:1fr; gap:12px; }
+    .stat-value { color:var(--primary); font-size:1.55rem; font-weight:800; }
+    .stat-label { color:#aeb4c8; font-size:.92rem; }
     .muted { color:#aeb4c8; }
     .error { color:var(--secondary); }
     .ok { color:var(--primary); }
     details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; margin-top:10px; }
     summary { color:var(--primary); font-weight:700; cursor:pointer; }
-    @media (min-width:720px){ .row.two { grid-template-columns:1fr 1fr; } }
+    @media (min-width:720px){ .row.two, .stats { grid-template-columns:repeat(3,1fr); } }
   </style>
 </head>
 <body>
@@ -32,14 +35,29 @@
   <nav class="nav">
     <a href="/">每日教材</a><a href="/verb-practice">動詞練習</a><a href="/grammar-analyzer">文法拆解</a>
   </nav>
+  <section class="stats" id="statsCards">
+    <div class="card"><div class="stat-label">今日應複習</div><div class="stat-value" id="dueCount">-</div></div>
+    <div class="card"><div class="stat-label">已掌握</div><div class="stat-value" id="masteredCount">-</div></div>
+    <div class="card"><div class="stat-label">最常錯類型</div><div class="stat-value" id="topCategory">-</div></div>
+  </section>
   <section class="card">
-    <label for="filterType">依題型篩選</label>
-    <select id="filterType">
-      <option value="all">全部</option>
-      {% for key, label in form_labels.items() %}
-      <option value="{{ key }}">{{ label }}</option>
-      {% endfor %}
-    </select>
+    <div class="row two">
+      <div>
+        <label for="filterType">依題型篩選</label>
+        <select id="filterType">
+          <option value="all">全部題型</option>
+          {% for key, label in form_labels.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="filterCategory">依錯誤類型篩選</label>
+        <select id="filterCategory">
+          <option value="all">全部錯誤類型</option>
+        </select>
+      </div>
+    </div>
   </section>
   <section id="mistakeList"></section>
 </main>
@@ -58,12 +76,14 @@ async function loadMistakes(){
   list.innerHTML = "<div class='card muted'>讀取錯題中...</div>";
   try {
     const type = document.getElementById("filterType").value;
-    const rows = await api(`/api/mistakes?question_type=${encodeURIComponent(type)}`);
-    if (!rows.length) { list.innerHTML = "<div class='card muted'>目前沒有待複習錯題。</div>"; return; }
+    const category = document.getElementById("filterCategory").value;
+    const rows = await api(`/api/mistakes?question_type=${encodeURIComponent(type)}&error_category=${encodeURIComponent(category)}`);
+    if (!rows.length) { list.innerHTML = "<div class='card muted'>今日沒有到期的待複習錯題。</div>"; return; }
     list.innerHTML = rows.map(row => `
       <article class="card" id="mistake-${row.id}">
         <h2>${esc(row.dictionary_form)}（${esc(row.reading)}）</h2>
-        <p class="muted">${esc(row.meaning)}｜${esc(row.verb_group_label)}｜${esc(row.question_label)}｜錯誤 ${row.mistake_count} 次</p>
+        <p class="muted">${esc(row.meaning)}｜${esc(row.verb_group_label)}｜${esc(row.question_label)}｜${esc(row.error_category)}｜錯誤 ${row.mistake_count} 次</p>
+        <p class="muted">下次複習：${esc(row.next_review_date || "今日")}｜目前間隔：${esc(row.review_interval)} 天｜複習次數：${esc(row.review_count)}</p>
         <p>歷史錯誤答案：<strong class="error">${esc(row.user_wrong_answer)}</strong></p>
         <p>正確答案：<strong>${esc(row.correct_answer)}</strong></p>
         <details><summary>重新作答</summary>
@@ -88,18 +108,35 @@ async function retryMistake(id){
   if (!answer) { result.innerHTML = "<p class='error'>請先輸入答案。</p>"; return; }
   result.innerHTML = "<p class='muted'>批改中...</p>";
   try {
-    const data = await api(`/api/mistakes/${id}/retry`, {method:"POST", body:JSON.stringify({answer})});
-    result.innerHTML = data.correct ? "<p class='ok'>答對了。</p>" : `<p class='error'>仍需練習。正確答案：${esc(data.correct_answer)}</p><p>${esc(data.rule)}</p>`;
+    const errorCategory = document.getElementById("filterCategory").value === "all" ? "動詞變化錯" : document.getElementById("filterCategory").value;
+    const data = await api(`/api/mistakes/${id}/retry`, {method:"POST", body:JSON.stringify({answer, error_category:errorCategory})});
+    result.innerHTML = data.correct
+      ? `<p class='ok'>答對了。下次複習排在 ${esc(data.next_review_date)}，間隔 ${esc(data.review_interval)} 天。</p>`
+      : `<p class='error'>仍需練習，已排到明天複習。正確答案：${esc(data.correct_answer)}</p><p>${esc(data.rule)}</p>`;
+    await loadStats();
   } catch(error) { result.innerHTML = `<p class='error'>${esc(error.message)}</p>`; }
 }
 
 async function markMastered(id){
   await api(`/api/mistakes/${id}/mastered`, {method:"POST"});
   document.getElementById(`mistake-${id}`).remove();
+  await loadStats();
+}
+
+async function loadStats(){
+  const stats = await api("/api/mistakes/stats");
+  document.getElementById("dueCount").innerText = `${stats.due_count} 題`;
+  document.getElementById("masteredCount").innerText = `${stats.mastered_count} 題`;
+  document.getElementById("topCategory").innerText = stats.top_error_category;
+  const categorySelect = document.getElementById("filterCategory");
+  if (categorySelect.options.length <= 1) {
+    stats.error_categories.forEach(category => categorySelect.add(new Option(category, category)));
+  }
 }
 
 document.getElementById("filterType").addEventListener("change", loadMistakes);
-loadMistakes();
+document.getElementById("filterCategory").addEventListener("change", loadMistakes);
+loadStats().then(loadMistakes);
 </script>
 </body>
 </html>
