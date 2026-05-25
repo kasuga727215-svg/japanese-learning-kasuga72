@@ -5,6 +5,7 @@ import os
 import random
 import re
 import sqlite3
+from collections import Counter
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +31,110 @@ APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 
 LEVELS = ["N5", "N4", "N3", "N2", "N1"]
+VERB_FORM_LABELS = {
+    "renyou_form": "連用形（ます形去ます）",
+    "te_form": "て形",
+    "ta_form": "た形",
+    "nai_form": "ない形",
+    "ba_form": "ば形",
+    "shieki_form": "使役形（させる）",
+    "ukemi_form": "受身形",
+}
+QUESTION_TYPES = list(VERB_FORM_LABELS.keys())
+
+SEED_VERBS = [
+    {
+        "dictionary_form": "行く",
+        "reading": "いく",
+        "verb_group": 1,
+        "meaning": "去",
+        "te_form": "行って",
+        "ta_form": "行った",
+        "nai_form": "行かない",
+        "renyou_form": "行き",
+        "shieki_form": "行かせる",
+        "ukemi_form": "行かれる",
+        "ba_form": "行けば",
+    },
+    {
+        "dictionary_form": "書く",
+        "reading": "かく",
+        "verb_group": 1,
+        "meaning": "寫",
+        "te_form": "書いて",
+        "ta_form": "書いた",
+        "nai_form": "書かない",
+        "renyou_form": "書き",
+        "shieki_form": "書かせる",
+        "ukemi_form": "書かれる",
+        "ba_form": "書けば",
+    },
+    {
+        "dictionary_form": "話す",
+        "reading": "はなす",
+        "verb_group": 1,
+        "meaning": "說話",
+        "te_form": "話して",
+        "ta_form": "話した",
+        "nai_form": "話さない",
+        "renyou_form": "話し",
+        "shieki_form": "話させる",
+        "ukemi_form": "話される",
+        "ba_form": "話せば",
+    },
+    {
+        "dictionary_form": "食べる",
+        "reading": "たべる",
+        "verb_group": 2,
+        "meaning": "吃",
+        "te_form": "食べて",
+        "ta_form": "食べた",
+        "nai_form": "食べない",
+        "renyou_form": "食べ",
+        "shieki_form": "食べさせる",
+        "ukemi_form": "食べられる",
+        "ba_form": "食べれば",
+    },
+    {
+        "dictionary_form": "見る",
+        "reading": "みる",
+        "verb_group": 2,
+        "meaning": "看",
+        "te_form": "見て",
+        "ta_form": "見た",
+        "nai_form": "見ない",
+        "renyou_form": "見",
+        "shieki_form": "見させる",
+        "ukemi_form": "見られる",
+        "ba_form": "見れば",
+    },
+    {
+        "dictionary_form": "する",
+        "reading": "する",
+        "verb_group": 3,
+        "meaning": "做",
+        "te_form": "して",
+        "ta_form": "した",
+        "nai_form": "しない",
+        "renyou_form": "し",
+        "shieki_form": "させる",
+        "ukemi_form": "される",
+        "ba_form": "すれば",
+    },
+    {
+        "dictionary_form": "来る",
+        "reading": "くる",
+        "verb_group": 3,
+        "meaning": "來",
+        "te_form": "来て",
+        "ta_form": "来た",
+        "nai_form": "来ない",
+        "renyou_form": "来",
+        "shieki_form": "来させる",
+        "ukemi_form": "来られる",
+        "ba_form": "来れば",
+    },
+]
 
 COLUMNS = [
     "date",
@@ -109,7 +214,76 @@ def ensure_settings_store():
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS verbs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dictionary_form TEXT NOT NULL,
+                reading TEXT NOT NULL,
+                verb_group INTEGER NOT NULL,
+                meaning TEXT NOT NULL,
+                te_form TEXT NOT NULL,
+                ta_form TEXT NOT NULL,
+                nai_form TEXT NOT NULL,
+                renyou_form TEXT NOT NULL,
+                shieki_form TEXT NOT NULL,
+                ukemi_form TEXT NOT NULL,
+                ba_form TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mistake_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                verb_id INTEGER NOT NULL,
+                question_type TEXT NOT NULL,
+                user_wrong_answer TEXT NOT NULL,
+                mistake_count INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'learning',
+                last_reviewed_at DATETIME NOT NULL,
+                FOREIGN KEY (verb_id) REFERENCES verbs(id)
+            )
+            """
+        )
         conn.commit()
+    seed_verbs_if_empty()
+
+
+def seed_verbs_if_empty():
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        count = conn.execute("SELECT COUNT(*) FROM verbs").fetchone()[0]
+        if count:
+            return
+        conn.executemany(
+            """
+            INSERT INTO verbs (
+                dictionary_form, reading, verb_group, meaning,
+                te_form, ta_form, nai_form, renyou_form,
+                shieki_form, ukemi_form, ba_form
+            )
+            VALUES (
+                :dictionary_form, :reading, :verb_group, :meaning,
+                :te_form, :ta_form, :nai_form, :renyou_form,
+                :shieki_form, :ukemi_form, :ba_form
+            )
+            """,
+            SEED_VERBS,
+        )
+        conn.commit()
+
+
+def sqlite_dicts(query, params=()):
+    ensure_settings_store()
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query, params).fetchall()
+    return [dict(row) for row in rows]
+
+
+def sqlite_one(query, params=()):
+    rows = sqlite_dicts(query, params)
+    return rows[0] if rows else None
 
 
 def load_settings():
@@ -525,9 +699,221 @@ def shuffled(items):
     return items
 
 
+def group_label(group):
+    return {1: "五段動詞", 2: "上下段動詞", 3: "不規則動詞"}.get(int(group), "未知類型")
+
+
+def form_rule_explanation(verb, question_type):
+    group = int(verb["verb_group"])
+    label = group_label(group)
+    if question_type == "renyou_form":
+        if group == 1:
+            rule = "五段動詞的連用形通常把語尾う段改成い段。例：書く→書き。"
+        elif group == 2:
+            rule = "上下段動詞的連用形通常去掉る。例：食べる→食べ。"
+        else:
+            rule = "不規則動詞需個別記憶。する→し，来る→来。"
+        return f"{label}。連用形是ます形去掉ます，不是使役形。{rule}"
+    if question_type == "shieki_form":
+        if group == 1:
+            rule = "五段動詞使役形通常把語尾う段改成あ段後加せる。例：行く→行かせる。"
+        elif group == 2:
+            rule = "上下段動詞使役形通常去掉る後加させる。例：食べる→食べさせる。"
+        else:
+            rule = "不規則動詞需個別記憶。する→させる，来る→来させる。"
+        return f"{label}。使役形表示讓某人做某事，常見形態是させる。{rule}"
+    return f"{label}。請比較題目指定形態與正確答案，注意假名與送假名。"
+
+
+def add_mistake(verb_id, question_type, wrong_answer):
+    now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    existing = sqlite_one(
+        """
+        SELECT id, mistake_count, user_wrong_answer
+        FROM mistake_logs
+        WHERE verb_id = ? AND question_type = ? AND status = 'learning'
+        """,
+        (verb_id, question_type),
+    )
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        if existing:
+            answers = [a for a in existing["user_wrong_answer"].split(" / ") if a]
+            answers.append(wrong_answer)
+            answers = answers[-5:]
+            conn.execute(
+                """
+                UPDATE mistake_logs
+                SET user_wrong_answer = ?, mistake_count = ?, last_reviewed_at = ?
+                WHERE id = ?
+                """,
+                (" / ".join(answers), int(existing["mistake_count"]) + 1, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO mistake_logs
+                (verb_id, question_type, user_wrong_answer, mistake_count, status, last_reviewed_at)
+                VALUES (?, ?, ?, 1, 'learning', ?)
+                """,
+                (verb_id, question_type, wrong_answer, now),
+            )
+        conn.commit()
+
+
+def kana_to_hiragana(text):
+    result = []
+    for ch in text or "":
+        code = ord(ch)
+        if 0x30A1 <= code <= 0x30F6:
+            result.append(chr(code - 0x60))
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+def token_meaning_hint(surface, pos):
+    hints = {
+        "が": "主語或狀態對象標記",
+        "を": "受詞標記",
+        "に": "時間、方向、對象標記",
+        "で": "地點、手段、原因標記",
+        "は": "主題標記",
+        "も": "也、同樣",
+        "のに": "明明～卻～",
+        "です": "禮貌判斷助動詞",
+        "ます": "禮貌助動詞",
+    }
+    if surface in hints:
+        return hints[surface]
+    if "動詞" in pos:
+        return "動作或狀態的核心"
+    if "形容詞" in pos:
+        return "性質或狀態描述"
+    if "助詞" in pos:
+        return "助詞，表示語法關係"
+    return ""
+
+
+def pick_reading(surface, features):
+    candidates = []
+    for value in features:
+        if value and value != "*" and re.search(r"[\u30a1-\u30f6]", value):
+            candidates.append(value)
+    return kana_to_hiragana(candidates[-1] if candidates else surface)
+
+
+def analyze_with_mecab(text):
+    try:
+        import MeCab
+        import unidic_lite
+
+        tagger = MeCab.Tagger(f"-d {unidic_lite.DICDIR}")
+    except Exception as e:
+        return None, f"MeCab 初始化失敗，請檢查依賴：{e}"
+
+    tokens = []
+    particles = []
+    verb_forms = []
+    readings = []
+    parsed = tagger.parse(text)
+    for line in parsed.splitlines():
+        if not line or line == "EOS":
+            continue
+        surface, _, feature_text = line.partition("\t")
+        features = feature_text.split(",") if feature_text else []
+        pos = features[0] if len(features) > 0 else ""
+        pos_detail = features[1] if len(features) > 1 else ""
+        conjugation_type = features[4] if len(features) > 4 else ""
+        conjugation_form = features[5] if len(features) > 5 else ""
+        base_form = features[7] if len(features) > 7 and features[7] != "*" else surface
+        reading = pick_reading(surface, features)
+        readings.append(reading)
+        token = {
+            "surface": surface,
+            "reading_hiragana": reading,
+            "base_form": base_form,
+            "pos": pos,
+            "pos_detail": pos_detail,
+            "conjugation_type": conjugation_type,
+            "conjugation_form": conjugation_form,
+            "meaning_hint_zh_tw": token_meaning_hint(surface, pos),
+        }
+        tokens.append(token)
+        if "助詞" in pos:
+            particles.append(token)
+        if "動詞" in pos or "助動詞" in pos:
+            verb_forms.append(token)
+    return {
+        "reading_hiragana": "".join(readings),
+        "tokens": tokens,
+        "particles": particles,
+        "verb_forms": verb_forms,
+    }, None
+
+
+def detect_grammar_patterns(text):
+    rules = [
+        ("Vたばかり", r"(た|だ)ばかり", "剛剛做完某動作。"),
+        ("Vてばかりいる", r"(て|で)ばかり(いる|います|いて|いた|いない)", "老是一直做某事，常帶批評語氣。"),
+        ("のに", r"のに", "明明～卻～，表示預期落差。"),
+        ("ても", r"(ても|でも)", "即使～也。"),
+        ("たら", r"(たら|だら)", "如果～／一旦～。"),
+        ("ば形", r"(えば|けば|げば|せば|てば|ねば|べば|めば|れば)(?!かり)", "如果～的話。需確認是否為真正ば形。"),
+        ("ように", r"ように", "希望～／像～一樣／為了～。需依語境判斷。"),
+        ("ている／てる", r"(ている|でいる|てる|でる)", "正在進行或結果狀態持續。"),
+        ("んだ／んですね", r"(んだ|んです|んですね|のだ|のです)", "說明、領悟、補充語氣。"),
+        ("って", r"って(?:いう|言う|思う|こと|何|なに|、|。|？|！|!|$)", "引用、主題提示、口語說法。需依語境判斷。"),
+        ("すぎる", r"すぎる", "太～了。"),
+        ("そう", r"そう", "看起來～／聽說～。需人工確認是哪一種。"),
+        ("たい", r"たい", "想～。"),
+        ("られる", r"られる", "可能形或被動形，需依語境判斷。"),
+        ("させる", r"させる|せる", "使役形，表示讓某人做某事。需確認是否為使役。"),
+    ]
+    patterns = []
+    notes = []
+    for name, pattern, description in rules:
+        if re.search(pattern, text):
+            item = {"pattern": name, "description_zh_tw": description}
+            patterns.append(item)
+            if "需" in description:
+                notes.append(f"{name}：需人工確認。")
+    if not patterns:
+        notes.append("未偵測到指定的 15 種常見句型。")
+    return patterns, notes
+
+
+def common_misunderstandings_for(text, patterns):
+    result = []
+    names = {p["pattern"] for p in patterns}
+    if "られる" in names:
+        result.append("られる 可能表示可能形或受身形，不能只看字面判斷。")
+    if "そう" in names:
+        result.append("そう 可能是樣態或傳聞，需看前接詞性與上下文。")
+    if "のに" in names:
+        result.append("のに 常帶有遺憾或意外感，不只是單純連接詞。")
+    if "ている／てる" in names:
+        result.append("ている 不一定是正在進行，也可能表示結果狀態。")
+    return result
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.get("/verb-practice")
+def verb_practice_page():
+    return render_template("verb_practice.html", form_labels=VERB_FORM_LABELS)
+
+
+@app.get("/mistake-review")
+def mistake_review_page():
+    return render_template("mistake_review.html", form_labels=VERB_FORM_LABELS)
+
+
+@app.get("/grammar-analyzer")
+def grammar_analyzer_page():
+    return render_template("grammar_analyzer.html")
 
 
 @app.get("/api/settings")
@@ -586,6 +972,171 @@ def api_test_telegram():
         return jsonify({"message": "Telegram 测试消息已经发送成功。"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.get("/api/verb-practice/question")
+def api_verb_question():
+    ensure_settings_store()
+    question_type = request.args.get("type", "random")
+    if question_type == "random" or question_type not in QUESTION_TYPES:
+        question_type = random.choice(QUESTION_TYPES)
+    verbs = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT 1")
+    if not verbs:
+        return jsonify({"error": "動詞題庫尚未建立。"}), 404
+    verb = verbs[0]
+    return jsonify(
+        {
+            "verb_id": verb["id"],
+            "dictionary_form": verb["dictionary_form"],
+            "reading": verb["reading"],
+            "meaning": verb["meaning"],
+            "verb_group": verb["verb_group"],
+            "verb_group_label": group_label(verb["verb_group"]),
+            "question_type": question_type,
+            "question_label": VERB_FORM_LABELS[question_type],
+            "prompt": f"請寫出「{verb['dictionary_form']}（{verb['reading']}）・{verb['meaning']}」的{VERB_FORM_LABELS[question_type]}。",
+        }
+    )
+
+
+@app.post("/api/verb-practice/check")
+def api_verb_check():
+    data = request.get_json(silent=True) or {}
+    verb_id = data.get("verb_id")
+    question_type = data.get("question_type")
+    answer = str(data.get("answer", "")).strip()
+    if not verb_id or question_type not in QUESTION_TYPES or not answer:
+        return jsonify({"error": "題目或答案不完整。"}), 400
+    verb = sqlite_one("SELECT * FROM verbs WHERE id = ?", (verb_id,))
+    if not verb:
+        return jsonify({"error": "找不到動詞題目。"}), 404
+    correct = verb[question_type]
+    is_correct = answer == correct
+    if not is_correct:
+        add_mistake(int(verb_id), question_type, answer)
+    return jsonify(
+        {
+            "correct": is_correct,
+            "correct_answer": correct,
+            "verb_group": group_label(verb["verb_group"]),
+            "rule": form_rule_explanation(verb, question_type),
+            "mistake_added": not is_correct,
+        }
+    )
+
+
+@app.get("/api/mistakes")
+def api_mistakes():
+    question_type = request.args.get("question_type", "all")
+    params = []
+    where = "m.status = 'learning'"
+    if question_type in QUESTION_TYPES:
+        where += " AND m.question_type = ?"
+        params.append(question_type)
+    rows = sqlite_dicts(
+        f"""
+        SELECT
+            m.id, m.verb_id, m.question_type, m.user_wrong_answer,
+            m.mistake_count, m.status, m.last_reviewed_at,
+            v.dictionary_form, v.reading, v.meaning, v.verb_group,
+            v.te_form, v.ta_form, v.nai_form, v.renyou_form,
+            v.shieki_form, v.ukemi_form, v.ba_form
+        FROM mistake_logs m
+        JOIN verbs v ON v.id = m.verb_id
+        WHERE {where}
+        ORDER BY m.mistake_count DESC, m.last_reviewed_at DESC
+        """,
+        tuple(params),
+    )
+    for row in rows:
+        row["question_label"] = VERB_FORM_LABELS.get(row["question_type"], row["question_type"])
+        row["correct_answer"] = row[row["question_type"]]
+        row["verb_group_label"] = group_label(row["verb_group"])
+    return jsonify(rows)
+
+
+@app.post("/api/mistakes/<int:mistake_id>/mastered")
+def api_mark_mistake_mastered(mistake_id):
+    ensure_settings_store()
+    now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        cur = conn.execute(
+            "UPDATE mistake_logs SET status = 'mastered', last_reviewed_at = ? WHERE id = ?",
+            (now, mistake_id),
+        )
+        conn.commit()
+    if cur.rowcount == 0:
+        return jsonify({"error": "找不到錯題紀錄。"}), 404
+    return jsonify({"success": True})
+
+
+@app.post("/api/mistakes/<int:mistake_id>/retry")
+def api_retry_mistake(mistake_id):
+    data = request.get_json(silent=True) or {}
+    answer = str(data.get("answer", "")).strip()
+    if not answer:
+        return jsonify({"error": "請先輸入答案。"}), 400
+    row = sqlite_one(
+        """
+        SELECT m.*, v.dictionary_form, v.reading, v.meaning, v.verb_group,
+               v.te_form, v.ta_form, v.nai_form, v.renyou_form,
+               v.shieki_form, v.ukemi_form, v.ba_form
+        FROM mistake_logs m
+        JOIN verbs v ON v.id = m.verb_id
+        WHERE m.id = ?
+        """,
+        (mistake_id,),
+    )
+    if not row:
+        return jsonify({"error": "找不到錯題紀錄。"}), 404
+    correct = row[row["question_type"]]
+    is_correct = answer == correct
+    now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        if is_correct:
+            conn.execute("UPDATE mistake_logs SET last_reviewed_at = ? WHERE id = ?", (now, mistake_id))
+        else:
+            conn.execute(
+                """
+                UPDATE mistake_logs
+                SET user_wrong_answer = ?, mistake_count = mistake_count + 1, last_reviewed_at = ?
+                WHERE id = ?
+                """,
+                (f"{row['user_wrong_answer']} / {answer}", now, mistake_id),
+            )
+        conn.commit()
+    return jsonify(
+        {
+            "correct": is_correct,
+            "correct_answer": correct,
+            "rule": form_rule_explanation(row, row["question_type"]),
+        }
+    )
+
+
+@app.post("/api/analyze_japanese")
+def api_analyze_japanese():
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+    if not text:
+        return jsonify({"success": False, "error": "請輸入日文句子。"}), 400
+    parsed, error = analyze_with_mecab(text)
+    if error:
+        return jsonify({"success": False, "error": error})
+    grammar_patterns, notes = detect_grammar_patterns(text)
+    return jsonify(
+        {
+            "success": True,
+            "original": text,
+            "reading_hiragana": parsed["reading_hiragana"],
+            "tokens": parsed["tokens"],
+            "particles": parsed["particles"],
+            "verb_forms": parsed["verb_forms"],
+            "grammar_patterns": grammar_patterns,
+            "common_misunderstandings": common_misunderstandings_for(text, grammar_patterns),
+            "notes": notes,
+        }
+    )
 
 
 @app.get("/api/quiz")

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>動詞變化練習</title>
+  <style>
+    :root { --bg-color:#0d0e15; --text-color:#e8e8e8; --primary:#00ffcc; --secondary:#ff00ff; --panel-bg:#1a1c29; --border-color:#2a2d40; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg-color); color:var(--text-color); font-family:Arial,"Microsoft JhengHei",sans-serif; }
+    .shell { width:min(100% - 24px, 860px); margin:24px auto; }
+    a { color:var(--primary); text-decoration:none; }
+    .nav { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 24px; }
+    .nav a { border:1px solid var(--border-color); padding:10px 12px; border-radius:6px; }
+    .card { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:16px; overflow-wrap:anywhere; word-wrap:break-word; }
+    h1,h2,strong { color:var(--primary); }
+    label { color:var(--primary); font-weight:700; display:block; margin-bottom:8px; }
+    select,input,button { width:100%; min-height:44px; border-radius:6px; border:1px solid var(--border-color); background:#080910; color:#fff; padding:10px; }
+    button { color:var(--primary); border-color:var(--primary); background:transparent; font-weight:700; cursor:pointer; }
+    button:hover { background:var(--primary); color:#000; }
+    .row { display:grid; gap:12px; }
+    .muted { color:#aeb4c8; }
+    .error { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
+    .ok { color:var(--primary); border-left:4px solid var(--primary); padding-left:10px; }
+    details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; }
+    summary { color:var(--primary); font-weight:700; cursor:pointer; }
+    @media (min-width:720px){ .row.two { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <h1>動詞變化練習</h1>
+  <nav class="nav">
+    <a href="/">每日教材</a><a href="/mistake-review">錯題複習</a><a href="/grammar-analyzer">文法拆解</a>
+  </nav>
+
+  <section class="card">
+    <div class="row two">
+      <div>
+        <label for="typeSelect">測驗題型</label>
+        <select id="typeSelect">
+          <option value="random">隨機</option>
+          {% for key, label in form_labels.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="align-self:end;">
+        <button id="nextBtn">取得題目</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="questionCard">
+    <p class="muted">請先取得題目。</p>
+  </section>
+</main>
+
+<script>
+let currentQuestion = null;
+const card = document.getElementById("questionCard");
+
+function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+async function api(url, options={}) {
+  const res = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "請求失敗");
+  return data;
+}
+
+async function loadQuestion(){
+  card.innerHTML = "<p class='muted'>載入題目中...</p>";
+  try {
+    const type = document.getElementById("typeSelect").value;
+    currentQuestion = await api(`/api/verb-practice/question?type=${encodeURIComponent(type)}`);
+    card.innerHTML = `
+      <h2>${esc(currentQuestion.question_label)}</h2>
+      <p>${esc(currentQuestion.prompt)}</p>
+      <p class="muted">類型：${esc(currentQuestion.verb_group_label)}｜讀音：${esc(currentQuestion.reading)}</p>
+      <label for="answerInput">你的答案</label>
+      <input id="answerInput" autocomplete="off" placeholder="請輸入平假名或日文答案">
+      <div class="row two" style="margin-top:12px;">
+        <button onclick="submitAnswer()">送出答案</button>
+        <button onclick="loadQuestion()">下一題</button>
+      </div>
+      <div id="resultBox" style="margin-top:12px;"></div>
+    `;
+  } catch (error) {
+    card.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+  }
+}
+
+async function submitAnswer(){
+  const input = document.getElementById("answerInput");
+  const answer = input.value.trim();
+  const result = document.getElementById("resultBox");
+  if (!answer) { result.innerHTML = "<p class='error'>請先輸入答案。</p>"; return; }
+  result.innerHTML = "<p class='muted'>批改中...</p>";
+  try {
+    const data = await api("/api/verb-practice/check", {
+      method:"POST",
+      body: JSON.stringify({verb_id: currentQuestion.verb_id, question_type: currentQuestion.question_type, answer})
+    });
+    result.innerHTML = data.correct
+      ? `<p class="ok">答對了。</p>`
+      : `<p class="error">答錯了。正確答案：<strong>${esc(data.correct_answer)}</strong></p>
+         <details open><summary>展開解析</summary><p>${esc(data.rule)}</p><p>已自動加入錯題。</p></details>`;
+  } catch (error) {
+    result.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+  }
+}
+
+document.getElementById("nextBtn").addEventListener("click", loadQuestion);
+loadQuestion();
+</script>
+</body>
+</html>

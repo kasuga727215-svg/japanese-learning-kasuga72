@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>錯題複習</title>
+  <style>
+    :root { --bg-color:#0d0e15; --text-color:#e8e8e8; --primary:#00ffcc; --secondary:#ff00ff; --panel-bg:#1a1c29; --border-color:#2a2d40; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg-color); color:var(--text-color); font-family:Arial,"Microsoft JhengHei",sans-serif; }
+    .shell { width:min(100% - 24px, 900px); margin:24px auto; }
+    a { color:var(--primary); text-decoration:none; }
+    .nav { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 24px; }
+    .nav a { border:1px solid var(--border-color); padding:10px 12px; border-radius:6px; }
+    .card { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:16px; overflow-wrap:anywhere; word-wrap:break-word; }
+    h1,h2,strong,label { color:var(--primary); }
+    select,input,button { width:100%; min-height:44px; border-radius:6px; border:1px solid var(--border-color); background:#080910; color:#fff; padding:10px; }
+    button { color:var(--primary); border-color:var(--primary); background:transparent; font-weight:700; cursor:pointer; }
+    .danger { color:var(--secondary); border-color:var(--secondary); }
+    .row { display:grid; gap:12px; }
+    .muted { color:#aeb4c8; }
+    .error { color:var(--secondary); }
+    .ok { color:var(--primary); }
+    details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; margin-top:10px; }
+    summary { color:var(--primary); font-weight:700; cursor:pointer; }
+    @media (min-width:720px){ .row.two { grid-template-columns:1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main class="shell">
+  <h1>錯題複習</h1>
+  <nav class="nav">
+    <a href="/">每日教材</a><a href="/verb-practice">動詞練習</a><a href="/grammar-analyzer">文法拆解</a>
+  </nav>
+  <section class="card">
+    <label for="filterType">依題型篩選</label>
+    <select id="filterType">
+      <option value="all">全部</option>
+      {% for key, label in form_labels.items() %}
+      <option value="{{ key }}">{{ label }}</option>
+      {% endfor %}
+    </select>
+  </section>
+  <section id="mistakeList"></section>
+</main>
+
+<script>
+const list = document.getElementById("mistakeList");
+function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+async function api(url, options={}) {
+  const res = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "請求失敗");
+  return data;
+}
+
+async function loadMistakes(){
+  list.innerHTML = "<div class='card muted'>讀取錯題中...</div>";
+  try {
+    const type = document.getElementById("filterType").value;
+    const rows = await api(`/api/mistakes?question_type=${encodeURIComponent(type)}`);
+    if (!rows.length) { list.innerHTML = "<div class='card muted'>目前沒有待複習錯題。</div>"; return; }
+    list.innerHTML = rows.map(row => `
+      <article class="card" id="mistake-${row.id}">
+        <h2>${esc(row.dictionary_form)}（${esc(row.reading)}）</h2>
+        <p class="muted">${esc(row.meaning)}｜${esc(row.verb_group_label)}｜${esc(row.question_label)}｜錯誤 ${row.mistake_count} 次</p>
+        <p>歷史錯誤答案：<strong class="error">${esc(row.user_wrong_answer)}</strong></p>
+        <p>正確答案：<strong>${esc(row.correct_answer)}</strong></p>
+        <details><summary>重新作答</summary>
+          <input id="retry-${row.id}" placeholder="請輸入答案">
+          <div class="row two" style="margin-top:12px;">
+            <button onclick="retryMistake(${row.id})">送出</button>
+            <button class="danger" onclick="markMastered(${row.id})">標記為已掌握</button>
+          </div>
+          <div id="result-${row.id}" style="margin-top:10px;"></div>
+        </details>
+      </article>
+    `).join("");
+  } catch (error) {
+    list.innerHTML = `<div class="card error">${esc(error.message)}</div>`;
+  }
+}
+
+async function retryMistake(id){
+  const input = document.getElementById(`retry-${id}`);
+  const result = document.getElementById(`result-${id}`);
+  const answer = input.value.trim();
+  if (!answer) { result.innerHTML = "<p class='error'>請先輸入答案。</p>"; return; }
+  result.innerHTML = "<p class='muted'>批改中...</p>";
+  try {
+    const data = await api(`/api/mistakes/${id}/retry`, {method:"POST", body:JSON.stringify({answer})});
+    result.innerHTML = data.correct ? "<p class='ok'>答對了。</p>" : `<p class='error'>仍需練習。正確答案：${esc(data.correct_answer)}</p><p>${esc(data.rule)}</p>`;
+  } catch(error) { result.innerHTML = `<p class='error'>${esc(error.message)}</p>`; }
+}
+
+async function markMastered(id){
+  await api(`/api/mistakes/${id}/mastered`, {method:"POST"});
+  document.getElementById(`mistake-${id}`).remove();
+}
+
+document.getElementById("filterType").addEventListener("change", loadMistakes);
+loadMistakes();
+</script>
+</body>
+</html>
