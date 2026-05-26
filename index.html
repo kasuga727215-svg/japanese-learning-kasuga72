@@ -409,7 +409,10 @@
       <div class="col-12 col-md-6"><div class="p-3 border rounded" style="border-color:var(--border-color)!important;background:rgba(255,255,255,.02);">
         <strong style="color:var(--primary);font-size:1.2em;">${escapeHtml(v.word)}</strong>
         <small style="color:#aaa;margin-left:8px;">${escapeHtml(v.reading)}</small><br>
-        <span>${escapeHtml(v.meaning)}</span>
+        <span><strong>意思：</strong>${escapeHtml(v.meaning || "尚未建立中文意思")}</span>
+        ${v.part_of_speech ? `<div class="small text-muted mt-1">${escapeHtml(v.part_of_speech)}${v.source ? `｜${escapeHtml(v.source)}` : ""}</div>` : ""}
+        ${v.example_sentence ? `<div class="mt-2 small" style="overflow-wrap:anywhere;"><span style="color:var(--primary);font-weight:bold;">例句：</span>${escapeHtml(v.example_sentence)}</div>` : ""}
+        ${v.example_translation_zh ? `<div class="small" style="overflow-wrap:anywhere;"><span style="color:var(--secondary);font-weight:bold;">中文：</span>${escapeHtml(v.example_translation_zh)}</div>` : ""}
       </div></div>`).join("");
     document.getElementById("verb-list").innerHTML = data.verbs.map(v => `
       <tr><td style="color:var(--secondary);font-weight:bold;">${escapeHtml(v.base || "-")}</td>
