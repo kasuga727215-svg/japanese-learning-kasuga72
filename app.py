@@ -14,7 +14,7 @@ from collections import Counter
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -377,6 +377,33 @@ def taipei_iso_now():
     return taipei_now().isoformat(timespec="seconds")
 
 
+def utc_now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def clean_timestamp(value):
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        return None
+    return value
+
+
+def is_temporal_field(field_name):
+    name = str(field_name or "").lower()
+    return name.endswith("_at") or "timestamp" in name or "time" in name or "date" in name
+
+
+def clean_db_payload(payload):
+    cleaned = {}
+    for key, value in dict(payload or {}).items():
+        if is_temporal_field(key):
+            cleaned[key] = clean_timestamp(value)
+        else:
+            cleaned[key] = value
+    return cleaned
+
+
 def rolling_start(days):
     return (taipei_now().date() - timedelta(days=days - 1)).isoformat()
 
@@ -575,7 +602,7 @@ def migrate_slang_candidates_sqlite(conn):
     for column, statement in migrations.items():
         if column not in columns:
             conn.execute(statement)
-    now = taipei_iso_now()
+    now = utc_now_iso()
     conn.execute(
         """
         UPDATE slang_candidates
@@ -842,7 +869,7 @@ def upsert_slang_candidates(slang_terms, source_context="", source="grammar_anal
         return result
 
     ensure_slang_candidates_store()
-    now = taipei_iso_now()
+    now = utc_now_iso()
     if DATABASE_URL:
         with get_db_connection() as conn:
             for item in candidates:
@@ -1053,7 +1080,7 @@ def update_slang_candidate_status(candidate_id, action):
         candidate_id = int(candidate_id)
     except (TypeError, ValueError):
         raise ValueError("候選詞 ID 不正確。")
-    now = taipei_iso_now()
+    now = utc_now_iso()
     ensure_slang_candidates_store()
     if DATABASE_URL:
         with get_db_connection() as conn:
@@ -1171,7 +1198,7 @@ def mark_slang_used_in_material(items):
     ids = [int(item["id"]) for item in items if item.get("id")]
     if not ids:
         return
-    now = taipei_iso_now()
+    now = utc_now_iso()
     if DATABASE_URL:
         placeholders = ", ".join(["%s"] * len(ids))
         with get_db_connection() as conn:
@@ -1293,7 +1320,7 @@ def migrate_slang_candidates_postgres():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_slang_candidates_term_unique ON slang_candidates(term)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON slang_candidates(status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_category ON slang_candidates(category)")
-            now = taipei_iso_now()
+            now = utc_now_iso()
             cur.execute(
                 """
                 UPDATE slang_candidates
@@ -1776,7 +1803,7 @@ def mark_vocabulary_pool_used(items):
     params = []
     if has_last_seen:
         updates.append("last_seen_at = %s" if DATABASE_URL else "last_seen_at = ?")
-        params.append(taipei_iso_now())
+        params.append(utc_now_iso())
     if has_used_count:
         updates.append("used_in_material_count = COALESCE(used_in_material_count, 0) + 1")
     if not updates:
@@ -2111,7 +2138,7 @@ def build_local_material(settings, force_seed=False):
         "wrong_reviews": wrong_items,
         "quiz": quiz,
         "seed_used": seed_used,
-        "generated_at": taipei_iso_now(),
+        "generated_at": utc_now_iso(),
     }
     print(
         "[material-generator] local sources "
@@ -2128,7 +2155,7 @@ def save_material_for_today(material, settings):
     verb_list = material.get("verbs") or []
     grammar = material.get("grammar") or {}
     metadata = material.get("metadata") or {}
-    now = taipei_iso_now()
+    now = utc_now_iso()
     max_rows = max(len(vocab_list), len(verb_list), 1)
 
     new_rows = []
@@ -2158,15 +2185,15 @@ def save_material_for_today(material, settings):
                 "generation_mode": metadata.get("generation_mode", "") if i == 0 else "",
                 "ai_used": str(bool(metadata.get("ai_used", False))).lower() if i == 0 else "",
                 "source_summary": json.dumps(metadata.get("source_summary", {}), ensure_ascii=False) if i == 0 else "",
-                "created_at": now if i == 0 else "",
-                "updated_at": now if i == 0 else "",
+                "created_at": now,
+                "updated_at": now,
             }
         )
 
     if DATABASE_URL:
         placeholders = ", ".join(["%s"] * len(COLUMNS))
         columns_sql = ", ".join(COLUMNS)
-        rows = [tuple(row[col] for col in COLUMNS) for row in new_rows]
+        rows = [tuple(clean_db_payload(row)[col] for col in COLUMNS) for row in new_rows]
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM materials WHERE date = %s", (date,))
@@ -2305,7 +2332,7 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
                 "fallback_used": False,
                 "source_summary": {"ai": 1},
                 "seed_used": False,
-                "generated_at": taipei_iso_now(),
+                "generated_at": utc_now_iso(),
             }
         except Exception as e:
             print(f"[material-generator] ai_full failed; fallback local; error={classify_gemini_error(e)}")
@@ -2339,6 +2366,16 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
         "fallback_used": bool(raw_material.get("metadata", {}).get("fallback_used", False)),
         "source_summary": raw_material.get("metadata", {}).get("source_summary", {}),
     }
+
+
+def material_generation_error_payload(error):
+    detail = str(error or "")
+    print(f"[material-generator] ERROR generate failed: {detail}")
+    print(traceback.format_exc())
+    lower = detail.lower()
+    if "timestamp" in lower or "timestamptz" in lower or "timestamp with time zone" in lower:
+        return {"error": "本地教材生成失敗，資料庫時間欄位格式異常，請稍後再試。"}
+    return {"error": "本地教材生成失敗，請稍後再試。"}
 
 
 def shuffled(items):
@@ -2560,7 +2597,7 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
 
 
 def add_or_update_sns_mistake(example, user_translation, error_category, interval_days):
-    now = taipei_iso_now()
+    now = utc_now_iso()
     category = normalize_error_category(error_category)
     question_type = f"sns_translation:{example['id']}"
     wrong_answer = f"{example['japanese']}｜使用者翻譯：{user_translation}"
@@ -3291,7 +3328,7 @@ def api_generate():
             )
         )
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(material_generation_error_payload(e)), 500
 
 
 @app.get("/api/cron/daily-push")
@@ -3301,7 +3338,7 @@ def api_cron_daily_push():
     try:
         return jsonify(generate_daily_material(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify(material_generation_error_payload(e)), 500
 
 
 @app.post("/api/test-telegram")
