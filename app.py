@@ -1348,6 +1348,318 @@ def common_misunderstandings_for(text, patterns):
     return result
 
 
+def grammar_response_template(input_type="japanese"):
+    return {
+        "input_type": input_type,
+        "natural_translation": "",
+        "sentence_summary": "",
+        "naturalness_check": {
+            "is_natural": False,
+            "level": "",
+            "reason": "",
+            "suggested_sentence": "",
+        },
+        "hiragana_reading": "",
+        "tone": {"label": "", "explanation": ""},
+        "sentence_structure": [],
+        "grammar_points": [],
+        "natural_alternatives": [],
+        "learning_focus": {"summary": "", "tips": []},
+        "error_message": "",
+    }
+
+
+def grammar_not_japanese_response():
+    payload = grammar_response_template("not_japanese")
+    payload["naturalness_check"] = {
+        "is_natural": False,
+        "level": "無法解析",
+        "reason": "目前此功能僅支援日文句子解析。",
+        "suggested_sentence": "",
+    }
+    payload["error_message"] = "目前此功能僅支援日文句子解析，請輸入日文句子。"
+    return payload
+
+
+def grammar_ai_error_response(message="解析失敗，請稍後再試，或確認 Gemini API 金鑰是否正確。"):
+    payload = grammar_response_template("japanese")
+    payload["naturalness_check"] = {
+        "is_natural": False,
+        "level": "解析失敗",
+        "reason": message,
+        "suggested_sentence": "",
+    }
+    payload["error_message"] = message
+    return payload
+
+
+def is_probably_japanese_text(text):
+    return bool(re.search(r"[ぁ-ゖァ-ヺー]", text or ""))
+
+
+def has_latin_letters(text):
+    return bool(re.search(r"[A-Za-z]", text or ""))
+
+
+def enforce_hiragana_reading(reading, japanese_source=""):
+    reading = clean_answer_value(reading)
+    if reading and not has_latin_letters(reading):
+        return kana_to_hiragana(reading)
+    return answer_reading_hiragana(japanese_source) if japanese_source else ""
+
+
+def clean_gemini_json_text(text):
+    cleaned = str(text or "").strip()
+    cleaned = re.sub(r"^\s*```(?:json|JSON)?\s*", "", cleaned)
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError("Gemini 沒有回傳合法 JSON 物件。")
+    return cleaned[start : end + 1]
+
+
+def parse_gemini_json_safely(raw_text):
+    return json.loads(clean_gemini_json_text(raw_text))
+
+
+def normalize_string(value):
+    return str(value or "").strip()
+
+
+def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_mecab=None):
+    source = raw if isinstance(raw, dict) else {}
+    payload = grammar_response_template(normalize_string(source.get("input_type")) or "japanese")
+    payload["natural_translation"] = normalize_string(source.get("natural_translation"))
+    payload["sentence_summary"] = normalize_string(source.get("sentence_summary"))
+    payload["hiragana_reading"] = enforce_hiragana_reading(
+        source.get("hiragana_reading") or fallback_reading,
+        original_text,
+    )
+
+    naturalness = source.get("naturalness_check") if isinstance(source.get("naturalness_check"), dict) else {}
+    payload["naturalness_check"] = {
+        "is_natural": bool(naturalness.get("is_natural")),
+        "level": normalize_string(naturalness.get("level")) or ("自然" if naturalness.get("is_natural") else "需確認"),
+        "reason": normalize_string(naturalness.get("reason")),
+        "suggested_sentence": normalize_string(naturalness.get("suggested_sentence")),
+    }
+
+    tone = source.get("tone") if isinstance(source.get("tone"), dict) else {}
+    payload["tone"] = {
+        "label": normalize_string(tone.get("label")),
+        "explanation": normalize_string(tone.get("explanation")),
+    }
+
+    structure = source.get("sentence_structure") if isinstance(source.get("sentence_structure"), list) else []
+    payload["sentence_structure"] = [
+        {
+            "segment": normalize_string(item.get("segment")),
+            "function": normalize_string(item.get("function")),
+            "meaning": normalize_string(item.get("meaning")),
+        }
+        for item in structure
+        if isinstance(item, dict)
+    ]
+
+    grammar_points = source.get("grammar_points") if isinstance(source.get("grammar_points"), list) else []
+    payload["grammar_points"] = []
+    for item in grammar_points:
+        if not isinstance(item, dict):
+            continue
+        example = item.get("example") if isinstance(item.get("example"), dict) else {}
+        example_japanese = normalize_string(example.get("japanese"))
+        payload["grammar_points"].append(
+            {
+                "name": normalize_string(item.get("name")),
+                "formula": normalize_string(item.get("formula")),
+                "explanation": normalize_string(item.get("explanation")),
+                "meaning_in_sentence": normalize_string(item.get("meaning_in_sentence")),
+                "example": {
+                    "japanese": example_japanese,
+                    "hiragana": enforce_hiragana_reading(example.get("hiragana"), example_japanese),
+                    "chinese": normalize_string(example.get("chinese")),
+                },
+            }
+        )
+
+    alternatives = source.get("natural_alternatives") if isinstance(source.get("natural_alternatives"), list) else []
+    payload["natural_alternatives"] = []
+    for item in alternatives:
+        if not isinstance(item, dict):
+            continue
+        alt_japanese = normalize_string(item.get("japanese"))
+        payload["natural_alternatives"].append(
+            {
+                "japanese": alt_japanese,
+                "hiragana": enforce_hiragana_reading(item.get("hiragana"), alt_japanese),
+                "chinese": normalize_string(item.get("chinese")),
+                "note": normalize_string(item.get("note")),
+            }
+        )
+
+    focus = source.get("learning_focus") if isinstance(source.get("learning_focus"), dict) else {}
+    tips = focus.get("tips") if isinstance(focus.get("tips"), list) else []
+    payload["learning_focus"] = {
+        "summary": normalize_string(focus.get("summary")),
+        "tips": [normalize_string(tip) for tip in tips if normalize_string(tip)],
+    }
+    payload["error_message"] = normalize_string(source.get("error_message"))
+    payload["original"] = original_text
+    payload["advanced_mecab"] = advanced_mecab or {}
+    return payload
+
+
+def build_grammar_coach_prompt(text, hiragana_reading):
+    return f"""
+你是一位專門教台灣學習者理解日文語感的「日文句子理解教練」。
+請分析使用者輸入的日文句子，並只回傳一個合法 JSON 物件。
+
+嚴格禁止：
+1. 禁止 Markdown。
+2. 禁止 ```json 或 ```。
+3. 禁止前言、後記、補充說明文字。
+4. 禁止簡體中文，所有中文必須使用繁體中文。
+5. 禁止羅馬拼音，所有日文讀音只能使用平假名。
+
+分析規則：
+1. natural_translation 必須自然通順，禁止逐字直翻。
+2. hiragana_reading 必須只使用平假名，不得出現羅馬拼音。
+3. sentence_structure 必須依照語意區塊拆解，不可只是單字詞性拆解。
+4. grammar_points 只列出真正值得學習的文法與句型，不要列出無意義詞性資訊。
+5. 若原句不自然，必須在 naturalness_check 中指出問題，並提供 suggested_sentence。
+6. 若原句自然，naturalness_check.level 請填「自然」。
+7. tone.label 必須簡短，tone.explanation 才放詳細說明。
+8. example 必須包含 japanese、hiragana、chinese 三個欄位。
+9. natural_alternatives 至少提供 1 到 3 句。
+10. 不可為了填滿欄位而硬塞不重要的文法點。
+11. 若句子很短，請解析真正有學習價值的語氣與用法。
+12. 若輸入不是日文，必須回傳指定的 not_japanese JSON。
+
+Gemini 必須回傳的 JSON 結構：
+{{
+  "input_type": "japanese",
+  "natural_translation": "通順、自然、非直翻的繁體中文翻譯",
+  "sentence_summary": "用一句繁體中文說明整句核心意思",
+  "naturalness_check": {{
+    "is_natural": true,
+    "level": "自然",
+    "reason": "說明原句是否自然，若不自然需指出問題",
+    "suggested_sentence": "若原句不自然，提供一個更自然的日文修正版；若原句自然則留空"
+  }},
+  "hiragana_reading": "整句平假名讀音，不可出現羅馬拼音",
+  "tone": {{
+    "label": "語氣類型，例如：疑問、委婉確認、吐槽、稱讚、感嘆、撒嬌、請求、推測、關心",
+    "explanation": "說明這句在日常對話中的語感與使用情境"
+  }},
+  "sentence_structure": [
+    {{
+      "segment": "日文語意片段",
+      "function": "該片段在句中的功能",
+      "meaning": "該片段的自然中文理解"
+    }}
+  ],
+  "grammar_points": [
+    {{
+      "name": "文法或句型名稱",
+      "formula": "結構公式",
+      "explanation": "詳細繁體中文說明，需解釋為什麼這裡這樣用，以及實際語感",
+      "meaning_in_sentence": "在本句中的自然中文意思",
+      "example": {{
+        "japanese": "相同句型的日文例句",
+        "hiragana": "例句的平假名讀音，不可使用羅馬拼音",
+        "chinese": "自然繁體中文翻譯"
+      }}
+    }}
+  ],
+  "natural_alternatives": [
+    {{
+      "japanese": "更自然或不同語氣的日文替換說法",
+      "hiragana": "替換句的平假名讀音，不可使用羅馬拼音",
+      "chinese": "繁體中文意思",
+      "note": "說明這個替換說法的語氣差異"
+    }}
+  ],
+  "learning_focus": {{
+    "summary": "用繁體中文總結這句最值得學習的地方",
+    "tips": [
+      "學習提醒 1",
+      "學習提醒 2"
+    ]
+  }},
+  "error_message": ""
+}}
+
+若輸入不是日文，請回傳：
+{{
+  "input_type": "not_japanese",
+  "natural_translation": "",
+  "sentence_summary": "",
+  "naturalness_check": {{
+    "is_natural": false,
+    "level": "無法解析",
+    "reason": "目前此功能僅支援日文句子解析。",
+    "suggested_sentence": ""
+  }},
+  "hiragana_reading": "",
+  "tone": {{
+    "label": "",
+    "explanation": ""
+  }},
+  "sentence_structure": [],
+  "grammar_points": [],
+  "natural_alternatives": [],
+  "learning_focus": {{
+    "summary": "",
+    "tips": []
+  }},
+  "error_message": "目前此功能僅支援日文句子解析，請輸入日文句子。"
+}}
+
+使用者輸入：
+{text}
+
+系統參考平假名讀音：
+{hiragana_reading}
+""".strip()
+
+
+def analyze_grammar_with_gemini(text):
+    parsed, mecab_error = analyze_with_mecab(text)
+    fallback_reading = parsed["reading_hiragana"] if parsed else answer_reading_hiragana(text)
+    advanced_mecab = {
+        "reading_hiragana": fallback_reading,
+        "tokens": parsed["tokens"] if parsed else [],
+        "particles": parsed["particles"] if parsed else [],
+        "verb_forms": parsed["verb_forms"] if parsed else [],
+        "error": mecab_error or "",
+    }
+
+    prompt = build_grammar_coach_prompt(text, fallback_reading)
+    raw_response = ""
+    try:
+        raw_response = call_gemini(prompt)
+        ai_payload = parse_gemini_json_safely(raw_response)
+    except Exception as e:
+        print(f"[grammar-analyzer] Gemini 解析失敗：{e}")
+        if raw_response:
+            print(f"[grammar-analyzer] Gemini 原始回傳：{raw_response}")
+        return grammar_ai_error_response(), 502
+
+    return normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab), 200
+
+
+def handle_grammar_analyzer_api():
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+    if not text:
+        return jsonify(grammar_not_japanese_response()), 400
+    if not is_probably_japanese_text(text):
+        return jsonify(grammar_not_japanese_response())
+    payload, status = analyze_grammar_with_gemini(text)
+    return jsonify(payload), status
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -1840,27 +2152,12 @@ def api_debug_grammar():
 
 @app.post("/api/analyze_japanese")
 def api_analyze_japanese():
-    data = request.get_json(silent=True) or {}
-    text = str(data.get("text", "")).strip()
-    if not text:
-        return jsonify({"success": False, "error": "請輸入日文句子。"}), 400
-    parsed, error = analyze_with_mecab(text)
-    if error:
-        return jsonify({"success": False, "error": error})
-    grammar_patterns, notes = detect_grammar_patterns(text)
-    return jsonify(
-        {
-            "success": True,
-            "original": text,
-            "reading_hiragana": parsed["reading_hiragana"],
-            "tokens": parsed["tokens"],
-            "particles": parsed["particles"],
-            "verb_forms": parsed["verb_forms"],
-            "grammar_patterns": grammar_patterns,
-            "common_misunderstandings": common_misunderstandings_for(text, grammar_patterns),
-            "notes": notes,
-        }
-    )
+    return handle_grammar_analyzer_api()
+
+
+@app.post("/api/analyze_grammar")
+def api_analyze_grammar():
+    return handle_grammar_analyzer_api()
 
 
 @app.get("/api/sns/random")

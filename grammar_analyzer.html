@@ -3,42 +3,202 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>日文文法結構化拆解</title>
+  <title>日文句子理解教練</title>
   <style>
-    :root { --bg-color:#0d0e15; --text-color:#e8e8e8; --primary:#00ffcc; --secondary:#ff00ff; --panel-bg:#1a1c29; --border-color:#2a2d40; }
+    :root {
+      --bg-color:#0d0e15;
+      --text-color:#e8e8e8;
+      --muted:#aeb4c8;
+      --primary:#00ffcc;
+      --secondary:#ff00ff;
+      --panel-bg:#1a1c29;
+      --soft-panel:#252837;
+      --border-color:#2a2d40;
+      --danger:#ff4d8d;
+      --warning:#ffd166;
+    }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg-color); color:var(--text-color); font-family:Arial,"Microsoft JhengHei",sans-serif; }
-    .shell { width:min(100% - 24px, 960px); margin:24px auto; }
+    html { background:var(--bg-color); }
+    body {
+      margin:0;
+      background:var(--bg-color);
+      color:var(--text-color);
+      font-family:Arial,"Microsoft JhengHei",sans-serif;
+      line-height:1.75;
+    }
+    .shell {
+      width:min(100% - 24px, 1080px);
+      margin:18px auto 48px;
+    }
     a { color:var(--primary); text-decoration:none; }
-    .nav { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0 24px; }
-    .nav a { border:1px solid var(--border-color); padding:10px 12px; border-radius:6px; }
-    .card { background:var(--panel-bg); border:1px solid var(--border-color); border-radius:8px; padding:16px; margin-bottom:16px; overflow-wrap:anywhere; word-wrap:break-word; }
+    .nav {
+      display:flex;
+      gap:10px;
+      margin:16px 0 24px;
+      overflow-x:auto;
+      padding-bottom:6px;
+      scrollbar-width:thin;
+    }
+    .nav a {
+      flex:0 0 auto;
+      border:1px solid var(--border-color);
+      padding:10px 12px;
+      border-radius:6px;
+      white-space:nowrap;
+    }
+    .nav a.active {
+      border-color:var(--primary);
+      box-shadow:0 0 14px rgba(0,255,204,.22);
+    }
     h1,h2,h3,strong,label,summary { color:var(--primary); }
-    textarea,button { width:100%; min-height:44px; border-radius:6px; border:1px solid var(--border-color); background:#080910; color:#fff; padding:10px; }
-    textarea { min-height:140px; resize:vertical; line-height:1.7; }
-    button { color:var(--primary); border-color:var(--primary); background:transparent; font-weight:700; cursor:pointer; }
-    .row { display:grid; gap:12px; }
-    .muted { color:#aeb4c8; }
-    .error { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
-    details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; margin-top:10px; }
-    .token-grid { display:grid; gap:10px; }
-    @media (min-width:760px){ .row.two,.token-grid { grid-template-columns:1fr 1fr; } }
+    h1 {
+      margin:0 0 10px;
+      font-size:clamp(1.75rem, 6vw, 2.6rem);
+      text-shadow:0 0 14px rgba(0,255,204,.35);
+      letter-spacing:0;
+    }
+    h2 { font-size:1.22rem; margin:0 0 12px; }
+    h3 { font-size:1rem; margin:0 0 8px; }
+    .card {
+      background:var(--panel-bg);
+      border:1px solid var(--border-color);
+      border-radius:8px;
+      padding:16px;
+      margin-bottom:16px;
+      overflow-wrap:anywhere;
+      word-wrap:break-word;
+      box-shadow:0 14px 30px rgba(0,0,0,.18);
+    }
+    .sub-card {
+      background:var(--soft-panel);
+      border:1px solid rgba(0,255,204,.12);
+      border-radius:8px;
+      padding:14px;
+      overflow-wrap:anywhere;
+      word-wrap:break-word;
+    }
+    .grid { display:grid; gap:12px; }
+    .meta-grid { display:grid; gap:12px; }
+    .muted { color:var(--muted); }
+    .label {
+      display:inline-flex;
+      align-items:center;
+      width:max-content;
+      max-width:100%;
+      border:1px solid var(--primary);
+      color:var(--primary);
+      border-radius:999px;
+      padding:4px 10px;
+      font-weight:700;
+      background:rgba(0,255,204,.08);
+      overflow-wrap:anywhere;
+    }
+    .label.warning {
+      border-color:var(--warning);
+      color:var(--warning);
+      background:rgba(255,209,102,.08);
+    }
+    .label.error {
+      border-color:var(--danger);
+      color:var(--danger);
+      background:rgba(255,77,141,.08);
+    }
+    textarea,button {
+      width:100%;
+      min-height:44px;
+      border-radius:6px;
+      border:1px solid var(--border-color);
+      background:#080910;
+      color:#fff;
+      padding:10px;
+      font:inherit;
+    }
+    textarea {
+      min-height:150px;
+      resize:vertical;
+    }
+    button {
+      color:var(--primary);
+      border-color:var(--primary);
+      background:transparent;
+      font-weight:700;
+      cursor:pointer;
+    }
+    button:hover:not(:disabled) {
+      box-shadow:0 0 16px rgba(0,255,204,.26);
+    }
+    button:disabled {
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .error-text {
+      color:var(--secondary);
+      border-left:4px solid var(--secondary);
+      padding-left:10px;
+      font-weight:700;
+    }
+    .loading {
+      display:none;
+      align-items:center;
+      gap:10px;
+      color:var(--primary);
+      margin-top:12px;
+    }
+    .loading.show { display:flex; }
+    .spinner {
+      width:18px;
+      height:18px;
+      border:2px solid rgba(0,255,204,.2);
+      border-top-color:var(--primary);
+      border-radius:50%;
+      animation:spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    details {
+      background:rgba(255,255,255,.045);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:8px;
+      padding:12px;
+      margin-top:12px;
+    }
+    summary { cursor:pointer; font-weight:700; }
+    pre {
+      white-space:pre-wrap;
+      overflow-wrap:anywhere;
+      word-wrap:break-word;
+      color:#dce4ff;
+      font-size:.88rem;
+    }
+    .tips { padding-left:18px; margin:8px 0 0; }
+    .tips li { margin-bottom:6px; }
+    @media (min-width:760px) {
+      .grid.two, .meta-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+      .grid.three { grid-template-columns:repeat(3, minmax(0, 1fr)); }
+      .actions { grid-template-columns:1fr 1fr; }
+      .shell { margin-top:28px; }
+    }
   </style>
 </head>
 <body>
 <main class="shell">
-  <h1>日文文法結構化拆解</h1>
-  <nav class="nav">
-    <a href="/">每日教材</a><a href="/verb-practice">動詞練習</a><a href="/mistake-review">錯題複習</a><a href="/sns-practice">SNS語感</a><a href="/learning-report">學習報告</a>
+  <h1>日文句子理解教練</h1>
+  <nav class="nav" aria-label="主要導覽">
+    <a href="/">每日教材</a>
+    <a href="/verb-practice">動詞練習</a>
+    <a href="/mistake-review">錯題複習</a>
+    <a href="/sns-practice">SNS語感</a>
+    <a href="/learning-report">學習報告</a>
+    <a class="active" href="/grammar-analyzer">文法拆解</a>
   </nav>
 
   <section class="card">
-    <label for="jpText">輸入日文句子</label>
-    <textarea id="jpText" placeholder="例：雨が降っている。"></textarea>
-    <div class="row two" style="margin-top:12px;">
+    <label for="jpText">輸入想理解的日文句子</label>
+    <textarea id="jpText" placeholder="例：こんな格好で寒くない？"></textarea>
+    <div class="grid actions" style="margin-top:12px;">
       <button id="analyzeBtn">開始拆解</button>
       <button id="copyBtn">複製解析結果</button>
     </div>
+    <div id="loading" class="loading"><span class="spinner"></span><span>AI 正在整理句子語感與文法重點...</span></div>
     <div id="status" class="muted" style="margin-top:12px;"></div>
   </section>
 
@@ -47,56 +207,189 @@
 
 <script>
 let lastResultText = "";
+let lastInputText = "";
 const result = document.getElementById("result");
 const statusBox = document.getElementById("status");
-function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
-async function api(url, options={}) {
+const loading = document.getElementById("loading");
+const analyzeBtn = document.getElementById("analyzeBtn");
+
+function esc(value){
+  return String(value ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+function hasText(value){ return String(value ?? "").trim().length > 0; }
+function arr(value){ return Array.isArray(value) ? value : []; }
+function obj(value){ return value && typeof value === "object" && !Array.isArray(value) ? value : {}; }
+
+async function api(url, options={}){
   const res = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "請求失敗");
+  let data = {};
+  try { data = await res.json(); } catch (_) { data = {}; }
+  if (!res.ok) {
+    throw new Error(data.error_message || "解析失敗，請稍後再試，或確認 Gemini API 金鑰是否正確。");
+  }
   return data;
 }
-function listCards(items, render, emptyText){
-  if (!items || !items.length) return `<p class="muted">${emptyText}</p>`;
-  return items.map(render).join("");
+
+function card(title, body){
+  return `<article class="card"><h2>${esc(title)}</h2>${body}</article>`;
 }
+
+function subCard(body){
+  return `<div class="sub-card">${body}</div>`;
+}
+
+function naturalnessClass(check){
+  const level = String(check.level || "");
+  if (check.is_natural || level === "自然") return "";
+  if (level.includes("無法") || level.includes("失敗")) return "error";
+  return "warning";
+}
+
+function renderOverview(data){
+  return card("總覽與翻譯", `
+    <div class="meta-grid">
+      ${subCard(`<h3>原文</h3><p>${esc(data.original || lastInputText)}</p>`)}
+      ${subCard(`<h3>平假名讀音</h3><p>${esc(data.hiragana_reading || "尚無讀音資料")}</p>`)}
+      ${subCard(`<h3>自然中文翻譯</h3><p>${esc(data.natural_translation || "尚無翻譯資料")}</p>`)}
+      ${subCard(`<h3>一句話核心意思</h3><p>${esc(data.sentence_summary || "尚無摘要資料")}</p>`)}
+    </div>
+  `);
+}
+
+function renderNaturalness(data){
+  const check = obj(data.naturalness_check);
+  const tagClass = naturalnessClass(check);
+  return card("原句自然度檢查", `
+    <p><span class="label ${tagClass}">${esc(check.level || "需確認")}</span></p>
+    <p>${esc(check.reason || "目前沒有自然度補充。")}</p>
+    ${hasText(check.suggested_sentence) ? subCard(`<h3>建議修正版</h3><p>${esc(check.suggested_sentence)}</p>`) : ""}
+  `);
+}
+
+function renderTone(data){
+  const tone = obj(data.tone);
+  return card("語氣與情境", `
+    <p><span class="label">${esc(tone.label || "語氣需依上下文判斷")}</span></p>
+    <p>${esc(tone.explanation || "目前沒有語氣說明。")}</p>
+  `);
+}
+
+function renderStructure(data){
+  const items = arr(data.sentence_structure);
+  const body = items.length ? `<div class="grid two">${items.map(item => subCard(`
+    <h3>${esc(item.segment || "語意片段")}</h3>
+    <p><strong>功能：</strong>${esc(item.function || "未提供")}</p>
+    <p><strong>自然理解：</strong>${esc(item.meaning || "未提供")}</p>
+  `)).join("")}</div>` : `<p class="muted">目前沒有句子主幹拆解。</p>`;
+  return card("句子主幹拆解", body);
+}
+
+function renderGrammarPoints(data){
+  const items = arr(data.grammar_points);
+  const body = items.length ? `<div class="grid">${items.map(item => {
+    const example = obj(item.example);
+    return subCard(`
+      <h3>${esc(item.name || "關鍵句型")}</h3>
+      ${hasText(item.formula) ? `<p><strong>結構：</strong>${esc(item.formula)}</p>` : ""}
+      ${hasText(item.meaning_in_sentence) ? `<p><strong>本句意思：</strong>${esc(item.meaning_in_sentence)}</p>` : ""}
+      <p>${esc(item.explanation || "目前沒有詳細說明。")}</p>
+      ${(hasText(example.japanese) || hasText(example.chinese)) ? `<div class="sub-card">
+        <h3>類似例句</h3>
+        <p>${esc(example.japanese)}</p>
+        <p class="muted">${esc(example.hiragana)}</p>
+        <p>${esc(example.chinese)}</p>
+      </div>` : ""}
+    `);
+  }).join("")}</div>` : `<p class="muted">這句沒有需要特別抽出的關鍵文法。</p>`;
+  return card("關鍵文法與句型", body);
+}
+
+function renderAlternatives(data){
+  const items = arr(data.natural_alternatives);
+  const body = items.length ? `<div class="grid">${items.map(item => subCard(`
+    <h3>${esc(item.japanese || "替換說法")}</h3>
+    <p class="muted">${esc(item.hiragana || "")}</p>
+    <p>${esc(item.chinese || "")}</p>
+    <p><strong>語氣差異：</strong>${esc(item.note || "未提供")}</p>
+  `)).join("")}</div>` : `<p class="muted">目前沒有自然替換說法。</p>`;
+  return card("自然替換說法", body);
+}
+
+function renderLearningFocus(data){
+  const focus = obj(data.learning_focus);
+  const tips = arr(focus.tips);
+  return card("學習總結", `
+    <p>${esc(focus.summary || "目前沒有學習總結。")}</p>
+    ${tips.length ? `<ul class="tips">${tips.map(tip => `<li>${esc(tip)}</li>`).join("")}</ul>` : ""}
+  `);
+}
+
+function renderAdvanced(data){
+  const advanced = obj(data.advanced_mecab);
+  if (!Object.keys(advanced).length) return "";
+  return card("進階資料", `
+    <details>
+      <summary>查看 MeCab 詞性資料</summary>
+      ${hasText(advanced.error) ? `<p class="error-text">${esc(advanced.error)}</p>` : ""}
+      <pre>${esc(JSON.stringify(advanced, null, 2))}</pre>
+    </details>
+  `);
+}
+
 function renderAnalysis(data){
   lastResultText = JSON.stringify(data, null, 2);
-  result.innerHTML = `
-    <article class="card"><h2>總覽</h2><p>原文：${esc(data.original)}</p><p>平假名讀音：${esc(data.reading_hiragana)}</p></article>
-    <article class="card"><details open><summary>單字拆解</summary><div class="token-grid">
-      ${listCards(data.tokens, t => `<div class="card"><strong>${esc(t.surface)}</strong><p>讀音：${esc(t.reading_hiragana)}</p><p>原形：${esc(t.base_form)}</p><p>詞性：${esc(t.pos)} / ${esc(t.pos_detail)}</p><p>活用：${esc(t.conjugation_type)} ${esc(t.conjugation_form)}</p><p>${esc(t.meaning_hint_zh_tw)}</p></div>`, "沒有拆解結果。")}
-    </div></details></article>
-    <article class="card"><details open><summary>助詞解析</summary>
-      ${listCards(data.particles, p => `<div class="card"><strong>${esc(p.surface)}</strong><p>${esc(p.meaning_hint_zh_tw)}</p></div>`, "未偵測到助詞。")}
-    </details></article>
-    <article class="card"><details open><summary>動詞變化解析</summary>
-      ${listCards(data.verb_forms, v => `<div class="card"><strong>${esc(v.surface)}</strong><p>原形：${esc(v.base_form)}</p><p>活用：${esc(v.conjugation_type)} ${esc(v.conjugation_form)}</p></div>`, "未偵測到動詞或助動詞。")}
-    </details></article>
-    <article class="card"><details open><summary>句型偵測</summary>
-      ${listCards(data.grammar_patterns, g => `<div class="card"><strong>${esc(g.pattern)}</strong><p>${esc(g.description_zh_tw)}</p></div>`, "未偵測到指定句型。")}
-    </details></article>
-    <article class="card"><details open><summary>常見誤解提醒</summary>
-      ${listCards(data.common_misunderstandings, m => `<p>${esc(m)}</p>`, "目前沒有特別提醒。")}
-      ${listCards(data.notes, n => `<p class="muted">${esc(n)}</p>`, "")}
-    </details></article>`;
+  if (hasText(data.error_message)) {
+    result.innerHTML = card("解析提示", `<p class="error-text">${esc(data.error_message)}</p>`);
+    return;
+  }
+  result.innerHTML = [
+    renderOverview(data),
+    renderNaturalness(data),
+    renderTone(data),
+    renderStructure(data),
+    renderGrammarPoints(data),
+    renderAlternatives(data),
+    renderLearningFocus(data),
+    renderAdvanced(data)
+  ].join("");
 }
-document.getElementById("analyzeBtn").addEventListener("click", async () => {
+
+analyzeBtn.addEventListener("click", async () => {
   const text = document.getElementById("jpText").value.trim();
-  if (!text) { statusBox.innerHTML = "<span class='error'>請先輸入日文句子。</span>"; return; }
-  statusBox.innerText = "解析中...";
+  if (!text) {
+    statusBox.innerHTML = "<span class='error-text'>請先輸入日文句子。</span>";
+    return;
+  }
+  lastInputText = text;
+  statusBox.innerText = "";
   result.innerHTML = "";
+  loading.classList.add("show");
+  analyzeBtn.disabled = true;
+  analyzeBtn.innerText = "AI 深度解析中...";
   try {
-    const data = await api("/api/analyze_japanese", {method:"POST", body:JSON.stringify({text})});
-    if (!data.success) throw new Error(data.error || "解析失敗");
+    const data = await api("/api/analyze_grammar", {method:"POST", body:JSON.stringify({text})});
     statusBox.innerText = "解析完成。";
     renderAnalysis(data);
   } catch(error) {
-    statusBox.innerHTML = `<span class="error">${esc(error.message)}</span>`;
+    statusBox.innerHTML = `<span class="error-text">${esc(error.message || "解析失敗，請稍後再試，或確認 Gemini API 金鑰是否正確。")}</span>`;
+  } finally {
+    loading.classList.remove("show");
+    analyzeBtn.disabled = false;
+    analyzeBtn.innerText = "開始拆解";
   }
 });
+
 document.getElementById("copyBtn").addEventListener("click", async () => {
-  if (!lastResultText) { statusBox.innerHTML = "<span class='error'>尚無解析結果可複製。</span>"; return; }
+  if (!lastResultText) {
+    statusBox.innerHTML = "<span class='error-text'>尚無解析結果可複製。</span>";
+    return;
+  }
   await navigator.clipboard.writeText(lastResultText);
   statusBox.innerText = "已複製解析結果。";
 });
