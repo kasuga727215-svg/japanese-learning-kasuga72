@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import threading
+import time
 import traceback
 import unicodedata
 from collections import Counter
@@ -47,6 +48,10 @@ GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 20, 5, 55)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
+GEMINI_MODEL_CANDIDATES = os.environ.get(
+    "GEMINI_MODEL_CANDIDATES",
+    "gemini-3.1-pro,gemini-3-flash,gemini-1.5-pro,gemini-1.5-flash",
+).strip()
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
@@ -1378,36 +1383,21 @@ def list_gemini_models():
     return data.get("models", [])
 
 
+def gemini_model_candidates():
+    candidates = []
+    for value in [GEMINI_MODEL, *GEMINI_MODEL_CANDIDATES.split(",")]:
+        model = str(value or "").strip()
+        if model and model not in candidates:
+            candidates.append(model)
+    return candidates or ["gemini-3-flash-preview"]
+
+
 def choose_gemini_model():
-    if GEMINI_MODEL:
-        return GEMINI_MODEL
+    return gemini_model_candidates()[0]
 
-    try:
-        models = list_gemini_models()
-    except Exception:
-        return "gemini-3.1-flash-lite"
 
-    usable = []
-    for model in models:
-        name = model.get("name", "").replace("models/", "")
-        methods = model.get("supportedGenerationMethods", [])
-        if name and "generateContent" in methods:
-            usable.append(name)
-
-    preferred = [
-        "gemini-3.1-flash-lite",
-        "gemini-3-flash-lite",
-        "gemini-2.5-flash-lite",
-        "gemini-2.0-flash-lite",
-        "gemini-3.1-flash",
-        "gemini-3-flash",
-        "gemini-2.5-flash",
-    ]
-    for keyword in preferred:
-        for name in usable:
-            if keyword in name:
-                return name
-    return usable[0] if usable else "gemini-3.1-flash-lite"
+def gemini_smoke_test_enabled():
+    return os.environ.get("GEMINI_ENABLE_MODEL_SMOKE_TEST", "false").strip().lower() == "true"
 
 
 def compact_gemini_error_detail(raw_detail):
@@ -1426,11 +1416,32 @@ def compact_gemini_error_detail(raw_detail):
     }
 
 
-def call_gemini(prompt):
+def classify_gemini_error(error):
+    text = str(error or "")
+    lower = text.lower()
+    if "timeout" in lower or "timed out" in lower or "逾時" in text:
+        return "timeout"
+    if "not_found" in lower or "not found" in lower or "404" in lower:
+        return "not_found"
+    if "quota" in lower or "resource_exhausted" in lower or "429" in lower:
+        return "quota_exceeded"
+    if "permission" in lower or "unauthorized" in lower or "api key" in lower or "403" in lower:
+        return "permission_or_api_key"
+    if "json" in lower:
+        return "json_parse_error"
+    if "格式" in text or "空內容" in text:
+        return "invalid_response"
+    if "連接" in text or "connection" in lower:
+        return "connection_error"
+    return "error"
+
+
+def call_gemini(prompt, model_name=None, timeout_seconds=None):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
 
-    model_name = choose_gemini_model()
+    model_name = model_name or choose_gemini_model()
+    timeout_seconds = timeout_seconds or GEMINI_TIMEOUT_SECONDS
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model_name}:generateContent?key={GEMINI_API_KEY}"
@@ -1443,7 +1454,7 @@ def call_gemini(prompt):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")
@@ -1454,16 +1465,53 @@ def call_gemini(prompt):
     except urllib.error.URLError as e:
         raise RuntimeError(f"無法連接 AI 服務；model={model_name}；reason={e.reason}") from e
     except TimeoutError as e:
-        raise RuntimeError(f"AI 服務逾時；model={model_name}；timeout={GEMINI_TIMEOUT_SECONDS}s") from e
+        raise RuntimeError(f"AI 服務逾時；model={model_name}；timeout={timeout_seconds}s") from e
 
     if "error" in data:
         compact_detail = json.dumps(compact_gemini_error_detail(json.dumps(data, ensure_ascii=False)), ensure_ascii=False)
         raise RuntimeError(f"AI 服務回傳錯誤；model={model_name}；detail={compact_detail}")
 
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        if not str(text or "").strip():
+            raise RuntimeError("AI 回傳空內容。")
+        return text
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError("AI 回傳格式不正確。") from e
+
+
+def smoke_test_gemini_model(model_name):
+    prompt = '請只回傳純 JSON: {"ok": true}'
+    started = time.perf_counter()
+    try:
+        raw_text = call_gemini(prompt, model_name=model_name, timeout_seconds=GEMINI_TIMEOUT_SECONDS)
+        parsed = parse_gemini_json_safely(raw_text)
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        if parsed.get("ok") is True:
+            return {
+                "model": model_name,
+                "status": "ok",
+                "elapsed_ms": elapsed_ms,
+                "error_type": "",
+                "error_message": "",
+            }
+        return {
+            "model": model_name,
+            "status": "error",
+            "elapsed_ms": elapsed_ms,
+            "error_type": "invalid_response",
+            "error_message": "模型有回應，但不是 {\"ok\": true}。",
+        }
+    except Exception as e:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        error_type = classify_gemini_error(e)
+        return {
+            "model": model_name,
+            "status": "timeout" if error_type == "timeout" else "error",
+            "elapsed_ms": elapsed_ms,
+            "error_type": error_type,
+            "error_message": str(e)[:500],
+        }
 
 
 def build_prompt(settings):
@@ -2412,7 +2460,7 @@ def build_grammar_coach_prompt(text, hiragana_reading):
 6. 若原句自然，naturalness_check.level 請填「自然」。
 7. tone.label 必須簡短，tone.explanation 才放詳細說明。
 8. example 必須包含 japanese、hiragana、chinese 三個欄位。
-9. natural_alternatives 至少提供 1 到 3 句。
+9. natural_alternatives 最多提供 2 句。
 10. 不可為了填滿欄位而硬塞不重要的文法點。
 11. 若句子很短，請解析真正有學習價值的語氣與用法。
 12. 若輸入不是日文，必須回傳指定的 not_japanese JSON。
@@ -2426,6 +2474,12 @@ def build_grammar_coach_prompt(text, hiragana_reading):
 20. named_entity、sensitive、typo_or_noise、unknown 即使 should_add_to_candidates 為 true，也只能進入候選池，不可直接進入正式每日教材。
 21. 特別注意捕捉：めちゃくちゃ、めっちゃ、エモい、バズる、バズりそう、てぇてぇ、限界オタク。
 22. 若出現 さくたん、ねんねちゃん 或類似暱稱，請放入 slang_terms，category 固定使用 named_entity。
+23. sentence_structure 最多 5 個。
+24. grammar_points 最多 3 個，只列最有學習價值的句型。
+25. natural_alternatives 最多 2 個。
+26. learning_focus.tips 最多 2 個。
+27. slang_terms 最多 5 個。
+28. 每個 explanation、reason、note、nuance 盡量控制在 80 到 120 字內，避免冗長。
 
 Gemini 必須回傳的 JSON 結構：
 {{
@@ -2552,24 +2606,33 @@ def analyze_grammar_with_gemini(text):
     }
 
     prompt = build_grammar_coach_prompt(text, fallback_reading)
-    raw_response = ""
-    try:
-        raw_response = call_gemini(prompt)
-        ai_payload = parse_gemini_json_safely(raw_response)
-    except Exception as e:
-        error_text = str(e)
-        if "逾時" in error_text or "timeout" in error_text.lower() or "timed out" in error_text.lower():
-            print(f"[grammar-analyzer] Gemini timeout; model={choose_gemini_model()}; timeout={GEMINI_TIMEOUT_SECONDS}s")
-        print(f"[grammar-analyzer] Gemini 解析失敗：{e}")
-        print(traceback.format_exc())
-        if raw_response:
-            print(f"[grammar-analyzer] Gemini 原始回傳：{raw_response}")
-        payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
-        persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
-        return payload, 200
+    failures = []
+    for model_name in gemini_model_candidates():
+        raw_response = ""
+        try:
+            print(f"[grammar-analyzer] 嘗試 Gemini 模型；model={model_name}")
+            raw_response = call_gemini(prompt, model_name=model_name)
+            ai_payload = parse_gemini_json_safely(raw_response)
+            payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
+            print(f"[grammar-analyzer] Gemini 解析成功；model={model_name}")
+            persist_analysis_slang_terms(payload, text, "grammar_analyzer")
+            return payload, 200
+        except Exception as e:
+            error_text = str(e)
+            error_type = classify_gemini_error(e)
+            failures.append({"model": model_name, "error_type": error_type, "message": error_text[:300]})
+            if raw_response:
+                print(f"[grammar-analyzer] Gemini 原始回傳；model={model_name}；raw={raw_response[:1200]}")
+            if error_type == "timeout":
+                print(f"[grammar-analyzer] Gemini timeout; model={model_name}; timeout={GEMINI_TIMEOUT_SECONDS}s")
+            print(f"[grammar-analyzer] Gemini 解析失敗；model={model_name}；error_type={error_type}；message={error_text}")
+            print(traceback.format_exc())
+            continue
 
-    payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
-    persist_analysis_slang_terms(payload, text, "grammar_analyzer")
+    if failures:
+        print(f"[grammar-analyzer] 所有 Gemini 模型皆失敗；failures={json.dumps(failures, ensure_ascii=False)}")
+    payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
+    persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
     return payload, 200
 
 
@@ -3082,6 +3145,30 @@ def api_analyze_japanese():
 @app.post("/api/analyze_grammar")
 def api_analyze_grammar():
     return handle_grammar_analyzer_api()
+
+
+@app.get("/api/gemini/debug/model-check")
+def api_gemini_debug_model_check():
+    if not gemini_smoke_test_enabled():
+        return jsonify({"error": "Gemini 模型測試端點未啟用。"}), 404
+    models = []
+    for model_name in gemini_model_candidates():
+        result = smoke_test_gemini_model(model_name)
+        models.append(result)
+        print(
+            "[grammar-analyzer] Gemini model smoke test；"
+            f"model={result['model']}；status={result['status']}；"
+            f"elapsed_ms={result['elapsed_ms']}；error_type={result['error_type']}"
+        )
+    recommended = next((item["model"] for item in models if item["status"] == "ok"), "")
+    return jsonify(
+        {
+            "models": models,
+            "recommended_model": recommended,
+            "timeout_seconds": GEMINI_TIMEOUT_SECONDS,
+            "candidate_count": len(models),
+        }
+    )
 
 
 @app.get("/api/sns/random")

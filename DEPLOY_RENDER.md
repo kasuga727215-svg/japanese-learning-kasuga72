@@ -32,7 +32,9 @@
 - `TG_CHAT_ID`: 你的 Telegram Chat ID
 - `APP_URL`: Render 給你的公網網址，例如 `https://your-app.onrender.com`
 - `GEMINI_MODEL`: 預設 `gemini-3-flash-preview`；若 Render 有設定，會以 Render 環境變數為準
+- `GEMINI_MODEL_CANDIDATES`: 預設 `gemini-3.1-pro,gemini-3-flash,gemini-1.5-pro,gemini-1.5-flash`，文法拆解會依序接力嘗試
 - `GEMINI_TIMEOUT_SECONDS`: 預設 `20`。若 Render Start Command 已使用 `gunicorn --timeout 90 app:app`，可視情況調到 `40`
+- `GEMINI_ENABLE_MODEL_SMOKE_TEST`: 平常填 `false`；需要測試模型可用性時才短暫改成 `true`
 - `SLANG_CANDIDATE_WRITE_MODE`: 建議填 `sync`，讓新詞候選池在文法解析回傳前直接寫入資料庫
 - `ENABLE_DEBUG_ENDPOINTS`: 平常填 `false`；排查新詞候選池時可短暫改成 `true`
 
@@ -41,9 +43,10 @@
 ```txt
 SLANG_CANDIDATE_WRITE_MODE=sync
 ENABLE_DEBUG_ENDPOINTS=true
+GEMINI_ENABLE_MODEL_SMOKE_TEST=true
 ```
 
-驗收完成後，請把 `ENABLE_DEBUG_ENDPOINTS` 改回 `false`。
+驗收完成後，請把 `ENABLE_DEBUG_ENDPOINTS` 與 `GEMINI_ENABLE_MODEL_SMOKE_TEST` 改回 `false`。
 
 ## PostgreSQL 說明
 
