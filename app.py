@@ -7,6 +7,7 @@ import re
 import shutil
 import sqlite3
 import threading
+import traceback
 import unicodedata
 from collections import Counter
 import urllib.error
@@ -28,6 +29,7 @@ DEFAULT_SQLITE_SETTINGS_FILE = os.path.join(BASE_DIR, "state.sqlite3")
 SQLITE_SETTINGS_FILE = os.environ.get("SQLITE_DB_PATH", "").strip() or DEFAULT_SQLITE_SETTINGS_FILE
 SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+GEMINI_TIMEOUT_SECONDS = 20
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip()
@@ -690,6 +692,23 @@ def normalize_slang_status(value):
     return status if status in {"pending", "approved", "rejected"} else "pending"
 
 
+def slang_candidate_write_mode():
+    mode = os.environ.get("SLANG_CANDIDATE_WRITE_MODE", "sync").strip().lower()
+    return mode if mode in {"sync", "async"} else "sync"
+
+
+def debug_endpoints_enabled():
+    return os.environ.get("ENABLE_DEBUG_ENDPOINTS", "false").strip().lower() == "true"
+
+
+def log_slang(message):
+    print(f"[slang-candidates] {message}", flush=True)
+
+
+def log_slang_exception(message):
+    print(f"[slang-candidates] {message}\n{traceback.format_exc()}", flush=True)
+
+
 def clean_slang_text(value):
     return unicodedata.normalize("NFKC", str(value or "")).strip()
 
@@ -755,19 +774,125 @@ def merge_slang_terms(ai_terms, supplemental_terms):
     return merged
 
 
+def slang_candidates_for_write(slang_terms):
+    candidates = []
+    skipped = 0
+    for item in slang_terms or []:
+        normalized = normalize_slang_candidate(item)
+        if normalized and normalized["should_add_to_candidates"]:
+            candidates.append(normalized)
+        else:
+            skipped += 1
+    return candidates, skipped
+
+
 def upsert_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
-    candidates = [normalize_slang_candidate(item) for item in (slang_terms or [])]
-    candidates = [item for item in candidates if item and item["should_add_to_candidates"]]
+    candidates, skipped = slang_candidates_for_write(slang_terms)
+    db_type = "postgres" if DATABASE_URL else "sqlite"
+    result = {
+        "db_type": db_type,
+        "success": 0,
+        "failed": 0,
+        "skipped": skipped,
+        "details": [],
+    }
+    log_slang(f"upsert_slang_candidates 開始執行；db_type={db_type}；candidates={len(candidates)}；skipped={skipped}")
     if not candidates:
-        return 0
+        log_slang("沒有可寫入的候選詞，跳過 upsert。")
+        return result
 
     ensure_slang_candidates_store()
     now = taipei_iso_now()
     if DATABASE_URL:
         with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                for item in candidates:
-                    params = (
+            for item in candidates:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1 FROM slang_candidates WHERE term = %s", (item["term"],))
+                        exists = cur.fetchone() is not None
+                        cur.execute(
+                            """
+                            INSERT INTO slang_candidates (
+                                term, normalized_term, reading_hiragana, base_form, part_of_speech,
+                                category, meaning_zh, nuance, example_sentence, source, source_context,
+                                frequency_count, confidence, status, first_seen_at, last_seen_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (term) DO UPDATE SET
+                                frequency_count = COALESCE(slang_candidates.frequency_count, 0) + 1,
+                                last_seen_at = EXCLUDED.last_seen_at,
+                                confidence = GREATEST(COALESCE(slang_candidates.confidence, 0), COALESCE(EXCLUDED.confidence, 0)),
+                                normalized_term = COALESCE(NULLIF(slang_candidates.normalized_term, ''), EXCLUDED.normalized_term),
+                                reading_hiragana = COALESCE(NULLIF(slang_candidates.reading_hiragana, ''), EXCLUDED.reading_hiragana),
+                                base_form = COALESCE(NULLIF(slang_candidates.base_form, ''), EXCLUDED.base_form),
+                                part_of_speech = COALESCE(NULLIF(slang_candidates.part_of_speech, ''), EXCLUDED.part_of_speech),
+                                category = COALESCE(NULLIF(slang_candidates.category, ''), EXCLUDED.category),
+                                meaning_zh = COALESCE(NULLIF(slang_candidates.meaning_zh, ''), EXCLUDED.meaning_zh),
+                                nuance = COALESCE(NULLIF(slang_candidates.nuance, ''), EXCLUDED.nuance),
+                                example_sentence = COALESCE(NULLIF(slang_candidates.example_sentence, ''), EXCLUDED.example_sentence),
+                                source = COALESCE(NULLIF(slang_candidates.source, ''), EXCLUDED.source),
+                                source_context = COALESCE(NULLIF(slang_candidates.source_context, ''), EXCLUDED.source_context)
+                            """,
+                            (
+                                item["term"],
+                                item["normalized_term"],
+                                item["reading_hiragana"],
+                                item["base_form"],
+                                item["part_of_speech"],
+                                item["category"],
+                                item["meaning_zh"],
+                                item["nuance"],
+                                source_context,
+                                source,
+                                source_context,
+                                1,
+                                item["confidence"],
+                                "pending",
+                                now,
+                                now,
+                            ),
+                        )
+                    conn.commit()
+                    action = "updated" if exists else "inserted"
+                    result["success"] += 1
+                    result["details"].append({"term": item["term"], "result": action})
+                    log_slang(f"term={item['term']} result={action}")
+                except Exception:
+                    conn.rollback()
+                    result["failed"] += 1
+                    result["details"].append({"term": item.get("term"), "result": "failed"})
+                    log_slang_exception(f"term={item.get('term')} 寫入失敗")
+        log_slang(f"upsert 完成；success={result['success']}；failed={result['failed']}；skipped={result['skipped']}")
+        return result
+
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+        for item in candidates:
+            try:
+                exists = conn.execute("SELECT 1 FROM slang_candidates WHERE term = ?", (item["term"],)).fetchone() is not None
+                conn.execute(
+                    """
+                    INSERT INTO slang_candidates (
+                        term, normalized_term, reading_hiragana, base_form, part_of_speech,
+                        category, meaning_zh, nuance, example_sentence, source, source_context,
+                        frequency_count, confidence, status, first_seen_at, last_seen_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(term) DO UPDATE SET
+                        frequency_count = COALESCE(frequency_count, 0) + 1,
+                        last_seen_at = excluded.last_seen_at,
+                        confidence = MAX(COALESCE(confidence, 0), COALESCE(excluded.confidence, 0)),
+                        normalized_term = COALESCE(NULLIF(normalized_term, ''), excluded.normalized_term),
+                        reading_hiragana = COALESCE(NULLIF(reading_hiragana, ''), excluded.reading_hiragana),
+                        base_form = COALESCE(NULLIF(base_form, ''), excluded.base_form),
+                        part_of_speech = COALESCE(NULLIF(part_of_speech, ''), excluded.part_of_speech),
+                        category = COALESCE(NULLIF(category, ''), excluded.category),
+                        meaning_zh = COALESCE(NULLIF(meaning_zh, ''), excluded.meaning_zh),
+                        nuance = COALESCE(NULLIF(nuance, ''), excluded.nuance),
+                        example_sentence = COALESCE(NULLIF(example_sentence, ''), excluded.example_sentence),
+                        source = COALESCE(NULLIF(source, ''), excluded.source),
+                        source_context = COALESCE(NULLIF(source_context, ''), excluded.source_context)
+                    """,
+                    (
                         item["term"],
                         item["normalized_term"],
                         item["reading_hiragana"],
@@ -784,98 +909,59 @@ def upsert_slang_candidates(slang_terms, source_context="", source="grammar_anal
                         "pending",
                         now,
                         now,
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO slang_candidates (
-                            term, normalized_term, reading_hiragana, base_form, part_of_speech,
-                            category, meaning_zh, nuance, example_sentence, source, source_context,
-                            frequency_count, confidence, status, first_seen_at, last_seen_at
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (term) DO UPDATE SET
-                            frequency_count = COALESCE(slang_candidates.frequency_count, 0) + 1,
-                            last_seen_at = EXCLUDED.last_seen_at,
-                            confidence = GREATEST(COALESCE(slang_candidates.confidence, 0), EXCLUDED.confidence),
-                            normalized_term = COALESCE(NULLIF(slang_candidates.normalized_term, ''), EXCLUDED.normalized_term),
-                            reading_hiragana = COALESCE(NULLIF(slang_candidates.reading_hiragana, ''), EXCLUDED.reading_hiragana),
-                            base_form = COALESCE(NULLIF(slang_candidates.base_form, ''), EXCLUDED.base_form),
-                            part_of_speech = COALESCE(NULLIF(slang_candidates.part_of_speech, ''), EXCLUDED.part_of_speech),
-                            category = COALESCE(NULLIF(slang_candidates.category, ''), EXCLUDED.category),
-                            meaning_zh = COALESCE(NULLIF(slang_candidates.meaning_zh, ''), EXCLUDED.meaning_zh),
-                            nuance = COALESCE(NULLIF(slang_candidates.nuance, ''), EXCLUDED.nuance),
-                            example_sentence = COALESCE(NULLIF(slang_candidates.example_sentence, ''), EXCLUDED.example_sentence),
-                            source = COALESCE(NULLIF(slang_candidates.source, ''), EXCLUDED.source),
-                            source_context = COALESCE(NULLIF(slang_candidates.source_context, ''), EXCLUDED.source_context)
-                        """,
-                        params,
-                    )
-            conn.commit()
-        return len(candidates)
-
-    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
-        for item in candidates:
-            conn.execute(
-                """
-                INSERT INTO slang_candidates (
-                    term, normalized_term, reading_hiragana, base_form, part_of_speech,
-                    category, meaning_zh, nuance, example_sentence, source, source_context,
-                    frequency_count, confidence, status, first_seen_at, last_seen_at
+                    ),
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(term) DO UPDATE SET
-                    frequency_count = COALESCE(frequency_count, 0) + 1,
-                    last_seen_at = excluded.last_seen_at,
-                    confidence = MAX(COALESCE(confidence, 0), excluded.confidence),
-                    normalized_term = COALESCE(NULLIF(normalized_term, ''), excluded.normalized_term),
-                    reading_hiragana = COALESCE(NULLIF(reading_hiragana, ''), excluded.reading_hiragana),
-                    base_form = COALESCE(NULLIF(base_form, ''), excluded.base_form),
-                    part_of_speech = COALESCE(NULLIF(part_of_speech, ''), excluded.part_of_speech),
-                    category = COALESCE(NULLIF(category, ''), excluded.category),
-                    meaning_zh = COALESCE(NULLIF(meaning_zh, ''), excluded.meaning_zh),
-                    nuance = COALESCE(NULLIF(nuance, ''), excluded.nuance),
-                    example_sentence = COALESCE(NULLIF(example_sentence, ''), excluded.example_sentence),
-                    source = COALESCE(NULLIF(source, ''), excluded.source),
-                    source_context = COALESCE(NULLIF(source_context, ''), excluded.source_context)
-                """,
-                (
-                    item["term"],
-                    item["normalized_term"],
-                    item["reading_hiragana"],
-                    item["base_form"],
-                    item["part_of_speech"],
-                    item["category"],
-                    item["meaning_zh"],
-                    item["nuance"],
-                    source_context,
-                    source,
-                    source_context,
-                    1,
-                    item["confidence"],
-                    "pending",
-                    now,
-                    now,
-                ),
-            )
-        conn.commit()
-    return len(candidates)
+                conn.commit()
+                action = "updated" if exists else "inserted"
+                result["success"] += 1
+                result["details"].append({"term": item["term"], "result": action})
+                log_slang(f"term={item['term']} result={action}")
+            except Exception:
+                conn.rollback()
+                result["failed"] += 1
+                result["details"].append({"term": item.get("term"), "result": "failed"})
+                log_slang_exception(f"term={item.get('term')} 寫入失敗")
+    log_slang(f"upsert 完成；success={result['success']}；failed={result['failed']}；skipped={result['skipped']}")
+    return result
 
 
 def enqueue_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
-    if not slang_terms:
-        return
-    thread_terms = json.loads(json.dumps(slang_terms, ensure_ascii=False))
+    total = len(slang_terms or [])
+    candidates, skipped = slang_candidates_for_write(slang_terms)
+    mode = slang_candidate_write_mode()
+    log_slang(
+        f"enqueue_slang_candidates 被呼叫；slang_terms_total={total}；"
+        f"should_add_to_candidates={len(candidates)}；skipped={skipped}；write_mode={mode}"
+    )
+    if not candidates:
+        return {"mode": mode, "queued": False, "success": 0, "failed": 0, "skipped": skipped}
+
+    if mode == "sync":
+        try:
+            log_slang("寫入模式是 sync，將在 API 回傳前執行 upsert。")
+            result = upsert_slang_candidates(candidates, source_context=source_context, source=source)
+            result["skipped"] = result.get("skipped", 0) + skipped
+            result["mode"] = "sync"
+            result["queued"] = False
+            return result
+        except Exception:
+            log_slang_exception("sync 寫入發生未預期錯誤")
+            return {"mode": "sync", "queued": False, "success": 0, "failed": len(candidates), "skipped": skipped}
+
+    thread_terms = json.loads(json.dumps(candidates, ensure_ascii=False))
     thread_context = str(source_context or "")
     thread_source = str(source or "grammar_analyzer")
 
     def worker():
         try:
             with app.app_context():
+                log_slang("寫入模式是 async，背景 Thread 開始 upsert。")
                 upsert_slang_candidates(thread_terms, source_context=thread_context, source=thread_source)
-        except Exception as e:
-            print(f"[slang-candidates] 寫入失敗：{e}")
+        except Exception:
+            log_slang_exception("async 背景 Thread 寫入失敗")
 
     threading.Thread(target=worker, name="slang-candidates-upsert", daemon=True).start()
+    return {"mode": "async", "queued": True, "success": 0, "failed": 0, "skipped": skipped}
 
 
 def query_slang_candidates(status="pending", limit=5):
@@ -884,11 +970,11 @@ def query_slang_candidates(status="pending", limit=5):
         limit = int(limit)
     except (TypeError, ValueError):
         limit = 5
-    limit = max(1, min(limit, 50))
+    limit = max(1, min(limit, 100))
     ensure_slang_candidates_store()
     columns = """
         id, term, normalized_term, reading_hiragana, category, meaning_zh, nuance,
-        frequency_count, confidence, example_sentence, status
+        frequency_count, confidence, example_sentence, status, first_seen_at, last_seen_at
     """
     if DATABASE_URL:
         with get_db_connection() as conn:
@@ -947,6 +1033,63 @@ def update_slang_candidate_status(candidate_id, action):
         )
         conn.commit()
         return cur.rowcount
+
+
+def slang_debug_recent_snapshot(limit=20):
+    ensure_slang_candidates_store()
+    try:
+        limit = int(limit or 20)
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 50))
+    empty_counts = {"total_count": 0, "pending_count": 0, "approved_count": 0, "rejected_count": 0}
+    columns = """
+        id, term, category, status, frequency_count, confidence,
+        first_seen_at, last_seen_at
+    """
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM slang_candidates")
+                total = cur.fetchone()[0]
+                cur.execute("SELECT status, COUNT(*) FROM slang_candidates GROUP BY status")
+                status_counts = {row[0] or "pending": row[1] for row in cur.fetchall()}
+                cur.execute(
+                    f"""
+                    SELECT {columns}
+                    FROM slang_candidates
+                    ORDER BY last_seen_at DESC NULLS LAST, id DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        keys = [item.strip() for item in columns.replace("\n", "").split(",")]
+        recent_items = [dict(zip(keys, row)) for row in rows]
+    else:
+        total = sqlite_one("SELECT COUNT(*) AS count FROM slang_candidates")["count"]
+        status_rows = sqlite_dicts("SELECT status, COUNT(*) AS count FROM slang_candidates GROUP BY status")
+        status_counts = {row["status"] or "pending": row["count"] for row in status_rows}
+        recent_items = sqlite_dicts(
+            f"""
+            SELECT {columns}
+            FROM slang_candidates
+            ORDER BY last_seen_at DESC, id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+    payload = dict(empty_counts)
+    payload.update(
+        {
+            "total_count": int(total or 0),
+            "pending_count": int(status_counts.get("pending", 0) or 0),
+            "approved_count": int(status_counts.get("approved", 0) or 0),
+            "rejected_count": int(status_counts.get("rejected", 0) or 0),
+            "recent_items": recent_items,
+        }
+    )
+    return payload
 
 
 def approved_slang_for_material(limit):
@@ -1255,13 +1398,15 @@ def call_gemini(prompt):
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"AI 服務請求失敗：{detail}") from e
     except urllib.error.URLError as e:
         raise RuntimeError(f"無法連接 AI 服務：{e.reason}") from e
+    except TimeoutError as e:
+        raise RuntimeError("AI 服務逾時。") from e
 
     if "error" in data:
         raise RuntimeError(data["error"].get("message", "AI 服務回傳錯誤。"))
@@ -2302,6 +2447,16 @@ Gemini 必須回傳的 JSON 結構：
 """.strip()
 
 
+def persist_analysis_slang_terms(payload, source_context, source):
+    slang_terms = payload.get("slang_terms", []) if isinstance(payload, dict) else []
+    candidates, _ = slang_candidates_for_write(slang_terms)
+    log_slang(
+        f"/api/analyze_grammar 完成；source={source}；"
+        f"analysis_json_slang_terms={len(slang_terms)}；should_add_to_candidates={len(candidates)}"
+    )
+    return enqueue_slang_candidates(slang_terms, source_context=source_context, source=source)
+
+
 def analyze_grammar_with_gemini(text):
     parsed, mecab_error = analyze_with_mecab(text)
     fallback_reading = parsed["reading_hiragana"] if parsed else answer_reading_hiragana(text)
@@ -2320,15 +2475,19 @@ def analyze_grammar_with_gemini(text):
         ai_payload = parse_gemini_json_safely(raw_response)
     except Exception as e:
         print(f"[grammar-analyzer] Gemini 解析失敗：{e}")
+        print(traceback.format_exc())
         if raw_response:
             print(f"[grammar-analyzer] Gemini 原始回傳：{raw_response}")
-        payload = grammar_ai_error_response()
+        payload = grammar_ai_error_response("Gemini 解析暫時失敗，已使用本地規則回傳部分結果。")
+        payload["hiragana_reading"] = fallback_reading
         payload["slang_terms"] = detect_known_slang_terms(text)
-        enqueue_slang_candidates(payload.get("slang_terms", []), source_context=text, source="grammar_analyzer_fallback")
-        return payload, 502
+        payload["original"] = text
+        payload["advanced_mecab"] = advanced_mecab
+        persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
+        return payload, 200
 
     payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
-    enqueue_slang_candidates(payload.get("slang_terms", []), source_context=text, source="grammar_analyzer")
+    persist_analysis_slang_terms(payload, text, "grammar_analyzer")
     return payload, 200
 
 
@@ -3156,9 +3315,9 @@ def api_slang_candidates():
     try:
         rows = query_slang_candidates(status=status, limit=limit)
     except Exception as e:
-        print(f"[slang-candidates] 讀取失敗：{e}")
+        log_slang_exception(f"讀取失敗：{e}")
         return jsonify({"error": "讀取新詞候選池失敗，請稍後再試。"}), 500
-    return jsonify({"items": rows})
+    return jsonify({"items": rows, "candidates": rows, "count": len(rows), "status": normalize_slang_status(status)})
 
 
 @app.post("/api/slang/triage")
@@ -3172,11 +3331,45 @@ def api_slang_triage():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
-        print(f"[slang-candidates] 審核失敗：{e}")
+        log_slang_exception(f"審核失敗：{e}")
         return jsonify({"error": "新詞審核失敗，請稍後再試。"}), 500
     if not updated:
         return jsonify({"error": "找不到指定的新詞候選。"}), 404
     return jsonify({"success": True, "status": action})
+
+
+@app.get("/api/slang/debug/recent")
+def api_slang_debug_recent():
+    if not debug_endpoints_enabled():
+        return jsonify({"error": "Debug endpoint 未啟用。"}), 404
+    try:
+        return jsonify(slang_debug_recent_snapshot())
+    except Exception as e:
+        log_slang_exception(f"debug recent 失敗：{e}")
+        return jsonify({"error": "讀取 debug 狀態失敗。"}), 500
+
+
+@app.post("/api/slang/debug/insert-test")
+def api_slang_debug_insert_test():
+    if not debug_endpoints_enabled():
+        return jsonify({"error": "Debug endpoint 未啟用。"}), 404
+    test_candidate = {
+        "term": "めちゃくちゃ",
+        "normalized_term": "めちゃくちゃ",
+        "reading_hiragana": "めちゃくちゃ",
+        "category": "slang",
+        "meaning_zh": "非常、超級",
+        "nuance": "常見口語強調用法",
+        "confidence": 0.99,
+        "should_add_to_candidates": True,
+    }
+    try:
+        result = upsert_slang_candidates([test_candidate], source_context="debug_insert", source="debug_insert")
+        snapshot = slang_debug_recent_snapshot(limit=10)
+        return jsonify({"success": result.get("failed", 0) == 0, "result": result, "debug": snapshot})
+    except Exception as e:
+        log_slang_exception(f"debug insert-test 失敗：{e}")
+        return jsonify({"success": False, "error": "Debug 寫入測試失敗。"}), 500
 
 
 @app.get("/api/quiz")
