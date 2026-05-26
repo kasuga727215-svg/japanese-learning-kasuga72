@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
+from services.grammar_debugger import debug_grammar
 
 
 app = Flask(__name__, template_folder=".")
@@ -382,6 +383,7 @@ def migrate_mistake_logs(conn):
         "last_reviewed_at": "ALTER TABLE mistake_logs ADD COLUMN last_reviewed_at TEXT",
         "mastered": "ALTER TABLE mistake_logs ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0",
         "error_category": "ALTER TABLE mistake_logs ADD COLUMN error_category TEXT",
+        "debug_report_json": "ALTER TABLE mistake_logs ADD COLUMN debug_report_json TEXT",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -993,6 +995,26 @@ def answer_display_value(correct_answer):
     return clean
 
 
+def make_debug_report_payload(question_type="", prompt="", user_answer="", correct_answer="", target_text="", target_reading="", target_form="", error_category="", extra=None):
+    return debug_grammar(
+        {
+            "question_type": question_type,
+            "prompt": prompt,
+            "user_answer": user_answer,
+            "correct_answer": correct_answer,
+            "target_text": target_text,
+            "target_reading": target_reading,
+            "target_form": target_form or question_type,
+            "error_category": error_category,
+            "extra": extra or {},
+        }
+    )
+
+
+def debug_report_to_json(report):
+    return json.dumps(report or {}, ensure_ascii=False)
+
+
 def normalize_error_category(value):
     return value if value in ERROR_CATEGORIES else "動詞變化錯"
 
@@ -1011,6 +1033,22 @@ def next_interval_after_success(current_interval):
 def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變化錯"):
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
     category = normalize_error_category(error_category)
+    target = sqlite_one("SELECT * FROM verbs WHERE id = ?", (verb_id,)) if int(verb_id or 0) > 0 else None
+    correct_answer = target.get(question_type, "") if target and question_type in target else ""
+    prompt = ""
+    if target:
+        prompt = f"請寫出「{target['dictionary_form']}（{target['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。"
+    report = make_debug_report_payload(
+        question_type=question_type,
+        prompt=prompt,
+        user_answer=wrong_answer,
+        correct_answer=correct_answer,
+        target_text=target.get("dictionary_form", "") if target else "",
+        target_reading=target.get("reading", "") if target else "",
+        target_form=question_type,
+        error_category=category,
+    )
+    report_json = debug_report_to_json(report)
     existing = sqlite_one(
         """
         SELECT id, mistake_count, user_wrong_answer
@@ -1034,10 +1072,11 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     review_interval = 1,
                     mastered = 0,
                     status = 'learning',
-                    error_category = ?
+                    error_category = ?,
+                    debug_report_json = ?
                 WHERE id = ?
                 """,
-                (" / ".join(answers), int(existing["mistake_count"]) + 1, now, iso_date_after(1), category, existing["id"]),
+                (" / ".join(answers), int(existing["mistake_count"]) + 1, now, iso_date_after(1), category, report_json, existing["id"]),
             )
         else:
             conn.execute(
@@ -1046,11 +1085,11 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                 (
                     verb_id, question_type, user_wrong_answer, mistake_count,
                     status, last_reviewed_at, next_review_date, review_interval,
-                    review_count, mastered, error_category
+                    review_count, mastered, error_category, debug_report_json
                 )
-                VALUES (?, ?, ?, 1, 'learning', ?, ?, 1, 0, 0, ?)
+                VALUES (?, ?, ?, 1, 'learning', ?, ?, 1, 0, 0, ?, ?)
                 """,
-                (verb_id, question_type, wrong_answer, now, iso_date_after(1), category),
+                (verb_id, question_type, wrong_answer, now, iso_date_after(1), category, report_json),
             )
         conn.commit()
     invalidate_dashboard_cache("mistake added")
@@ -1061,6 +1100,22 @@ def add_or_update_sns_mistake(example, user_translation, error_category, interva
     category = normalize_error_category(error_category)
     question_type = f"sns_translation:{example['id']}"
     wrong_answer = f"{example['japanese']}｜使用者翻譯：{user_translation}"
+    report = make_debug_report_payload(
+        question_type=question_type,
+        prompt=example["japanese"],
+        user_answer=user_translation,
+        correct_answer=example.get("zh_tw_translation", ""),
+        target_text=example["japanese"],
+        target_reading=example.get("reading_hiragana", ""),
+        target_form="sns_translation",
+        error_category=category,
+        extra={
+            "literal_translation_trap": example.get("literal_translation_trap", ""),
+            "natural_rewrite": example.get("natural_rewrite", ""),
+            "tone_category": example.get("tone_category", ""),
+        },
+    )
+    report_json = debug_report_to_json(report)
     existing = sqlite_one(
         """
         SELECT id, mistake_count, user_wrong_answer
@@ -1083,10 +1138,11 @@ def add_or_update_sns_mistake(example, user_translation, error_category, interva
                     review_interval = ?,
                     mastered = 0,
                     status = 'learning',
-                    error_category = ?
+                    error_category = ?,
+                    debug_report_json = ?
                 WHERE id = ?
                 """,
-                (" / ".join(answers[-5:]), now, iso_date_after(interval_days), interval_days, category, existing["id"]),
+                (" / ".join(answers[-5:]), now, iso_date_after(interval_days), interval_days, category, report_json, existing["id"]),
             )
         else:
             conn.execute(
@@ -1095,11 +1151,11 @@ def add_or_update_sns_mistake(example, user_translation, error_category, interva
                 (
                     verb_id, question_type, user_wrong_answer, mistake_count,
                     status, last_reviewed_at, next_review_date, review_interval,
-                    review_count, mastered, error_category
+                    review_count, mastered, error_category, debug_report_json
                 )
-                VALUES (0, ?, ?, 1, 'learning', ?, ?, ?, 0, 0, ?)
+                VALUES (0, ?, ?, 1, 'learning', ?, ?, ?, 0, 0, ?, ?)
                 """,
-                (question_type, wrong_answer, now, iso_date_after(interval_days), interval_days, category),
+                (question_type, wrong_answer, now, iso_date_after(interval_days), interval_days, category, report_json),
             )
         conn.commit()
     invalidate_dashboard_cache("sns mistake updated")
@@ -1427,8 +1483,19 @@ def api_verb_check():
         return jsonify({"error": "找不到動詞題目。"}), 404
     correct = verb[question_type]
     is_correct = smart_answer_equal(answer, correct)
+    debug_report = None
     if not is_correct:
         add_mistake(int(verb_id), question_type, answer)
+        debug_report = make_debug_report_payload(
+            question_type=question_type,
+            prompt=f"請寫出「{verb['dictionary_form']}（{verb['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
+            user_answer=answer,
+            correct_answer=correct,
+            target_text=verb["dictionary_form"],
+            target_reading=verb["reading"],
+            target_form=question_type,
+            error_category="動詞變化錯",
+        )
     return jsonify(
         {
             "correct": is_correct,
@@ -1436,6 +1503,7 @@ def api_verb_check():
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
             "mistake_added": not is_correct,
+            "debug_report": debug_report,
         }
     )
 
@@ -1466,7 +1534,7 @@ def query_mistakes(args=None, limit=None):
         m.id, m.verb_id, m.question_type, m.user_wrong_answer,
         m.mistake_count, m.status, m.last_reviewed_at,
         m.next_review_date, m.review_interval, m.review_count,
-        m.mastered, m.error_category,
+        m.mastered, m.error_category, m.debug_report_json,
         v.dictionary_form, v.reading, v.meaning, v.verb_group,
         v.te_form, v.ta_form, v.nai_form, v.renyou_form,
         v.shieki_form, v.ukemi_form, v.ba_form
@@ -1486,7 +1554,7 @@ def query_mistakes(args=None, limit=None):
     )
     for row in rows:
         row["question_label"] = VERB_FORM_LABELS.get(row["question_type"], row["question_type"])
-        row["correct_answer"] = answer_display_value(row[row["question_type"]])
+        row["correct_answer"] = answer_display_value(row[row["question_type"]]) if row["question_type"] in QUESTION_TYPES else ""
         row["verb_group_label"] = group_label(row["verb_group"])
     return rows
 
@@ -1568,6 +1636,17 @@ def api_retry_mistake(mistake_id):
         return jsonify({"error": "找不到錯題紀錄。"}), 404
     correct = row[row["question_type"]]
     is_correct = smart_answer_equal(answer, correct)
+    report = make_debug_report_payload(
+        question_type=row["question_type"],
+        prompt=f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(row['question_type'], row['question_type'])}。",
+        user_answer=answer,
+        correct_answer=correct,
+        target_text=row["dictionary_form"],
+        target_reading=row["reading"],
+        target_form=row["question_type"],
+        error_category=error_category,
+    )
+    report_json = debug_report_to_json(report)
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         if is_correct:
@@ -1595,10 +1674,11 @@ def api_retry_mistake(mistake_id):
                     review_interval = 1,
                     mastered = 0,
                     status = 'learning',
-                    error_category = ?
+                    error_category = ?,
+                    debug_report_json = ?
                 WHERE id = ?
                 """,
-                (f"{row['user_wrong_answer']} / {answer}", now, iso_date_after(1), error_category, mistake_id),
+                (f"{row['user_wrong_answer']} / {answer}", now, iso_date_after(1), error_category, report_json, mistake_id),
             )
         conn.commit()
     return jsonify(
@@ -1608,8 +1688,46 @@ def api_retry_mistake(mistake_id):
             "rule": form_rule_explanation(row, row["question_type"]),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
+            "debug_report": None if is_correct else report,
         }
     )
+
+
+@app.get("/api/mistakes/<int:mistake_id>/debug")
+def api_mistake_debug(mistake_id):
+    row = sqlite_one(
+        """
+        SELECT m.*, v.dictionary_form, v.reading, v.meaning, v.verb_group,
+               v.te_form, v.ta_form, v.nai_form, v.renyou_form,
+               v.shieki_form, v.ukemi_form, v.ba_form
+        FROM mistake_logs m
+        LEFT JOIN verbs v ON v.id = m.verb_id
+        WHERE m.id = ?
+        """,
+        (mistake_id,),
+    )
+    if not row:
+        return jsonify({"error": "找不到錯題紀錄。"}), 404
+    if row.get("debug_report_json"):
+        try:
+            return jsonify(json.loads(row["debug_report_json"]))
+        except json.JSONDecodeError:
+            pass
+    correct = row[row["question_type"]] if row.get("question_type") in QUESTION_TYPES else ""
+    report = make_debug_report_payload(
+        question_type=row.get("question_type", ""),
+        prompt=f"請寫出「{row.get('dictionary_form') or row.get('question_type')}」的{VERB_FORM_LABELS.get(row.get('question_type'), row.get('question_type'))}。",
+        user_answer=row.get("user_wrong_answer", ""),
+        correct_answer=correct,
+        target_text=row.get("dictionary_form", ""),
+        target_reading=row.get("reading", ""),
+        target_form=row.get("question_type", ""),
+        error_category=row.get("error_category", ""),
+    )
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.execute("UPDATE mistake_logs SET debug_report_json = ? WHERE id = ?", (debug_report_to_json(report), mistake_id))
+        conn.commit()
+    return jsonify(report)
 
 
 @app.post("/api/mistakes/generate-similar")
@@ -1673,6 +1791,23 @@ def api_generate_similar_mistakes():
         return jsonify({"message": "已生成 SNS 類似題。", "items": items})
 
     return jsonify({"message": "此題暫無法自動生成類似題", "items": []})
+
+
+@app.post("/api/debug/grammar")
+def api_debug_grammar():
+    data = request.get_json(silent=True) or {}
+    report = make_debug_report_payload(
+        question_type=str(data.get("question_type", "")),
+        prompt=str(data.get("prompt", "")),
+        user_answer=str(data.get("user_answer", "")),
+        correct_answer=str(data.get("correct_answer", "")),
+        target_text=str(data.get("target_text", "")),
+        target_reading=str(data.get("target_reading", "")),
+        target_form=str(data.get("target_form", "")),
+        error_category=str(data.get("error_category", "")),
+        extra=data.get("extra") if isinstance(data.get("extra"), dict) else {},
+    )
+    return jsonify(report)
 
 
 @app.post("/api/analyze_japanese")
@@ -1760,20 +1895,43 @@ def api_sns_self_evaluate():
         return jsonify({"error": "找不到 SNS 例句。"}), 404
 
     error_category = ""
+    report = None
     message = "已記錄本次自我評估。"
     if self_evaluation == "mastered":
         message = "已記錄為完全掌握，不加入錯題。"
     elif self_evaluation == "nuance_off":
         error_category = "口語語感不自然"
         add_or_update_sns_mistake(example, user_translation, error_category, 3)
+        report = make_debug_report_payload(
+            question_type=f"sns_translation:{example['id']}",
+            prompt=example["japanese"],
+            user_answer=user_translation,
+            correct_answer=example.get("zh_tw_translation", ""),
+            target_text=example["japanese"],
+            target_reading=example.get("reading_hiragana", ""),
+            target_form="sns_translation",
+            error_category=error_category,
+            extra={"literal_translation_trap": example.get("literal_translation_trap", ""), "natural_rewrite": example.get("natural_rewrite", "")},
+        )
         message = "已加入錯題，3 天後安排複習。"
     elif self_evaluation == "literal_translation":
         error_category = "中文直翻造成不自然"
         add_or_update_sns_mistake(example, user_translation, error_category, 1)
+        report = make_debug_report_payload(
+            question_type=f"sns_translation:{example['id']}",
+            prompt=example["japanese"],
+            user_answer=user_translation,
+            correct_answer=example.get("zh_tw_translation", ""),
+            target_text=example["japanese"],
+            target_reading=example.get("reading_hiragana", ""),
+            target_form="sns_translation",
+            error_category=error_category,
+            extra={"literal_translation_trap": example.get("literal_translation_trap", ""), "natural_rewrite": example.get("natural_rewrite", "")},
+        )
         message = "已加入錯題，明天安排複習。"
 
     log_sns_practice(example, user_translation, self_evaluation, error_category)
-    return jsonify({"success": True, "message": message})
+    return jsonify({"success": True, "message": message, "debug_report": report})
 
 
 @app.get("/api/dashboard")

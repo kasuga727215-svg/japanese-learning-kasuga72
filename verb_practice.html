@@ -22,6 +22,12 @@
     .muted { color:#aeb4c8; }
     .error { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
     .ok { color:var(--primary); border-left:4px solid var(--primary); padding-left:10px; }
+    .debug-card { background:#030406; color:#e8fff9; border:1px solid #232636; border-left:4px solid var(--primary); border-radius:8px; padding:14px; font-family:Consolas, "Courier New", monospace; white-space:normal; overflow-wrap:anywhere; word-wrap:break-word; }
+    .debug-card.error { border-left-color:var(--secondary); }
+    .debug-card.warning { border-left-color:#ffb000; }
+    .debug-label { color:var(--primary); font-weight:800; }
+    .debug-card.warning .debug-label { color:#ffb000; }
+    .debug-card.error .debug-label { color:var(--secondary); }
     details { background:rgba(255,255,255,.06); border-radius:6px; padding:10px; }
     summary { color:var(--primary); font-weight:700; cursor:pointer; }
     @media (min-width:720px){ .row.two { grid-template-columns:1fr 1fr; } }
@@ -61,6 +67,19 @@ let currentQuestion = null;
 const card = document.getElementById("questionCard");
 
 function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
+function renderDebug(report){
+  if (!report) return "";
+  const list = items => (items || []).map(item => `<div> - ${esc(item)}</div>`).join("");
+  return `<div class="debug-card ${esc(report.severity)}">
+    <div><span class="debug-label">[ ${esc(report.error_code)} | ${esc(report.severity)} ]</span></div>
+    <div><span class="debug-label">[ Diagnosis ]</span> ${esc(report.diagnosis)}</div>
+    <div><span class="debug-label">[ Rule ]</span> ${esc(report.rule)}</div>
+    <div><span class="debug-label">[ Expected ]</span> ${esc(report.expected)}</div>
+    <div><span class="debug-label">[ Actual ]</span> ${esc(report.actual)}</div>
+    <div><span class="debug-label">[ Quick Fix ]</span>${list(report.quick_fix)}</div>
+    <div><span class="debug-label">[ Hint ]</span> ${esc(report.hint_zh_tw)}</div>
+  </div>`;
+}
 async function api(url, options={}) {
   const res = await fetch(url, {headers: {"Content-Type":"application/json"}, ...options});
   const data = await res.json();
@@ -104,7 +123,8 @@ async function submitAnswer(){
     result.innerHTML = data.correct
       ? `<p class="ok">答對了。</p>`
       : `<p class="error">答錯了。正確答案：<strong>${esc(data.correct_answer)}</strong></p>
-         <details open><summary>展開解析</summary><p>${esc(data.rule)}</p><p>已自動加入錯題。</p></details>`;
+         <details open><summary>展開解析</summary><p>${esc(data.rule)}</p><p>已自動加入錯題。</p></details>
+         ${renderDebug(data.debug_report)}`;
   } catch (error) {
     result.innerHTML = `<p class="error">${esc(error.message)}</p>`;
   }
