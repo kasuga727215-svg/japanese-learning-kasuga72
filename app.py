@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import sqlite3
+import unicodedata
 from collections import Counter
 import urllib.error
 import urllib.parse
@@ -60,6 +61,14 @@ ERROR_CATEGORIES = [
 ]
 REVIEW_INTERVAL_STEPS = [3, 7, 14, 30]
 ANSWER_READING_FALLBACKS = {
+    "冷える": "ひえる",
+    "冷えた": "ひえた",
+    "冷えだ": "ひえだ",
+    "乗り換える": "のりかえる",
+    "乗り換えさせる": "のりかえさせる",
+    "励ます": "はげます",
+    "励まれる": "はげまれる",
+    "励まされる": "はげまされる",
     "断れば": "ことわれば",
     "断る": "ことわる",
     "断り": "ことわり",
@@ -76,6 +85,8 @@ ANSWER_READING_FALLBACKS = {
     "降って": "ふって",
     "降った": "ふった",
     "降らない": "ふらない",
+    "降りる": "おりる",
+    "降りれば": "おりれば",
 }
 
 SEED_VERBS = [
@@ -931,19 +942,35 @@ def form_rule_explanation(verb, question_type):
 
 
 def clean_answer_value(value):
-    text = str(value or "").strip()
-    text = re.sub(r"[（(][ぁ-ゖー\s\u3000]+[）)]", "", text)
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    text = re.sub(r"[（(][^）)]*[）)]", "", text)
     text = re.sub(r"[\s\u3000\u200b\u200c\u200d\ufeff]+", "", text)
     return text
 
 
 def parenthetical_reading(value):
-    match = re.search(r"[（(]([ぁ-ゖー\s\u3000]+)[）)]", str(value or ""))
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    match = re.search(r"[（(]([ぁ-ゖーァ-ヶー\s\u3000]+)[）)]", normalized)
     return clean_answer_value(match.group(1)) if match else ""
 
 
 def contains_kanji(text):
     return bool(re.search(r"[\u4e00-\u9fff]", text or ""))
+
+
+def is_kana_reading(value):
+    text = clean_answer_value(value)
+    return bool(text) and re.fullmatch(r"[ぁ-ゖァ-ヶー]+", text) is not None
+
+
+def extract_mecab_reading(surface, features):
+    for index in (9, 11, 6, 7):
+        if len(features) > index and is_kana_reading(features[index]):
+            return kana_to_hiragana(features[index])
+    for value in features:
+        if is_kana_reading(value):
+            return kana_to_hiragana(value)
+    return kana_to_hiragana(surface)
 
 
 def answer_reading_hiragana(value):
@@ -969,7 +996,7 @@ def answer_reading_hiragana(value):
                 continue
             surface, _, feature_text = line.partition("\t")
             features = feature_text.split(",") if feature_text else []
-            readings.append(pick_reading(surface, features))
+            readings.append(extract_mecab_reading(surface, features))
         return clean_answer_value("".join(readings))
     except Exception:
         return kana_to_hiragana(text)
@@ -987,8 +1014,13 @@ def smart_answer_equal(user_input, correct_answer):
     return bool(user_reading and correct_reading and user_reading == correct_reading)
 
 
-def answer_display_value(correct_answer):
+def answer_display_value(correct_answer, preferred_answer=None):
     clean = clean_answer_value(correct_answer)
+    preferred = clean_answer_value(preferred_answer)
+    if preferred and contains_kanji(preferred) and smart_answer_equal(preferred, clean):
+        preferred_reading = answer_reading_hiragana(preferred)
+        if preferred_reading and preferred_reading != preferred:
+            return f"{preferred}（{preferred_reading}）"
     reading = answer_reading_hiragana(clean)
     if contains_kanji(clean) and reading and reading != clean:
         return f"{clean}（{reading}）"
@@ -1218,11 +1250,7 @@ def token_meaning_hint(surface, pos):
 
 
 def pick_reading(surface, features):
-    candidates = []
-    for value in features:
-        if value and value != "*" and re.search(r"[\u30a1-\u30f6]", value):
-            candidates.append(value)
-    return kana_to_hiragana(candidates[-1] if candidates else surface)
+    return extract_mecab_reading(surface, features)
 
 
 def analyze_with_mecab(text):
@@ -1499,7 +1527,7 @@ def api_verb_check():
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": answer_display_value(correct),
+            "correct_answer": answer_display_value(correct, answer if is_correct else None),
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
             "mistake_added": not is_correct,
@@ -1684,7 +1712,7 @@ def api_retry_mistake(mistake_id):
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": answer_display_value(correct),
+            "correct_answer": answer_display_value(correct, answer if is_correct else None),
             "rule": form_rule_explanation(row, row["question_type"]),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
@@ -2218,7 +2246,7 @@ def api_quiz_submit():
         results.append(
             {
                 "correct": is_correct,
-                "correct_answer": question.get("displayAns") or answer_display_value(correct_answer),
+                "correct_answer": question.get("displayAns") or answer_display_value(correct_answer, user_answer if is_correct else None),
             }
         )
     ensure_settings_store()
