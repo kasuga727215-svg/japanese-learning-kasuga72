@@ -1381,6 +1381,22 @@ def choose_gemini_model():
     return usable[0] if usable else "gemini-3.1-flash-lite"
 
 
+def compact_gemini_error_detail(raw_detail):
+    raw_detail = str(raw_detail or "").strip()
+    try:
+        parsed = json.loads(raw_detail)
+    except json.JSONDecodeError:
+        return {"raw": re.sub(r"\s+", " ", raw_detail)[:800]}
+    error = parsed.get("error") if isinstance(parsed, dict) else {}
+    if not isinstance(error, dict):
+        return {"raw": re.sub(r"\s+", " ", raw_detail)[:800]}
+    return {
+        "code": error.get("code"),
+        "status": error.get("status"),
+        "message": str(error.get("message", ""))[:800],
+    }
+
+
 def call_gemini(prompt):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
@@ -1402,14 +1418,18 @@ def call_gemini(prompt):
             data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"AI 服務請求失敗：{detail}") from e
+        compact_detail = json.dumps(compact_gemini_error_detail(detail), ensure_ascii=False)
+        raise RuntimeError(
+            f"AI 服務請求失敗；model={model_name}；http_status={e.code}；detail={compact_detail}"
+        ) from e
     except urllib.error.URLError as e:
-        raise RuntimeError(f"無法連接 AI 服務：{e.reason}") from e
+        raise RuntimeError(f"無法連接 AI 服務；model={model_name}；reason={e.reason}") from e
     except TimeoutError as e:
-        raise RuntimeError("AI 服務逾時。") from e
+        raise RuntimeError(f"AI 服務逾時；model={model_name}；timeout={GEMINI_TIMEOUT_SECONDS}s") from e
 
     if "error" in data:
-        raise RuntimeError(data["error"].get("message", "AI 服務回傳錯誤。"))
+        compact_detail = json.dumps(compact_gemini_error_detail(json.dumps(data, ensure_ascii=False)), ensure_ascii=False)
+        raise RuntimeError(f"AI 服務回傳錯誤；model={model_name}；detail={compact_detail}")
 
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"]
