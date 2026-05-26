@@ -71,6 +71,104 @@ SLANG_CATEGORIES = {
     "unknown",
 }
 SLANG_MATERIAL_CATEGORIES = {"slang", "internet_slang", "otaku_culture"}
+KNOWN_SLANG_RULES = [
+    {
+        "pattern": r"めちゃくちゃ",
+        "term": "めちゃくちゃ",
+        "normalized_term": "めちゃくちゃ",
+        "reading_hiragana": "めちゃくちゃ",
+        "base_form": "",
+        "part_of_speech": "副詞",
+        "category": "slang",
+        "meaning_zh": "非常；超級；程度很強",
+        "nuance": "常見口語強調詞，可表示程度很高，也可表示混亂或亂七八糟，需依語境判斷。",
+        "confidence": 0.93,
+    },
+    {
+        "pattern": r"めっちゃ",
+        "term": "めっちゃ",
+        "normalized_term": "めちゃくちゃ",
+        "reading_hiragana": "めっちゃ",
+        "base_form": "",
+        "part_of_speech": "副詞",
+        "category": "slang",
+        "meaning_zh": "非常；超級",
+        "nuance": "めちゃくちゃ 的口語變體，常用於日常對話與 SNS。",
+        "confidence": 0.93,
+    },
+    {
+        "pattern": r"エモい",
+        "term": "エモい",
+        "normalized_term": "エモい",
+        "reading_hiragana": "えもい",
+        "base_form": "エモい",
+        "part_of_speech": "形容詞",
+        "category": "internet_slang",
+        "meaning_zh": "很有情緒感染力；很有氛圍",
+        "nuance": "用於形容照片、音樂、場景等引發懷舊、感動或難以言說的情緒。",
+        "confidence": 0.95,
+    },
+    {
+        "pattern": r"バズ(?:る|り|った|って|りそう|りたい|らない)",
+        "term": "バズる",
+        "normalized_term": "バズる",
+        "reading_hiragana": "ばずる",
+        "base_form": "バズる",
+        "part_of_speech": "動詞",
+        "category": "internet_slang",
+        "meaning_zh": "在網路上爆紅；大量擴散",
+        "nuance": "常用於社群貼文、影片或話題快速被大量轉發與討論的情境。",
+        "confidence": 0.95,
+    },
+    {
+        "pattern": r"てぇてぇ",
+        "term": "てぇてぇ",
+        "normalized_term": "尊い",
+        "reading_hiragana": "てぇてぇ",
+        "base_form": "",
+        "part_of_speech": "形容詞",
+        "category": "otaku_culture",
+        "meaning_zh": "太尊了；太美好了",
+        "nuance": "推し活與宅文化常用語，用來表達被角色、偶像或關係性強烈打動。",
+        "confidence": 0.94,
+    },
+    {
+        "pattern": r"限界オタク",
+        "term": "限界オタク",
+        "normalized_term": "限界オタク",
+        "reading_hiragana": "げんかいおたく",
+        "base_form": "",
+        "part_of_speech": "名詞",
+        "category": "otaku_culture",
+        "meaning_zh": "情緒到極限的粉絲；失控粉絲狀態",
+        "nuance": "帶自嘲語氣，表示因推、角色或作品太好而情緒激動到接近失控。",
+        "confidence": 0.95,
+    },
+    {
+        "pattern": r"さくたん",
+        "term": "さくたん",
+        "normalized_term": "さくたん",
+        "reading_hiragana": "さくたん",
+        "base_form": "",
+        "part_of_speech": "名詞",
+        "category": "named_entity",
+        "meaning_zh": "暱稱或特殊名詞",
+        "nuance": "可能是人物暱稱或圈內稱呼，需人工確認，不可自動進入每日教材。",
+        "confidence": 0.88,
+    },
+    {
+        "pattern": r"ねんねちゃん",
+        "term": "ねんねちゃん",
+        "normalized_term": "ねんねちゃん",
+        "reading_hiragana": "ねんねちゃん",
+        "base_form": "",
+        "part_of_speech": "名詞",
+        "category": "named_entity",
+        "meaning_zh": "暱稱或特殊名詞",
+        "nuance": "可能是人物暱稱、角色稱呼或圈內用語，需人工確認，不可自動進入每日教材。",
+        "confidence": 0.86,
+    },
+]
 ANSWER_READING_FALLBACKS = {
     "冷える": "ひえる",
     "冷えた": "ひえた",
@@ -314,7 +412,7 @@ def normalize_settings(raw):
 
 def ensure_settings_store():
     prepare_sqlite_path()
-    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS settings (
@@ -530,7 +628,7 @@ def migrate_quiz_records(conn):
 
 
 def seed_verbs_if_empty():
-    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
         count = conn.execute("SELECT COUNT(*) FROM verbs").fetchone()[0]
         if count:
             return
@@ -626,6 +724,37 @@ def normalize_slang_candidate(raw):
     }
 
 
+def detect_known_slang_terms(text):
+    found = []
+    seen = set()
+    for rule in KNOWN_SLANG_RULES:
+        if not re.search(rule["pattern"], text or ""):
+            continue
+        key = rule["term"]
+        if key in seen:
+            continue
+        seen.add(key)
+        item = {k: v for k, v in rule.items() if k != "pattern"}
+        item["should_add_to_candidates"] = True
+        found.append(item)
+    return found
+
+
+def merge_slang_terms(ai_terms, supplemental_terms):
+    merged = []
+    seen = set()
+    for item in list(ai_terms or []) + list(supplemental_terms or []):
+        normalized = normalize_slang_candidate(item)
+        if not normalized:
+            continue
+        key = normalized["term"]
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(normalized)
+    return merged
+
+
 def upsert_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
     candidates = [normalize_slang_candidate(item) for item in (slang_terms or [])]
     candidates = [item for item in candidates if item and item["should_add_to_candidates"]]
@@ -684,7 +813,7 @@ def upsert_slang_candidates(slang_terms, source_context="", source="grammar_anal
             conn.commit()
         return len(candidates)
 
-    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
         for item in candidates:
             conn.execute(
                 """
@@ -735,14 +864,18 @@ def upsert_slang_candidates(slang_terms, source_context="", source="grammar_anal
 def enqueue_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
     if not slang_terms:
         return
+    thread_terms = json.loads(json.dumps(slang_terms, ensure_ascii=False))
+    thread_context = str(source_context or "")
+    thread_source = str(source or "grammar_analyzer")
 
     def worker():
         try:
-            upsert_slang_candidates(slang_terms, source_context=source_context, source=source)
+            with app.app_context():
+                upsert_slang_candidates(thread_terms, source_context=thread_context, source=thread_source)
         except Exception as e:
             print(f"[slang-candidates] 寫入失敗：{e}")
 
-    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=worker, name="slang-candidates-upsert", daemon=True).start()
 
 
 def query_slang_candidates(status="pending", limit=5):
@@ -2023,11 +2156,7 @@ def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_me
         "tips": [normalize_string(tip) for tip in tips if normalize_string(tip)],
     }
     slang_terms = source.get("slang_terms") if isinstance(source.get("slang_terms"), list) else []
-    payload["slang_terms"] = [
-        item
-        for item in (normalize_slang_candidate(term) for term in slang_terms)
-        if item
-    ]
+    payload["slang_terms"] = merge_slang_terms(slang_terms, detect_known_slang_terms(original_text))
     payload["error_message"] = normalize_string(source.get("error_message"))
     payload["original"] = original_text
     payload["advanced_mecab"] = advanced_mecab or {}
@@ -2067,6 +2196,8 @@ def build_grammar_coach_prompt(text, hiragana_reading):
 18. 疑似錯字、一次性梗或雜訊歸類為 typo_or_noise 或 unknown。
 19. should_add_to_candidates 代表是否加入候選池，不代表可直接進入每日教材。
 20. named_entity、sensitive、typo_or_noise、unknown 即使 should_add_to_candidates 為 true，也只能進入候選池，不可直接進入正式每日教材。
+21. 特別注意捕捉：めちゃくちゃ、めっちゃ、エモい、バズる、バズりそう、てぇてぇ、限界オタク。
+22. 若出現 さくたん、ねんねちゃん 或類似暱稱，請放入 slang_terms，category 固定使用 named_entity。
 
 Gemini 必須回傳的 JSON 結構：
 {{
@@ -2191,7 +2322,10 @@ def analyze_grammar_with_gemini(text):
         print(f"[grammar-analyzer] Gemini 解析失敗：{e}")
         if raw_response:
             print(f"[grammar-analyzer] Gemini 原始回傳：{raw_response}")
-        return grammar_ai_error_response(), 502
+        payload = grammar_ai_error_response()
+        payload["slang_terms"] = detect_known_slang_terms(text)
+        enqueue_slang_candidates(payload.get("slang_terms", []), source_context=text, source="grammar_analyzer_fallback")
+        return payload, 502
 
     payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
     enqueue_slang_candidates(payload.get("slang_terms", []), source_context=text, source="grammar_analyzer")
