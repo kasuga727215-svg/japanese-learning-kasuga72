@@ -19,6 +19,13 @@
     .muted { color:#aeb4c8; }
     .warn { color:var(--secondary); border-left:4px solid var(--secondary); padding-left:10px; }
     .chip { display:inline-block; padding:5px 10px; border:1px solid var(--border-color); border-radius:999px; margin:4px 6px 4px 0; }
+    button { min-height:42px; border-radius:6px; border:1px solid var(--primary); background:transparent; color:var(--primary); font-weight:700; cursor:pointer; padding:9px 12px; }
+    button:hover { box-shadow:0 0 14px rgba(0,255,204,.22); }
+    button.reject { border-color:var(--secondary); color:var(--secondary); }
+    button.reject:hover { box-shadow:0 0 14px rgba(255,0,255,.22); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .triage-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:12px; }
+    .candidate-card { border-color:rgba(0,255,204,.2); }
     @media (min-width:760px){ .grid.three { grid-template-columns:repeat(3,1fr); } .grid.two { grid-template-columns:1fr 1fr; } }
   </style>
 </head>
@@ -34,13 +41,27 @@
   </nav>
   <section id="status" class="card muted">讀取學習報告中...</section>
   <section id="report"></section>
+  <section id="slangTriage" class="card">
+    <h2>新詞動態候選池</h2>
+    <p class="muted">文法拆解時捕捉到的 SNS、流行語與特殊用語會先進入這裡，核准後才有機會少量進入每日教材。</p>
+    <div id="slangStatus" class="muted">讀取候選新詞中...</div>
+    <div id="slangList" class="grid two" style="margin-top:12px;"></div>
+  </section>
 </main>
 <script>
 const statusBox = document.getElementById("status");
 const report = document.getElementById("report");
+const slangStatus = document.getElementById("slangStatus");
+const slangList = document.getElementById("slangList");
 function esc(value){ return String(value ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;"); }
 async function api(url) {
   const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "請求失敗");
+  return data;
+}
+async function apiJson(url, body) {
+  const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "請求失敗");
   return data;
@@ -66,10 +87,74 @@ function render(data){
     </section>
   `;
 }
+function categoryLabel(category) {
+  const labels = {
+    slang: "現代口語",
+    internet_slang: "網路流行語",
+    otaku_culture: "推し活／宅文化",
+    named_entity: "特殊名詞",
+    sensitive: "敏感語境",
+    typo_or_noise: "疑似錯字或雜訊",
+    unknown: "待判斷"
+  };
+  return labels[category] || "待判斷";
+}
+function renderSlangCandidates(data) {
+  const items = Array.isArray(data.items) ? data.items : [];
+  if (!items.length) {
+    slangStatus.innerText = "目前沒有待審核的新詞 🎉";
+    slangList.innerHTML = "";
+    return;
+  }
+  slangStatus.innerText = `共有 ${items.length} 筆候選新詞待審核。`;
+  slangList.innerHTML = items.map(item => `
+    <article class="card candidate-card" data-slang-id="${esc(item.id)}">
+      <h3>${esc(item.term || "未命名詞彙")}</h3>
+      <p class="muted">${esc(item.reading_hiragana || "尚無讀音")}</p>
+      <p><span class="chip">${esc(categoryLabel(item.category))}</span><span class="chip">出現 ${esc(item.frequency_count || 0)} 次</span><span class="chip">信心 ${esc(item.confidence ?? "資料不足")}</span></p>
+      <p><strong>中文意思：</strong>${esc(item.meaning_zh || "尚無說明")}</p>
+      <p><strong>語感：</strong>${esc(item.nuance || "尚無語感說明")}</p>
+      <p><strong>來源例句：</strong>${esc(item.example_sentence || "尚無來源例句")}</p>
+      <div class="triage-actions">
+        <button data-action="approved" data-id="${esc(item.id)}">核准</button>
+        <button class="reject" data-action="rejected" data-id="${esc(item.id)}">拒絕</button>
+      </div>
+    </article>
+  `).join("");
+}
+async function loadSlangCandidates() {
+  try {
+    const data = await api("/api/slang/candidates?status=pending&limit=5");
+    renderSlangCandidates(data);
+  } catch(error) {
+    slangStatus.className = "warn";
+    slangStatus.innerText = error.message;
+  }
+}
+slangList.addEventListener("click", async event => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const id = button.dataset.id;
+  const action = button.dataset.action;
+  button.disabled = true;
+  try {
+    await apiJson("/api/slang/triage", {id, action});
+    const card = button.closest("[data-slang-id]");
+    if (card) card.remove();
+    if (!slangList.querySelector("[data-slang-id]")) {
+      slangStatus.innerText = "目前沒有待審核的新詞 🎉";
+    }
+  } catch(error) {
+    button.disabled = false;
+    slangStatus.className = "warn";
+    slangStatus.innerText = error.message;
+  }
+});
 api("/api/learning-report").then(render).catch(error => {
   statusBox.className = "card warn";
   statusBox.innerText = error.message;
 });
+loadSlangCandidates();
 </script>
 </body>
 </html>

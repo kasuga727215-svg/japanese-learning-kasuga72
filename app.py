@@ -6,6 +6,7 @@ import random
 import re
 import shutil
 import sqlite3
+import threading
 import unicodedata
 from collections import Counter
 import urllib.error
@@ -60,6 +61,16 @@ ERROR_CATEGORIES = [
     "其他",
 ]
 REVIEW_INTERVAL_STEPS = [3, 7, 14, 30]
+SLANG_CATEGORIES = {
+    "slang",
+    "internet_slang",
+    "otaku_culture",
+    "named_entity",
+    "sensitive",
+    "typo_or_noise",
+    "unknown",
+}
+SLANG_MATERIAL_CATEGORIES = {"slang", "internet_slang", "otaku_culture"}
 ANSWER_READING_FALLBACKS = {
     "冷える": "ひえる",
     "冷えた": "ひえた",
@@ -381,8 +392,79 @@ def ensure_settings_store():
         migrate_mistake_logs(conn)
         migrate_sns_practice_logs(conn)
         migrate_quiz_records(conn)
+        migrate_slang_candidates_sqlite(conn)
         conn.commit()
     seed_verbs_if_empty()
+
+
+def migrate_slang_candidates_sqlite(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS slang_candidates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            term TEXT NOT NULL UNIQUE,
+            normalized_term TEXT,
+            reading_hiragana TEXT,
+            base_form TEXT,
+            part_of_speech TEXT,
+            category TEXT,
+            meaning_zh TEXT,
+            nuance TEXT,
+            example_sentence TEXT,
+            source TEXT,
+            source_context TEXT,
+            frequency_count INTEGER DEFAULT 1,
+            confidence REAL,
+            status TEXT DEFAULT 'pending',
+            review_note TEXT,
+            first_seen_at TEXT,
+            last_seen_at TEXT,
+            reviewed_at TEXT,
+            used_in_material_count INTEGER DEFAULT 0,
+            last_used_at TEXT
+        )
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(slang_candidates)").fetchall()}
+    migrations = {
+        "normalized_term": "ALTER TABLE slang_candidates ADD COLUMN normalized_term TEXT",
+        "reading_hiragana": "ALTER TABLE slang_candidates ADD COLUMN reading_hiragana TEXT",
+        "base_form": "ALTER TABLE slang_candidates ADD COLUMN base_form TEXT",
+        "part_of_speech": "ALTER TABLE slang_candidates ADD COLUMN part_of_speech TEXT",
+        "category": "ALTER TABLE slang_candidates ADD COLUMN category TEXT",
+        "meaning_zh": "ALTER TABLE slang_candidates ADD COLUMN meaning_zh TEXT",
+        "nuance": "ALTER TABLE slang_candidates ADD COLUMN nuance TEXT",
+        "example_sentence": "ALTER TABLE slang_candidates ADD COLUMN example_sentence TEXT",
+        "source": "ALTER TABLE slang_candidates ADD COLUMN source TEXT",
+        "source_context": "ALTER TABLE slang_candidates ADD COLUMN source_context TEXT",
+        "frequency_count": "ALTER TABLE slang_candidates ADD COLUMN frequency_count INTEGER DEFAULT 1",
+        "confidence": "ALTER TABLE slang_candidates ADD COLUMN confidence REAL",
+        "status": "ALTER TABLE slang_candidates ADD COLUMN status TEXT DEFAULT 'pending'",
+        "review_note": "ALTER TABLE slang_candidates ADD COLUMN review_note TEXT",
+        "first_seen_at": "ALTER TABLE slang_candidates ADD COLUMN first_seen_at TEXT",
+        "last_seen_at": "ALTER TABLE slang_candidates ADD COLUMN last_seen_at TEXT",
+        "reviewed_at": "ALTER TABLE slang_candidates ADD COLUMN reviewed_at TEXT",
+        "used_in_material_count": "ALTER TABLE slang_candidates ADD COLUMN used_in_material_count INTEGER DEFAULT 0",
+        "last_used_at": "ALTER TABLE slang_candidates ADD COLUMN last_used_at TEXT",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+    now = taipei_iso_now()
+    conn.execute(
+        """
+        UPDATE slang_candidates
+        SET status = COALESCE(NULLIF(status, ''), 'pending'),
+            category = COALESCE(NULLIF(category, ''), 'unknown'),
+            frequency_count = COALESCE(frequency_count, 1),
+            first_seen_at = COALESCE(NULLIF(first_seen_at, ''), ?),
+            last_seen_at = COALESCE(NULLIF(last_seen_at, ''), ?),
+            used_in_material_count = COALESCE(used_in_material_count, 0)
+        """,
+        (now, now),
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON slang_candidates(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_category ON slang_candidates(category)")
 
 
 def migrate_mistake_logs(conn):
@@ -500,6 +582,313 @@ def find_sns_example(example_id):
     return None
 
 
+def normalize_slang_category(value):
+    category = str(value or "").strip()
+    return category if category in SLANG_CATEGORIES else "unknown"
+
+
+def normalize_slang_status(value):
+    status = str(value or "pending").strip()
+    return status if status in {"pending", "approved", "rejected"} else "pending"
+
+
+def clean_slang_text(value):
+    return unicodedata.normalize("NFKC", str(value or "")).strip()
+
+
+def coerce_confidence(value):
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        return 0.5
+    return max(0.0, min(confidence, 1.0))
+
+
+def normalize_slang_candidate(raw):
+    if not isinstance(raw, dict):
+        return None
+    term = clean_slang_text(raw.get("term"))
+    if not term:
+        return None
+    category = normalize_slang_category(raw.get("category"))
+    reading = enforce_hiragana_reading(raw.get("reading_hiragana"), term)
+    return {
+        "term": term,
+        "normalized_term": clean_slang_text(raw.get("normalized_term")) or term,
+        "reading_hiragana": reading,
+        "base_form": clean_slang_text(raw.get("base_form")),
+        "part_of_speech": clean_slang_text(raw.get("part_of_speech")),
+        "category": category,
+        "meaning_zh": clean_slang_text(raw.get("meaning_zh")),
+        "nuance": clean_slang_text(raw.get("nuance")),
+        "confidence": coerce_confidence(raw.get("confidence")),
+        "should_add_to_candidates": bool(raw.get("should_add_to_candidates")),
+    }
+
+
+def upsert_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
+    candidates = [normalize_slang_candidate(item) for item in (slang_terms or [])]
+    candidates = [item for item in candidates if item and item["should_add_to_candidates"]]
+    if not candidates:
+        return 0
+
+    ensure_slang_candidates_store()
+    now = taipei_iso_now()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for item in candidates:
+                    params = (
+                        item["term"],
+                        item["normalized_term"],
+                        item["reading_hiragana"],
+                        item["base_form"],
+                        item["part_of_speech"],
+                        item["category"],
+                        item["meaning_zh"],
+                        item["nuance"],
+                        source_context,
+                        source,
+                        source_context,
+                        1,
+                        item["confidence"],
+                        "pending",
+                        now,
+                        now,
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO slang_candidates (
+                            term, normalized_term, reading_hiragana, base_form, part_of_speech,
+                            category, meaning_zh, nuance, example_sentence, source, source_context,
+                            frequency_count, confidence, status, first_seen_at, last_seen_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (term) DO UPDATE SET
+                            frequency_count = COALESCE(slang_candidates.frequency_count, 0) + 1,
+                            last_seen_at = EXCLUDED.last_seen_at,
+                            confidence = GREATEST(COALESCE(slang_candidates.confidence, 0), EXCLUDED.confidence),
+                            normalized_term = COALESCE(NULLIF(slang_candidates.normalized_term, ''), EXCLUDED.normalized_term),
+                            reading_hiragana = COALESCE(NULLIF(slang_candidates.reading_hiragana, ''), EXCLUDED.reading_hiragana),
+                            base_form = COALESCE(NULLIF(slang_candidates.base_form, ''), EXCLUDED.base_form),
+                            part_of_speech = COALESCE(NULLIF(slang_candidates.part_of_speech, ''), EXCLUDED.part_of_speech),
+                            category = COALESCE(NULLIF(slang_candidates.category, ''), EXCLUDED.category),
+                            meaning_zh = COALESCE(NULLIF(slang_candidates.meaning_zh, ''), EXCLUDED.meaning_zh),
+                            nuance = COALESCE(NULLIF(slang_candidates.nuance, ''), EXCLUDED.nuance),
+                            example_sentence = COALESCE(NULLIF(slang_candidates.example_sentence, ''), EXCLUDED.example_sentence),
+                            source = COALESCE(NULLIF(slang_candidates.source, ''), EXCLUDED.source),
+                            source_context = COALESCE(NULLIF(slang_candidates.source_context, ''), EXCLUDED.source_context)
+                        """,
+                        params,
+                    )
+            conn.commit()
+        return len(candidates)
+
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        for item in candidates:
+            conn.execute(
+                """
+                INSERT INTO slang_candidates (
+                    term, normalized_term, reading_hiragana, base_form, part_of_speech,
+                    category, meaning_zh, nuance, example_sentence, source, source_context,
+                    frequency_count, confidence, status, first_seen_at, last_seen_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(term) DO UPDATE SET
+                    frequency_count = COALESCE(frequency_count, 0) + 1,
+                    last_seen_at = excluded.last_seen_at,
+                    confidence = MAX(COALESCE(confidence, 0), excluded.confidence),
+                    normalized_term = COALESCE(NULLIF(normalized_term, ''), excluded.normalized_term),
+                    reading_hiragana = COALESCE(NULLIF(reading_hiragana, ''), excluded.reading_hiragana),
+                    base_form = COALESCE(NULLIF(base_form, ''), excluded.base_form),
+                    part_of_speech = COALESCE(NULLIF(part_of_speech, ''), excluded.part_of_speech),
+                    category = COALESCE(NULLIF(category, ''), excluded.category),
+                    meaning_zh = COALESCE(NULLIF(meaning_zh, ''), excluded.meaning_zh),
+                    nuance = COALESCE(NULLIF(nuance, ''), excluded.nuance),
+                    example_sentence = COALESCE(NULLIF(example_sentence, ''), excluded.example_sentence),
+                    source = COALESCE(NULLIF(source, ''), excluded.source),
+                    source_context = COALESCE(NULLIF(source_context, ''), excluded.source_context)
+                """,
+                (
+                    item["term"],
+                    item["normalized_term"],
+                    item["reading_hiragana"],
+                    item["base_form"],
+                    item["part_of_speech"],
+                    item["category"],
+                    item["meaning_zh"],
+                    item["nuance"],
+                    source_context,
+                    source,
+                    source_context,
+                    1,
+                    item["confidence"],
+                    "pending",
+                    now,
+                    now,
+                ),
+            )
+        conn.commit()
+    return len(candidates)
+
+
+def enqueue_slang_candidates(slang_terms, source_context="", source="grammar_analyzer"):
+    if not slang_terms:
+        return
+
+    def worker():
+        try:
+            upsert_slang_candidates(slang_terms, source_context=source_context, source=source)
+        except Exception as e:
+            print(f"[slang-candidates] 寫入失敗：{e}")
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def query_slang_candidates(status="pending", limit=5):
+    status = normalize_slang_status(status)
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 5
+    limit = max(1, min(limit, 50))
+    ensure_slang_candidates_store()
+    columns = """
+        id, term, normalized_term, reading_hiragana, category, meaning_zh, nuance,
+        frequency_count, confidence, example_sentence, status
+    """
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT {columns}
+                    FROM slang_candidates
+                    WHERE status = %s
+                    ORDER BY frequency_count DESC, confidence DESC, last_seen_at DESC
+                    LIMIT %s
+                    """,
+                    (status, limit),
+                )
+                rows = cur.fetchall()
+        keys = [item.strip() for item in columns.replace("\n", "").split(",")]
+        return [dict(zip(keys, row)) for row in rows]
+
+    return sqlite_dicts(
+        f"""
+        SELECT {columns}
+        FROM slang_candidates
+        WHERE status = ?
+        ORDER BY frequency_count DESC, confidence DESC, last_seen_at DESC
+        LIMIT ?
+        """,
+        (status, limit),
+    )
+
+
+def update_slang_candidate_status(candidate_id, action):
+    action = normalize_slang_status(action)
+    if action not in {"approved", "rejected"}:
+        raise ValueError("審核動作不正確。")
+    try:
+        candidate_id = int(candidate_id)
+    except (TypeError, ValueError):
+        raise ValueError("候選詞 ID 不正確。")
+    now = taipei_iso_now()
+    ensure_slang_candidates_store()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE slang_candidates SET status = %s, reviewed_at = %s WHERE id = %s",
+                    (action, now, candidate_id),
+                )
+                updated = cur.rowcount
+            conn.commit()
+        return updated
+
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        cur = conn.execute(
+            "UPDATE slang_candidates SET status = ?, reviewed_at = ? WHERE id = ?",
+            (action, now, candidate_id),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def approved_slang_for_material(limit):
+    if limit <= 0:
+        return []
+    ensure_slang_candidates_store()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, term, reading_hiragana, meaning_zh, category
+                    FROM slang_candidates
+                    WHERE status = 'approved'
+                      AND category IN ('slang', 'internet_slang', 'otaku_culture')
+                    ORDER BY COALESCE(last_used_at, '') ASC, frequency_count DESC, confidence DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        keys = ["id", "term", "reading_hiragana", "meaning_zh", "category"]
+        return [dict(zip(keys, row)) for row in rows]
+
+    return sqlite_dicts(
+        """
+        SELECT id, term, reading_hiragana, meaning_zh, category
+        FROM slang_candidates
+        WHERE status = 'approved'
+          AND category IN ('slang', 'internet_slang', 'otaku_culture')
+        ORDER BY COALESCE(last_used_at, '') ASC, frequency_count DESC, confidence DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+
+def mark_slang_used_in_material(items):
+    ids = [int(item["id"]) for item in items if item.get("id")]
+    if not ids:
+        return
+    now = taipei_iso_now()
+    if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(ids))
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    UPDATE slang_candidates
+                    SET used_in_material_count = COALESCE(used_in_material_count, 0) + 1,
+                        last_used_at = %s,
+                        last_seen_at = %s
+                    WHERE id IN ({placeholders})
+                    """,
+                    (now, now, *ids),
+                )
+            conn.commit()
+        return
+
+    ensure_slang_candidates_store()
+    placeholders = ", ".join(["?"] * len(ids))
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.execute(
+            f"""
+            UPDATE slang_candidates
+            SET used_in_material_count = COALESCE(used_in_material_count, 0) + 1,
+                last_used_at = ?,
+                last_seen_at = ?
+            WHERE id IN ({placeholders})
+            """,
+            (now, now, *ids),
+        )
+        conn.commit()
+
+
 def load_settings():
     ensure_settings_store()
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
@@ -528,6 +917,87 @@ def get_db_connection():
     import psycopg
 
     return psycopg.connect(DATABASE_URL)
+
+
+def migrate_slang_candidates_postgres():
+    if not DATABASE_URL:
+        return
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS slang_candidates (
+                    id BIGSERIAL PRIMARY KEY,
+                    term TEXT NOT NULL UNIQUE,
+                    normalized_term TEXT,
+                    reading_hiragana TEXT,
+                    base_form TEXT,
+                    part_of_speech TEXT,
+                    category TEXT,
+                    meaning_zh TEXT,
+                    nuance TEXT,
+                    example_sentence TEXT,
+                    source TEXT,
+                    source_context TEXT,
+                    frequency_count INTEGER DEFAULT 1,
+                    confidence REAL,
+                    status TEXT DEFAULT 'pending',
+                    review_note TEXT,
+                    first_seen_at TEXT,
+                    last_seen_at TEXT,
+                    reviewed_at TEXT,
+                    used_in_material_count INTEGER DEFAULT 0,
+                    last_used_at TEXT
+                )
+                """
+            )
+            postgres_columns = {
+                "normalized_term": "TEXT",
+                "reading_hiragana": "TEXT",
+                "base_form": "TEXT",
+                "part_of_speech": "TEXT",
+                "category": "TEXT",
+                "meaning_zh": "TEXT",
+                "nuance": "TEXT",
+                "example_sentence": "TEXT",
+                "source": "TEXT",
+                "source_context": "TEXT",
+                "frequency_count": "INTEGER DEFAULT 1",
+                "confidence": "REAL",
+                "status": "TEXT DEFAULT 'pending'",
+                "review_note": "TEXT",
+                "first_seen_at": "TEXT",
+                "last_seen_at": "TEXT",
+                "reviewed_at": "TEXT",
+                "used_in_material_count": "INTEGER DEFAULT 0",
+                "last_used_at": "TEXT",
+            }
+            for column, col_type in postgres_columns.items():
+                cur.execute(f"ALTER TABLE slang_candidates ADD COLUMN IF NOT EXISTS {column} {col_type}")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_slang_candidates_term_unique ON slang_candidates(term)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON slang_candidates(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_category ON slang_candidates(category)")
+            now = taipei_iso_now()
+            cur.execute(
+                """
+                UPDATE slang_candidates
+                SET status = COALESCE(NULLIF(status, ''), 'pending'),
+                    category = COALESCE(NULLIF(category, ''), 'unknown'),
+                    frequency_count = COALESCE(frequency_count, 1),
+                    first_seen_at = COALESCE(NULLIF(first_seen_at, ''), %s),
+                    last_seen_at = COALESCE(NULLIF(last_seen_at, ''), %s),
+                    used_in_material_count = COALESCE(used_in_material_count, 0)
+                """,
+                (now, now),
+            )
+        conn.commit()
+
+
+def ensure_slang_candidates_store():
+    if DATABASE_URL:
+        migrate_slang_candidates_postgres()
+    else:
+        ensure_settings_store()
 
 
 def ensure_database():
@@ -563,6 +1033,7 @@ def ensure_database():
                     if col not in ("date",):
                         cur.execute(f"ALTER TABLE materials ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT ''")
             conn.commit()
+        migrate_slang_candidates_postgres()
         return
 
     if not os.path.exists(DATABASE_FILE):
@@ -764,6 +1235,51 @@ def sample_material(settings=None):
     }
 
 
+def merge_approved_slang_into_material(material, settings):
+    material = material if isinstance(material, dict) else {}
+    total_quota_base = int(settings.get("vocab_count", 0)) + int(settings.get("verb_count", 0))
+    slang_quota = int(total_quota_base * 0.1)
+    if slang_quota <= 0:
+        return material
+
+    approved = approved_slang_for_material(slang_quota)
+    if not approved:
+        return material
+
+    vocab_list = list(material.get("vocab") or [])
+    existing_terms = {str(item.get("word", "")) for item in vocab_list if isinstance(item, dict)}
+    selected = [item for item in approved if item.get("term") not in existing_terms]
+    if not selected:
+        return material
+
+    target_vocab_count = int(settings.get("vocab_count", len(vocab_list)) or len(vocab_list))
+    slang_vocab = [
+        {
+            "word": item.get("term", ""),
+            "reading": item.get("reading_hiragana", ""),
+            "meaning": item.get("meaning_zh", "") or "已審核的新詞",
+        }
+        for item in selected[:slang_quota]
+        if item.get("term")
+    ]
+    if not slang_vocab:
+        return material
+
+    available_slots = max(0, target_vocab_count - len(vocab_list))
+    if available_slots:
+        vocab_list.extend(slang_vocab[:available_slots])
+        remaining = slang_vocab[available_slots:]
+    else:
+        remaining = slang_vocab
+    if remaining and vocab_list:
+        replace_count = min(len(remaining), len(vocab_list), slang_quota)
+        vocab_list[-replace_count:] = remaining[:replace_count]
+
+    material["vocab"] = vocab_list[:target_vocab_count] if target_vocab_count else vocab_list
+    mark_slang_used_in_material(selected[: len(slang_vocab)])
+    return material
+
+
 def save_material_for_today(material, settings):
     ensure_database()
     date = today_string()
@@ -891,6 +1407,7 @@ def send_telegram_message(text):
 def generate_daily_material(use_sample=False, posted_settings=None, app_url=None):
     settings = save_settings_file(posted_settings) if posted_settings else load_settings()
     raw_material = sample_material(settings) if use_sample else parse_json_from_ai(call_gemini(build_prompt(settings)))
+    raw_material = merge_approved_slang_into_material(raw_material, settings)
     date = save_material_for_today(raw_material, settings)
     material = material_by_date(date)
 
@@ -1365,6 +1882,7 @@ def grammar_response_template(input_type="japanese"):
         "grammar_points": [],
         "natural_alternatives": [],
         "learning_focus": {"summary": "", "tips": []},
+        "slang_terms": [],
         "error_message": "",
     }
 
@@ -1504,6 +2022,12 @@ def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_me
         "summary": normalize_string(focus.get("summary")),
         "tips": [normalize_string(tip) for tip in tips if normalize_string(tip)],
     }
+    slang_terms = source.get("slang_terms") if isinstance(source.get("slang_terms"), list) else []
+    payload["slang_terms"] = [
+        item
+        for item in (normalize_slang_candidate(term) for term in slang_terms)
+        if item
+    ]
     payload["error_message"] = normalize_string(source.get("error_message"))
     payload["original"] = original_text
     payload["advanced_mecab"] = advanced_mecab or {}
@@ -1535,6 +2059,14 @@ def build_grammar_coach_prompt(text, hiragana_reading):
 10. 不可為了填滿欄位而硬塞不重要的文法點。
 11. 若句子很短，請解析真正有學習價值的語氣與用法。
 12. 若輸入不是日文，必須回傳指定的 not_japanese JSON。
+13. slang_terms 僅捕捉真正具有學習價值、需要審核的新詞、特殊名詞、SNS 用語、推し活用語、網路流行語或現代口語。
+14. 不要把普通助詞、助動詞、一般單字或無意義碎片放入 slang_terms。
+15. slang_terms.category 必須只能從 slang、internet_slang、otaku_culture、named_entity、sensitive、typo_or_noise、unknown 選擇，不可創造新分類。
+16. 人名、暱稱、團名、作品名一律歸類為 named_entity。
+17. 成人或敏感語境詞歸類為 sensitive。
+18. 疑似錯字、一次性梗或雜訊歸類為 typo_or_noise 或 unknown。
+19. should_add_to_candidates 代表是否加入候選池，不代表可直接進入每日教材。
+20. named_entity、sensitive、typo_or_noise、unknown 即使 should_add_to_candidates 為 true，也只能進入候選池，不可直接進入正式每日教材。
 
 Gemini 必須回傳的 JSON 結構：
 {{
@@ -1587,6 +2119,20 @@ Gemini 必須回傳的 JSON 結構：
       "學習提醒 2"
     ]
   }},
+  "slang_terms": [
+    {{
+      "term": "捕捉到的流行詞彙",
+      "normalized_term": "正規化後的詞條，例如 バズった 可歸為 バズる",
+      "reading_hiragana": "純平假名讀音，絕對禁用羅馬拼音",
+      "base_form": "原形，可空",
+      "part_of_speech": "詞性，可空",
+      "category": "slang / internet_slang / otaku_culture / named_entity / sensitive / typo_or_noise / unknown",
+      "meaning_zh": "繁體中文意思",
+      "nuance": "詳細語感、使用情境與使用陷阱說明",
+      "confidence": 0.95,
+      "should_add_to_candidates": true
+    }}
+  ],
   "error_message": ""
 }}
 
@@ -1613,6 +2159,7 @@ Gemini 必須回傳的 JSON 結構：
     "summary": "",
     "tips": []
   }},
+  "slang_terms": [],
   "error_message": "目前此功能僅支援日文句子解析，請輸入日文句子。"
 }}
 
@@ -1646,7 +2193,9 @@ def analyze_grammar_with_gemini(text):
             print(f"[grammar-analyzer] Gemini 原始回傳：{raw_response}")
         return grammar_ai_error_response(), 502
 
-    return normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab), 200
+    payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
+    enqueue_slang_candidates(payload.get("slang_terms", []), source_context=text, source="grammar_analyzer")
+    return payload, 200
 
 
 def handle_grammar_analyzer_api():
@@ -2464,6 +3013,36 @@ def api_learning_report():
             "data_health": health,
         }
     )
+
+
+@app.get("/api/slang/candidates")
+def api_slang_candidates():
+    status = request.args.get("status", "pending")
+    limit = request.args.get("limit", 5)
+    try:
+        rows = query_slang_candidates(status=status, limit=limit)
+    except Exception as e:
+        print(f"[slang-candidates] 讀取失敗：{e}")
+        return jsonify({"error": "讀取新詞候選池失敗，請稍後再試。"}), 500
+    return jsonify({"items": rows})
+
+
+@app.post("/api/slang/triage")
+def api_slang_triage():
+    data = request.get_json(silent=True) or {}
+    action = str(data.get("action", "")).strip()
+    if action not in {"approved", "rejected"}:
+        return jsonify({"error": "審核動作不正確，請選擇核准或拒絕。"}), 400
+    try:
+        updated = update_slang_candidate_status(data.get("id"), action)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        print(f"[slang-candidates] 審核失敗：{e}")
+        return jsonify({"error": "新詞審核失敗，請稍後再試。"}), 500
+    if not updated:
+        return jsonify({"error": "找不到指定的新詞候選。"}), 404
+    return jsonify({"success": True, "status": action})
 
 
 @app.get("/api/quiz")
