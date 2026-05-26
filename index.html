@@ -167,10 +167,13 @@
       </div>
       <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
         <button class="neon-btn" onclick="saveSettingsUI()" id="save-btn">保存設定</button>
-        <button class="neon-btn accent-btn" onclick="triggerNowUI(false)" id="trigger-btn">立即 AI 生成</button>
+        <button class="neon-btn accent-btn" onclick="triggerNowUI('local')" id="trigger-btn">立即生成本地教材</button>
         <button class="neon-btn" onclick="triggerNowUI(true)" id="sample-btn">生成範例資料</button>
         <button class="neon-btn" onclick="testTelegram()" id="tg-btn">測試 Telegram</button>
       </div>
+      <p class="mt-3 text-muted">
+        本功能會從本地詞庫、approved 新詞與錯題庫生成教材，不消耗 Gemini API 額度。
+      </p>
       <div id="save-msg" class="mt-3"></div>
     </div>
   </div>
@@ -288,15 +291,18 @@
     }
   }
 
-  async function triggerNowUI(useSample) {
+  async function triggerNowUI(mode = "local") {
+    const useSample = mode === true || mode === "sample";
+    const generationMode = useSample ? "local" : (mode || "local");
     const btn = useSample ? document.getElementById("sample-btn") : document.getElementById("trigger-btn");
     const msg = document.getElementById("save-msg");
     btn.disabled = true;
-    btn.innerText = useSample ? "生成範例中..." : "AI 生成中...";
+    btn.innerText = useSample ? "生成範例中..." : "本地教材生成中...";
     msg.className = "mt-3 text-muted";
-    msg.innerText = "正在生成教材，並發送 Telegram 通知...";
+    msg.innerText = "正在從本地題庫生成教材，並發送 Telegram 通知...";
     try {
-      const result = await api(`/api/generate${useSample ? "?sample=1" : ""}`, { method: "POST", body: JSON.stringify(currentSettings()) });
+      const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
+      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify({...currentSettings(), mode: generationMode}) });
       msg.className = "mt-3 success-text";
       msg.innerText = result.message;
       await loadMaterialByDate(result.date);
@@ -307,7 +313,7 @@
       msg.innerText = error.message;
     } finally {
       btn.disabled = false;
-      btn.innerText = useSample ? "生成範例資料" : "立即 AI 生成";
+      btn.innerText = useSample ? "生成範例資料" : "立即生成本地教材";
     }
   }
 

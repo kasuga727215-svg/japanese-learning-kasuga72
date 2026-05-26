@@ -50,7 +50,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
 GEMINI_MODEL_CANDIDATES = os.environ.get(
     "GEMINI_MODEL_CANDIDATES",
-    "gemini-3.1-pro,gemini-3-flash,gemini-1.5-pro,gemini-1.5-flash",
+    "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
 ).strip()
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
@@ -331,6 +331,12 @@ COLUMNS = [
     "grammar_title",
     "grammar_exp",
     "grammar_examples",
+    "material_json",
+    "generation_mode",
+    "ai_used",
+    "source_summary",
+    "created_at",
+    "updated_at",
 ]
 
 DEFAULT_SETTINGS = {
@@ -1421,6 +1427,8 @@ def classify_gemini_error(error):
     lower = text.lower()
     if "timeout" in lower or "timed out" in lower or "逾時" in text:
         return "timeout"
+    if "unavailable" in lower or "503" in lower or "high demand" in lower:
+        return "service_unavailable"
     if "not_found" in lower or "not found" in lower or "404" in lower:
         return "not_found"
     if "quota" in lower or "resource_exhausted" in lower or "429" in lower:
@@ -1655,12 +1663,472 @@ def merge_approved_slang_into_material(material, settings):
     return material
 
 
+def material_vocab_from_existing(settings, limit):
+    if limit <= 0:
+        return []
+    target = settings.get("target_level", "")
+    recent_cutoff = taipei_now().date() - timedelta(days=7)
+    df = read_database()
+    if df.empty:
+        return []
+    items = []
+    seen = set()
+    for _, row in df.sample(frac=1).iterrows():
+        word = str(row.get("vocab_word", "")).strip()
+        if not word or word in seen:
+            continue
+        row_date = parse_material_date(row.get("date", ""))
+        if row_date and row_date >= recent_cutoff:
+            continue
+        row_level = str(row.get("target_level", "")).strip()
+        if target and row_level and row_level != target:
+            continue
+        seen.add(word)
+        items.append(
+            {
+                "word": word,
+                "reading": str(row.get("vocab_reading", "")).strip(),
+                "meaning": str(row.get("vocab_meaning", "")).strip(),
+                "part_of_speech": "",
+                "jlpt_level": row_level,
+                "source": "materials",
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
+
+
+def material_vocab_from_approved_slang(limit):
+    if limit <= 0:
+        return []
+    selected = approved_slang_for_material(limit)
+    items = [
+        {
+            "word": item.get("term", ""),
+            "reading": item.get("reading_hiragana", ""),
+            "meaning": item.get("meaning_zh", "") or "已審核的新詞",
+            "part_of_speech": "SNS語彙",
+            "jlpt_level": item.get("category", ""),
+            "source": "slang_candidates",
+            "_slang_id": item.get("id"),
+        }
+        for item in selected
+        if item.get("term")
+    ]
+    mark_slang_used_in_material(selected[: len(items)])
+    return items
+
+
+def first_text(row, names):
+    for name in names:
+        value = row.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def parse_loose_date(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for parser in (
+        lambda raw: datetime.fromisoformat(raw.replace("Z", "+00:00")).date(),
+        lambda raw: datetime.strptime(raw, "%Y/%m/%d").date(),
+        lambda raw: datetime.strptime(raw, "%Y-%m-%d").date(),
+    ):
+        try:
+            return parser(text)
+        except ValueError:
+            continue
+    return None
+
+
+def fetch_vocabulary_pool_rows():
+    if DATABASE_URL:
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT * FROM vocabulary_pool LIMIT 500")
+                    columns = [desc[0] for desc in cur.description]
+                    return [dict(zip(columns, row)) for row in cur.fetchall()]
+        except Exception as e:
+            print(f"[material-generator] vocabulary_pool unavailable; db=postgres; error={e}")
+            return []
+    try:
+        ensure_settings_store()
+        with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM vocabulary_pool LIMIT 500").fetchall()
+            return [dict(row) for row in rows]
+    except sqlite3.Error as e:
+        print(f"[material-generator] vocabulary_pool unavailable; db=sqlite; error={e}")
+        return []
+
+
+def mark_vocabulary_pool_used(items):
+    ids = [item.get("_pool_id") for item in items if item.get("_pool_id")]
+    if not ids:
+        return
+    has_last_seen = any(item.get("_pool_has_last_seen") for item in items)
+    has_used_count = any(item.get("_pool_has_used_count") for item in items)
+    updates = []
+    params = []
+    if has_last_seen:
+        updates.append("last_seen_at = %s" if DATABASE_URL else "last_seen_at = ?")
+        params.append(taipei_iso_now())
+    if has_used_count:
+        updates.append("used_in_material_count = COALESCE(used_in_material_count, 0) + 1")
+    if not updates:
+        return
+    placeholder = "%s" if DATABASE_URL else "?"
+    id_placeholders = ", ".join([placeholder] * len(ids))
+    sql = f"UPDATE vocabulary_pool SET {', '.join(updates)} WHERE id IN ({id_placeholders})"
+    try:
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params + ids)
+                conn.commit()
+            return
+        with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+            conn.execute(sql, params + ids)
+            conn.commit()
+    except Exception as e:
+        print(f"[material-generator] vocabulary_pool mark used failed; error={e}")
+
+
+def material_vocab_from_vocabulary_pool(settings, limit):
+    if limit <= 0:
+        return []
+    rows = fetch_vocabulary_pool_rows()
+    if not rows:
+        return []
+
+    target = settings.get("target_level", "")
+    recent_cutoff = taipei_now().date() - timedelta(days=7)
+    target_items = []
+    backup_items = []
+    seen = set()
+    for row in rows:
+        is_active = first_text(row, ["is_active", "active", "enabled"])
+        if is_active and is_active.lower() in {"0", "false", "no", "off"}:
+            continue
+        word = first_text(row, ["term", "surface", "word", "vocab_word", "dictionary_form"])
+        if not word or word in seen:
+            continue
+        last_seen = parse_loose_date(first_text(row, ["last_seen_at", "last_used_at"]))
+        if last_seen and last_seen >= recent_cutoff:
+            continue
+        seen.add(word)
+        row_level = first_text(row, ["jlpt_level", "target_level", "level"])
+        priority = first_text(row, ["priority", "weight"])
+        try:
+            priority_value = int(float(priority)) if priority else 0
+        except ValueError:
+            priority_value = 0
+        next_review = parse_loose_date(first_text(row, ["next_review_at", "next_review_date", "review_at"]))
+        due_rank = 0 if not next_review or next_review <= taipei_now().date() else 1
+        item = {
+            "word": word,
+            "reading": first_text(row, ["reading_hiragana", "reading", "kana", "vocab_reading"]),
+            "meaning": first_text(row, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"]),
+            "part_of_speech": first_text(row, ["part_of_speech", "pos"]),
+            "jlpt_level": row_level,
+            "source": "vocabulary_pool",
+            "_pool_id": row.get("id"),
+            "_pool_has_last_seen": "last_seen_at" in row,
+            "_pool_has_used_count": "used_in_material_count" in row,
+            "_sort": (due_rank, -priority_value, random.random()),
+        }
+        if target and row_level and row_level != target:
+            backup_items.append(item)
+        else:
+            target_items.append(item)
+
+    ordered = sorted(target_items, key=lambda item: item["_sort"]) + sorted(backup_items, key=lambda item: item["_sort"])
+    selected = ordered[:limit]
+    mark_vocabulary_pool_used(selected)
+    for item in selected:
+        for key in list(item):
+            if key.startswith("_"):
+                item.pop(key, None)
+    return selected
+
+
+LOCAL_SEED_VOCAB = [
+    {"word": "予定", "reading": "よてい", "meaning": "預定；計畫"},
+    {"word": "準備", "reading": "じゅんび", "meaning": "準備"},
+    {"word": "確認", "reading": "かくにん", "meaning": "確認"},
+    {"word": "資料", "reading": "しりょう", "meaning": "資料"},
+    {"word": "進捗", "reading": "しんちょく", "meaning": "進度"},
+    {"word": "提案", "reading": "ていあん", "meaning": "提案"},
+    {"word": "改善", "reading": "かいぜん", "meaning": "改善"},
+    {"word": "共有", "reading": "きょうゆう", "meaning": "共享；告知"},
+    {"word": "締切", "reading": "しめきり", "meaning": "截止期限"},
+    {"word": "相談", "reading": "そうだん", "meaning": "商量；諮詢"},
+    {"word": "対応", "reading": "たいおう", "meaning": "處理；應對"},
+    {"word": "変更", "reading": "へんこう", "meaning": "變更"},
+    {"word": "必要", "reading": "ひつよう", "meaning": "必要"},
+    {"word": "可能", "reading": "かのう", "meaning": "可能"},
+    {"word": "原因", "reading": "げんいん", "meaning": "原因"},
+    {"word": "結果", "reading": "けっか", "meaning": "結果"},
+]
+
+
+LOCAL_SEED_VERBS = [
+    {
+        "base": "確認する（かくにんする） - 確認",
+        "masuStem": "確認し",
+        "te": "確認して",
+        "ta": "確認した",
+        "nai": "確認しない",
+        "ba": "確認すれば",
+        "causative": "確認させる",
+        "passive": "確認される",
+        "causativePassive": "確認させられる",
+    },
+    {
+        "base": "進める（すすめる） - 推進；進行",
+        "masuStem": "進め",
+        "te": "進めて",
+        "ta": "進めた",
+        "nai": "進めない",
+        "ba": "進めれば",
+        "causative": "進めさせる",
+        "passive": "進められる",
+        "causativePassive": "進めさせられる",
+    },
+    {
+        "base": "直す（なおす） - 修正",
+        "masuStem": "直し",
+        "te": "直して",
+        "ta": "直した",
+        "nai": "直さない",
+        "ba": "直せば",
+        "causative": "直させる",
+        "passive": "直される",
+        "causativePassive": "直させられる",
+    },
+    {
+        "base": "選ぶ（えらぶ） - 選擇",
+        "masuStem": "選び",
+        "te": "選んで",
+        "ta": "選んだ",
+        "nai": "選ばない",
+        "ba": "選べば",
+        "causative": "選ばせる",
+        "passive": "選ばれる",
+        "causativePassive": "選ばせられる",
+    },
+    {
+        "base": "伝える（つたえる） - 傳達",
+        "masuStem": "伝え",
+        "te": "伝えて",
+        "ta": "伝えた",
+        "nai": "伝えない",
+        "ba": "伝えれば",
+        "causative": "伝えさせる",
+        "passive": "伝えられる",
+        "causativePassive": "伝えさせられる",
+    },
+]
+
+
+def material_seed_vocab(settings, limit):
+    if limit <= 0:
+        return []
+    seed = list(sample_material(settings).get("vocab", [])) + LOCAL_SEED_VOCAB
+    items = []
+    seen = set()
+    for item in seed:
+        word = str(item.get("word", "")).strip()
+        if not word or word in seen:
+            continue
+        seen.add(word)
+        items.append(
+            {
+                "word": word,
+                "reading": item.get("reading", ""),
+                "meaning": item.get("meaning", ""),
+                "part_of_speech": "",
+                "jlpt_level": settings.get("target_level", ""),
+                "source": "seed",
+            }
+        )
+        if len(items) >= limit:
+            return items
+    base_items = list(items)
+    while len(items) < limit and base_items:
+        items.append(dict(base_items[len(items) % len(base_items)]))
+    return items[:limit]
+
+
+def material_verbs_from_db(limit):
+    if limit <= 0:
+        return []
+    ensure_settings_store()
+    rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (limit,))
+    return [
+        {
+            "base": f"{row['dictionary_form']}（{row['reading']}） - {row['meaning']}",
+            "masuStem": answer_display_value(row["renyou_form"]),
+            "te": answer_display_value(row["te_form"]),
+            "ta": answer_display_value(row["ta_form"]),
+            "nai": answer_display_value(row["nai_form"]),
+            "ba": answer_display_value(row["ba_form"]),
+            "causative": answer_display_value(row["shieki_form"]),
+            "passive": answer_display_value(row["ukemi_form"]),
+            "causativePassive": "",
+            "source": "verbs",
+        }
+        for row in rows
+    ]
+
+
+def material_seed_verbs(settings, limit):
+    if limit <= 0:
+        return []
+    seed = list(sample_material(settings).get("verbs", [])) + LOCAL_SEED_VERBS
+    items = []
+    seen = set()
+    for item in seed:
+        base = str(item.get("base", "")).strip()
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        copied = dict(item)
+        copied["source"] = "seed"
+        items.append(copied)
+        if len(items) >= limit:
+            return items
+    base_items = list(items)
+    while len(items) < limit and base_items:
+        items.append(dict(base_items[len(items) % len(base_items)]))
+    return items[:limit]
+
+
+def due_wrong_answer_summary(limit=5):
+    try:
+        rows = query_mistakes({"scope": "due"}, limit=limit)
+    except Exception:
+        return []
+    return [
+        {
+            "question_type": row.get("question_type", ""),
+            "wrong_answer": row.get("user_wrong_answer", ""),
+            "correct_answer": row.get("correct_answer", ""),
+            "mistake_count": row.get("mistake_count", 0),
+        }
+        for row in rows
+    ]
+
+
+def build_local_quiz(vocab, verbs, settings):
+    mcq_count = int(settings.get("mcq_count", 0) or 0)
+    fill_count = int(settings.get("fill_count", 0) or 0)
+    questions = []
+    meanings = [item.get("meaning", "") for item in vocab if item.get("meaning")]
+    for item in vocab[:mcq_count]:
+        answer = item.get("meaning", "")
+        if not answer:
+            continue
+        options = [answer]
+        for meaning in shuffled(meanings):
+            if meaning and meaning not in options:
+                options.append(meaning)
+            if len(options) >= 4:
+                break
+        questions.append(
+            {
+                "type": "MCQ",
+                "q": f"下列哪個意思最接近「{item.get('word', '')}」？",
+                "options": shuffled(options),
+                "ans": answer,
+            }
+        )
+    for verb in verbs[:fill_count]:
+        questions.append(
+            {
+                "type": "FILL",
+                "q": f"請寫出「{verb.get('base', '')}」的て形。",
+                "ans": clean_answer_value(verb.get("te", "")),
+                "displayAns": verb.get("te", ""),
+            }
+        )
+    return questions
+
+
+def build_local_material(settings, force_seed=False):
+    settings = normalize_settings(settings)
+    vocab_count = int(settings["vocab_count"])
+    verb_count = int(settings["verb_count"])
+    source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
+    seed_used = False
+
+    slang_quota = 0 if vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
+    slang_vocab = [] if force_seed else material_vocab_from_approved_slang(slang_quota)
+    source_counts["slang"] = len(slang_vocab)
+
+    base_quota = max(0, vocab_count - len(slang_vocab))
+    vocab = [] if force_seed else material_vocab_from_vocabulary_pool(settings, base_quota)
+    if not force_seed and len(vocab) < base_quota:
+        vocab.extend(material_vocab_from_existing(settings, base_quota - len(vocab)))
+    source_counts["vocabulary"] = len(vocab)
+    vocab.extend(slang_vocab)
+
+    if len(vocab) < vocab_count:
+        seed_items = material_seed_vocab(settings, vocab_count - len(vocab))
+        vocab.extend(seed_items)
+        source_counts["seed"] += len(seed_items)
+        seed_used = bool(seed_items)
+    vocab = vocab[:vocab_count]
+
+    verbs = [] if force_seed else material_verbs_from_db(verb_count)
+    if len(verbs) < verb_count:
+        seed_verbs = material_seed_verbs(settings, verb_count - len(verbs))
+        verbs.extend(seed_verbs)
+        source_counts["seed"] += len(seed_verbs)
+        seed_used = bool(seed_verbs)
+    verbs = verbs[:verb_count]
+
+    wrong_items = due_wrong_answer_summary()
+    source_counts["wrong"] = len(wrong_items)
+    quiz = build_local_quiz(vocab, verbs, settings)
+    grammar = {
+        "title": "本地題庫複習",
+        "exp": "本日教材由本地詞庫、已審核新詞與錯題紀錄組成，適合用來穩定複習，不消耗 Gemini API 額度。",
+        "examples": [
+            {"jp": "今日は新しい言葉を復習します。", "cn": "今天複習新的詞彙。"},
+            {"jp": "間違えたところをもう一度確認します。", "cn": "再確認一次曾經答錯的地方。"},
+        ],
+    }
+    metadata = {
+        "generation_mode": "local",
+        "ai_used": False,
+        "fallback_used": False,
+        "source_summary": source_counts,
+        "wrong_reviews": wrong_items,
+        "quiz": quiz,
+        "seed_used": seed_used,
+        "generated_at": taipei_iso_now(),
+    }
+    print(
+        "[material-generator] local sources "
+        f"vocabulary={source_counts['vocabulary']} slang={source_counts['slang']} "
+        f"wrong={source_counts['wrong']} seed={source_counts['seed']}"
+    )
+    return {"vocab": vocab, "verbs": verbs, "grammar": grammar, "metadata": metadata}
+
+
 def save_material_for_today(material, settings):
     ensure_database()
     date = today_string()
     vocab_list = material.get("vocab") or []
     verb_list = material.get("verbs") or []
     grammar = material.get("grammar") or {}
+    metadata = material.get("metadata") or {}
+    now = taipei_iso_now()
     max_rows = max(len(vocab_list), len(verb_list), 1)
 
     new_rows = []
@@ -1686,6 +2154,12 @@ def save_material_for_today(material, settings):
                 "grammar_title": grammar.get("title", "") if i == 0 else "",
                 "grammar_exp": grammar.get("exp", "") if i == 0 else "",
                 "grammar_examples": json.dumps(grammar.get("examples", []), ensure_ascii=False) if i == 0 else "",
+                "material_json": json.dumps(material, ensure_ascii=False) if i == 0 else "",
+                "generation_mode": metadata.get("generation_mode", "") if i == 0 else "",
+                "ai_used": str(bool(metadata.get("ai_used", False))).lower() if i == 0 else "",
+                "source_summary": json.dumps(metadata.get("source_summary", {}), ensure_ascii=False) if i == 0 else "",
+                "created_at": now if i == 0 else "",
+                "updated_at": now if i == 0 else "",
             }
         )
 
@@ -1738,6 +2212,17 @@ def material_by_date(target_date):
         examples = json.loads(first["grammar_examples"]) if first["grammar_examples"] else []
     except json.JSONDecodeError:
         examples = []
+    try:
+        metadata = json.loads(first.get("material_json", "") or "{}")
+        metadata = metadata.get("metadata", metadata) if isinstance(metadata, dict) else {}
+    except json.JSONDecodeError:
+        metadata = {}
+    if not metadata:
+        metadata = {
+            "generation_mode": first.get("generation_mode", ""),
+            "ai_used": first.get("ai_used", ""),
+            "source_summary": first.get("source_summary", ""),
+        }
 
     return {
         "date": target_date,
@@ -1745,6 +2230,7 @@ def material_by_date(target_date):
         "vocabulary": vocabulary,
         "verbs": verbs,
         "grammar": {"title": first["grammar_title"], "exp": first["grammar_exp"], "examples": examples},
+        "metadata": metadata,
     }
 
 
@@ -1779,11 +2265,61 @@ def send_telegram_message(text):
     return data
 
 
-def generate_daily_material(use_sample=False, posted_settings=None, app_url=None):
+def normalize_generation_mode(value):
+    mode = str(value or "local").strip().lower()
+    return mode if mode in {"local", "ai_enhance", "ai_full"} else "local"
+
+
+def material_success_message(date, settings, material, telegram_status):
+    metadata = material.get("metadata") or {}
+    if metadata.get("fallback_used"):
+        base = "AI 配額暫時用完，已改用本地教材生成。本次教材已成功建立，未中斷。"
+    elif metadata.get("seed_used"):
+        base = "✅ 今日教材已建立。部分內容由內建範例補足，建議後續增加詞庫資料。本次未消耗 Gemini API 額度。"
+    elif not metadata.get("ai_used"):
+        base = "✅ 今日教材已成功從題庫抽取並建立！本次未消耗 Gemini API 額度。"
+    else:
+        base = f"{date} 的 {settings['target_level']} 學習材料已經生成並保存。"
+    return f"{base} {telegram_status}"
+
+
+def generate_daily_material(use_sample=False, posted_settings=None, app_url=None, mode="local"):
     settings = save_settings_file(posted_settings) if posted_settings else load_settings()
-    raw_material = sample_material(settings) if use_sample else parse_json_from_ai(call_gemini(build_prompt(settings)))
-    raw_material = merge_approved_slang_into_material(raw_material, settings)
+    mode = "local" if use_sample else normalize_generation_mode(mode)
+    print(f"[material-generator] mode={mode} start")
+
+    if mode == "local":
+        raw_material = build_local_material(settings, force_seed=use_sample)
+    elif mode == "ai_enhance":
+        raw_material = build_local_material(settings)
+        raw_material["metadata"]["generation_mode"] = "ai_enhance"
+        raw_material["metadata"]["ai_used"] = False
+        raw_material["metadata"]["fallback_used"] = False
+    else:
+        try:
+            raw_material = parse_json_from_ai(call_gemini(build_prompt(settings)))
+            raw_material = merge_approved_slang_into_material(raw_material, settings)
+            raw_material["metadata"] = {
+                "generation_mode": "ai_full",
+                "ai_used": True,
+                "fallback_used": False,
+                "source_summary": {"ai": 1},
+                "seed_used": False,
+                "generated_at": taipei_iso_now(),
+            }
+        except Exception as e:
+            print(f"[material-generator] ai_full failed; fallback local; error={classify_gemini_error(e)}")
+            raw_material = build_local_material(settings)
+            raw_material["metadata"]["generation_mode"] = "local"
+            raw_material["metadata"]["ai_used"] = False
+            raw_material["metadata"]["fallback_used"] = True
+
+    if mode == "local" and raw_material.get("metadata", {}).get("ai_used"):
+        print("[material-generator] ERROR local mode attempted to call Gemini")
+
     date = save_material_for_today(raw_material, settings)
+    print(f"[material-generator] local material generated; ai_used={str(raw_material.get('metadata', {}).get('ai_used', False)).lower()}")
+    print(f"[material-generator] material saved date={date}")
     material = material_by_date(date)
 
     telegram_status = "未發送"
@@ -1795,9 +2331,13 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
 
     invalidate_dashboard_cache("daily material generated")
     return {
-        "message": f"{date} 的 {settings['target_level']} 學習材料已經生成並保存。{telegram_status}",
+        "message": material_success_message(date, settings, raw_material, telegram_status),
         "date": date,
         "telegram": telegram_status,
+        "generation_mode": raw_material.get("metadata", {}).get("generation_mode", mode),
+        "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
+        "fallback_used": bool(raw_material.get("metadata", {}).get("fallback_used", False)),
+        "source_summary": raw_material.get("metadata", {}).get("source_summary", {}),
     }
 
 
@@ -2740,11 +3280,14 @@ def api_materials():
 @app.post("/api/generate")
 def api_generate():
     try:
+        data = request.get_json(silent=True) or {}
+        mode = request.args.get("mode") or data.get("mode") or "local"
         return jsonify(
             generate_daily_material(
                 use_sample=request.args.get("sample") == "1",
-                posted_settings=request.get_json(silent=True) or {},
+                posted_settings=data,
                 app_url=request.host_url.rstrip("/"),
+                mode=mode,
             )
         )
     except Exception as e:
@@ -2756,7 +3299,7 @@ def api_cron_daily_push():
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
         return jsonify({"error": "unauthorized"}), 401
     try:
-        return jsonify(generate_daily_material(app_url=APP_URL)), 200
+        return jsonify(generate_daily_material(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
