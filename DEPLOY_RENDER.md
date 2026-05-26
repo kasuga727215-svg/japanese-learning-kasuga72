@@ -20,7 +20,7 @@
 
 - Language: Python 3
 - Build Command: `pip install -r requirements.txt`
-- Start Command: `gunicorn app:app`
+- Start Command: `gunicorn --timeout 90 app:app`
 
 ## 3. 設定環境變數
 
@@ -31,7 +31,8 @@
 - `TG_TOKEN`: 你的 Telegram Bot Token
 - `TG_CHAT_ID`: 你的 Telegram Chat ID
 - `APP_URL`: Render 給你的公網網址，例如 `https://your-app.onrender.com`
-- `GEMINI_MODEL`: 可留空；若要固定模型，可填 `gemini-3-flash-preview`
+- `GEMINI_MODEL`: 預設 `gemini-3-flash-preview`；若 Render 有設定，會以 Render 環境變數為準
+- `GEMINI_TIMEOUT_SECONDS`: 預設 `20`。若 Render Start Command 已使用 `gunicorn --timeout 90 app:app`，可視情況調到 `40`
 - `SLANG_CANDIDATE_WRITE_MODE`: 建議填 `sync`，讓新詞候選池在文法解析回傳前直接寫入資料庫
 - `ENABLE_DEBUG_ENDPOINTS`: 平常填 `false`；排查新詞候選池時可短暫改成 `true`
 

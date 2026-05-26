@@ -171,6 +171,15 @@
     }
     .tips { padding-left:18px; margin:8px 0 0; }
     .tips li { margin-bottom:6px; }
+    .slang-list {
+      display:grid;
+      gap:12px;
+    }
+    .slang-term {
+      color:var(--secondary);
+      font-weight:800;
+      font-size:1.05rem;
+    }
     @media (min-width:760px) {
       .grid.two, .meta-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
       .grid.three { grid-template-columns:repeat(3, minmax(0, 1fr)); }
@@ -330,6 +339,35 @@ function renderLearningFocus(data){
   `);
 }
 
+function renderSlangTerms(data){
+  const items = arr(data.slang_terms);
+  if (!items.length) return "";
+  return card("本地捕捉到的 SNS / 流行語", `
+    <div class="slang-list">
+      ${items.map(item => subCard(`
+        <div class="slang-term">${esc(item.term || "未命名詞彙")}</div>
+        ${hasText(item.reading_hiragana) ? `<p class="muted">${esc(item.reading_hiragana)}</p>` : ""}
+        <p><span class="label">${esc(item.category || "unknown")}</span></p>
+        ${hasText(item.meaning_zh) ? `<p><strong>意思：</strong>${esc(item.meaning_zh)}</p>` : ""}
+        ${hasText(item.nuance) ? `<p><strong>語感：</strong>${esc(item.nuance)}</p>` : ""}
+      `)).join("")}
+    </div>
+  `);
+}
+
+function renderFallbackAnalysis(data){
+  const slangBlock = renderSlangTerms(data);
+  const suggestion = card("建議", `
+    <p>Gemini 解析暫時失敗，目前僅顯示本地規則補抓結果。可以稍後重新點擊「開始拆解」取得完整文法解析。</p>
+  `);
+  result.innerHTML = [
+    card("解析提示", `<p class="error-text">${esc(data.error_message || "Gemini 解析暫時失敗，已使用本地規則回傳部分結果。")}</p>`),
+    slangBlock,
+    suggestion,
+    renderAdvanced(data)
+  ].filter(Boolean).join("");
+}
+
 function renderAdvanced(data){
   const advanced = obj(data.advanced_mecab);
   if (!Object.keys(advanced).length) return "";
@@ -344,7 +382,15 @@ function renderAdvanced(data){
 
 function renderAnalysis(data){
   lastResultText = JSON.stringify(data, null, 2);
-  if (hasText(data.error_message)) {
+  const hasError = hasText(data.error_message);
+  const hasSlang = arr(data.slang_terms).length > 0;
+  const hasStructure = arr(data.sentence_structure).length > 0;
+  const hasGrammar = arr(data.grammar_points).length > 0;
+  if (hasError && hasSlang && !hasStructure && !hasGrammar) {
+    renderFallbackAnalysis(data);
+    return;
+  }
+  if (hasError && !hasSlang) {
     result.innerHTML = card("解析提示", `<p class="error-text">${esc(data.error_message)}</p>`);
     return;
   }
@@ -354,6 +400,7 @@ function renderAnalysis(data){
     renderTone(data),
     renderStructure(data),
     renderGrammarPoints(data),
+    renderSlangTerms(data),
     renderAlternatives(data),
     renderLearningFocus(data),
     renderAdvanced(data)
