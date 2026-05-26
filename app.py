@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import shutil
 import sqlite3
 from collections import Counter
 import urllib.error
@@ -20,7 +21,8 @@ app = Flask(__name__, template_folder=".")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE_FILE = os.path.join(BASE_DIR, "database.csv")
-SQLITE_SETTINGS_FILE = os.path.join(BASE_DIR, "state.sqlite3")
+DEFAULT_SQLITE_SETTINGS_FILE = os.path.join(BASE_DIR, "state.sqlite3")
+SQLITE_SETTINGS_FILE = os.environ.get("SQLITE_DB_PATH", "").strip() or DEFAULT_SQLITE_SETTINGS_FILE
 SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
@@ -30,6 +32,8 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
+DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
+_DASHBOARD_CACHE = {"expires_at": None, "payload": None}
 
 LEVELS = ["N5", "N4", "N3", "N2", "N1"]
 VERB_FORM_LABELS = {
@@ -236,6 +240,29 @@ def parse_material_date(value):
         return None
 
 
+def prepare_sqlite_path():
+    target = os.path.abspath(SQLITE_SETTINGS_FILE)
+    target_dir = os.path.dirname(target)
+    if target_dir:
+        os.makedirs(target_dir, exist_ok=True)
+    if target != os.path.abspath(DEFAULT_SQLITE_SETTINGS_FILE) and not os.path.exists(target) and os.path.exists(DEFAULT_SQLITE_SETTINGS_FILE):
+        shutil.copy2(DEFAULT_SQLITE_SETTINGS_FILE, target)
+        print(f"[sqlite] copied legacy database to {target}")
+    try:
+        with open(target, "a+b"):
+            pass
+    except OSError as e:
+        print(f"[sqlite] database path is not writable: {target} ({e})")
+        raise
+
+
+def invalidate_dashboard_cache(reason=""):
+    _DASHBOARD_CACHE["expires_at"] = None
+    _DASHBOARD_CACHE["payload"] = None
+    if reason:
+        print(f"[dashboard-cache] invalidated: {reason}")
+
+
 def normalize_settings(raw):
     normalized = {}
     for key, value in (raw or {}).items():
@@ -263,6 +290,7 @@ def normalize_settings(raw):
 
 
 def ensure_settings_store():
+    prepare_sqlite_path()
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         conn.execute(
             """
@@ -427,6 +455,7 @@ def seed_verbs_if_empty():
             SEED_VERBS,
         )
         conn.commit()
+    invalidate_dashboard_cache("mistake mastered")
 
 
 def sqlite_dicts(query, params=()):
@@ -478,6 +507,7 @@ def save_settings_file(settings):
             list(current.items()),
         )
         conn.commit()
+    invalidate_dashboard_cache("mistake retry")
     return current
 
 
@@ -858,6 +888,7 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     except Exception as e:
         telegram_status = f"Telegram 通知發送失敗：{e}"
 
+    invalidate_dashboard_cache("daily material generated")
     return {
         "message": f"{date} 的 {settings['target_level']} 學習材料已經生成並保存。{telegram_status}",
         "date": date,
@@ -1022,6 +1053,7 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                 (verb_id, question_type, wrong_answer, now, iso_date_after(1), category),
             )
         conn.commit()
+    invalidate_dashboard_cache("mistake added")
 
 
 def add_or_update_sns_mistake(example, user_translation, error_category, interval_days):
@@ -1070,6 +1102,7 @@ def add_or_update_sns_mistake(example, user_translation, error_category, interva
                 (question_type, wrong_answer, now, iso_date_after(interval_days), interval_days, category),
             )
         conn.commit()
+    invalidate_dashboard_cache("sns mistake updated")
 
 
 def log_sns_practice(example, user_translation, self_evaluation, error_category=""):
@@ -1091,6 +1124,7 @@ def log_sns_practice(example, user_translation, self_evaluation, error_category=
             ),
         )
         conn.commit()
+    invalidate_dashboard_cache("sns practice logged")
 
 
 def kana_to_hiragana(text):
@@ -1233,6 +1267,43 @@ def common_misunderstandings_for(text, patterns):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.get("/healthz")
+def healthz():
+    return jsonify({"status": "ok", "instance": "render-starter"})
+
+
+@app.get("/readyz")
+def readyz():
+    checks = {}
+    ok = True
+    try:
+        prepare_sqlite_path()
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=2) as conn:
+            conn.execute("SELECT 1").fetchone()
+        checks["sqlite"] = "ok"
+        checks["sqlite_path"] = SQLITE_SETTINGS_FILE
+    except Exception as e:
+        ok = False
+        checks["sqlite"] = f"error: {e}"
+        checks["sqlite_path"] = SQLITE_SETTINGS_FILE
+
+    if DATABASE_URL:
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    cur.fetchone()
+            checks["postgresql"] = "ok"
+        except Exception as e:
+            ok = False
+            checks["postgresql"] = f"error: {e}"
+    else:
+        checks["postgresql"] = "not_configured"
+
+    status = 200 if ok else 503
+    return jsonify({"status": "ready" if ok else "not_ready", "instance": "render-starter", "checks": checks}), status
 
 
 @app.get("/verb-practice")
@@ -1707,6 +1778,16 @@ def api_sns_self_evaluate():
 
 @app.get("/api/dashboard")
 def api_dashboard():
+    now_ts = taipei_now().timestamp()
+    if _DASHBOARD_CACHE["payload"] is not None and _DASHBOARD_CACHE["expires_at"] and _DASHBOARD_CACHE["expires_at"] > now_ts:
+        return jsonify(_DASHBOARD_CACHE["payload"])
+    payload = build_dashboard_payload()
+    _DASHBOARD_CACHE["payload"] = payload
+    _DASHBOARD_CACHE["expires_at"] = now_ts + DASHBOARD_CACHE_TTL_SECONDS
+    return jsonify(payload)
+
+
+def build_dashboard_payload():
     settings = load_settings()
     today = today_string()
     today_material = material_by_date(today)
@@ -1732,21 +1813,19 @@ def api_dashboard():
         (today_iso_date(), today_iso_date()),
     )
     review_items = query_mistakes({}, limit=5)
-    return jsonify(
-        {
-            "today": today,
-            "has_today_material": bool(today_material),
-            "target_level": settings["target_level"],
-            "vocab_count": len(today_material["vocabulary"]) if today_material else 0,
-            "verb_count": len(today_material["verbs"]) if today_material else 0,
-            "quiz_total": int(settings["mcq_count"]) + int(settings["fill_count"]),
-            "today_new_mistakes": len(today_mistakes),
-            "due_review_count": int(due_review["count"] if due_review else 0),
-            "last_7_days": [{"date": date, "studied": date in material_dates} for date in reversed(last_7_dates)],
-            "streak_days": len(active_days),
-            "review_items": review_items,
-        }
-    )
+    return {
+        "today": today,
+        "has_today_material": bool(today_material),
+        "target_level": settings["target_level"],
+        "vocab_count": len(today_material["vocabulary"]) if today_material else 0,
+        "verb_count": len(today_material["verbs"]) if today_material else 0,
+        "quiz_total": int(settings["mcq_count"]) + int(settings["fill_count"]),
+        "today_new_mistakes": len(today_mistakes),
+        "due_review_count": int(due_review["count"] if due_review else 0),
+        "last_7_days": [{"date": date, "studied": date in material_dates} for date in reversed(last_7_dates)],
+        "streak_days": len(active_days),
+        "review_items": review_items,
+    }
 
 
 def table_status(table_name):
@@ -1994,6 +2073,7 @@ def api_quiz_submit():
             (taipei_iso_now(), len(questions), score),
         )
         conn.commit()
+    invalidate_dashboard_cache("quiz submitted")
     return jsonify({"score": score, "total": len(questions), "results": results})
 
 

@@ -190,6 +190,19 @@
     return data;
   }
 
+  async function apiWithTimeout(url, timeoutMs = 5000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { headers: { "Content-Type": "application/json" }, signal: controller.signal });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "請求失敗，請稍後再試。");
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   function todayKey() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -324,7 +337,20 @@
   }
 
   async function loadDashboard() {
-    const data = await api("/api/dashboard");
+    let data;
+    try {
+      data = await apiWithTimeout("/api/dashboard", 5000);
+    } catch (error) {
+      document.getElementById("dash-material").innerText = "整理中";
+      document.getElementById("dash-material-note").innerText = "資料整理中，請稍後重新整理";
+      document.getElementById("dash-quiz").innerText = "- / -";
+      document.getElementById("dash-accuracy").innerText = "資料整理中，請稍後重新整理";
+      document.getElementById("dash-streak").innerText = "- 天";
+      document.getElementById("dash-streak-row").innerHTML = "";
+      document.getElementById("dash-mistakes").innerText = "- 題";
+      document.getElementById("dash-review").innerText = "資料整理中，請稍後重新整理";
+      return;
+    }
     const stats = getTodayQuizStats();
     document.getElementById("dash-material").innerText = data.has_today_material ? "已生成" : "尚未生成";
     document.getElementById("dash-material-note").innerText = data.has_today_material
