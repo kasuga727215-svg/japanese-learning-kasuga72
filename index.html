@@ -36,6 +36,86 @@
     .example-box, .question-box { background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.08); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 10px; border-radius: 4px; }
     .example-jp { color: #ffffff; font-weight: 600; }
     .example-cn { color: #e9ecff; font-weight: 600; }
+    .vocab-card,
+    .vocab-card * {
+      opacity: 1;
+      mix-blend-mode: normal;
+      -webkit-text-fill-color: currentColor;
+    }
+    .vocab-card {
+      position: relative;
+      overflow: hidden;
+      color: #eef4ff;
+      background: rgba(255,255,255,.045);
+      border: 1px solid rgba(102,209,255,.22);
+      border-radius: 8px;
+      overflow-wrap: anywhere;
+      word-wrap: break-word;
+    }
+    .vocab-card::before,
+    .vocab-card::after {
+      pointer-events: none;
+      z-index: 0;
+    }
+    .vocab-card-content {
+      position: relative;
+      z-index: 1;
+    }
+    .vocab-word {
+      color: #35f2e1 !important;
+      font-weight: 800;
+      font-size: 1.2rem;
+      letter-spacing: 0;
+    }
+    .vocab-reading {
+      color: #b8c4e0 !important;
+      margin-left: 8px;
+      font-weight: 700;
+    }
+    .vocab-meaning,
+    .vocab-meaning-text {
+      color: #eef4ff !important;
+      font-weight: 700;
+    }
+    .vocab-example,
+    .vocab-example-text {
+      color: #dfe7ff !important;
+      line-height: 1.65;
+    }
+    .vocab-translation,
+    .vocab-translation-text {
+      color: #ffd6f6 !important;
+      line-height: 1.65;
+    }
+    .vocab-label,
+    .vocab-meta,
+    .vocab-pos,
+    .vocab-jlpt,
+    .vocab-category {
+      color: #9fe8ff !important;
+    }
+    .vocab-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .vocab-tag {
+      display: inline-block;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      background: rgba(102, 209, 255, 0.12);
+      border: 1px solid rgba(102, 209, 255, 0.35);
+      color: #9fe8ff !important;
+      font-size: 0.8rem;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .vocab-tag.sns-tag {
+      color: #ffd6f6 !important;
+      background: rgba(255, 0, 255, 0.12);
+      border-color: rgba(255, 0, 255, 0.35);
+    }
     .range-value { color: var(--secondary); font-weight: 800; min-width: 34px; display: inline-block; text-align: right; }
     .answer-ok { border-left-color: var(--primary) !important; box-shadow: inset 0 0 0 1px rgba(0,255,204,.4); }
     .answer-bad { border-left-color: var(--secondary) !important; box-shadow: inset 0 0 0 1px rgba(255,0,255,.35); }
@@ -406,18 +486,22 @@
     }
     document.getElementById("material-content").style.display = "block";
     document.getElementById("vocab-list").innerHTML = data.vocabulary.map(v => `
-      <div class="col-12 col-md-6"><div class="p-3 border rounded" style="border-color:var(--border-color)!important;background:rgba(255,255,255,.02);">
-        <strong style="color:var(--primary);font-size:1.2em;">${escapeHtml(v.word)}</strong>
-        <small style="color:#aaa;margin-left:8px;">${escapeHtml(v.reading)}</small><br>
-        <span><strong>意思：</strong>${escapeHtml(v.meaning || "尚未建立中文意思")}</span>
-        <div class="small text-muted mt-1">
-          ${escapeHtml(v.part_of_speech || "")}
-          ${v.jlpt_level ? `｜${escapeHtml(v.jlpt_level)}` : ""}
-          ${v.category ? `｜${escapeHtml(v.category)}` : ""}
-          ${["sns","internet_slang","otaku_culture"].includes(v.category || "") ? `<span class="ms-2" style="color:var(--secondary);font-weight:bold;">SNS</span>` : ""}
+      <div class="col-12 col-md-6"><div class="vocab-card p-3">
+        <div class="vocab-card-content">
+          <div>
+            <span class="vocab-word">${escapeHtml(v.word || "-")}</span>
+            <span class="vocab-reading">${escapeHtml(v.reading || "讀音尚未建立")}</span>
+          </div>
+          <div class="vocab-meaning mt-2"><span class="vocab-label">意思：</span><span class="vocab-meaning-text">${escapeHtml(v.meaning || "尚未建立中文意思")}</span></div>
+          <div class="vocab-meta">
+            ${v.part_of_speech ? `<span class="vocab-tag vocab-pos">${escapeHtml(v.part_of_speech)}</span>` : ""}
+            ${v.jlpt_level ? `<span class="vocab-tag vocab-jlpt">${escapeHtml(v.jlpt_level)}</span>` : ""}
+            ${v.category ? `<span class="vocab-tag vocab-category">${escapeHtml(v.category)}</span>` : ""}
+            ${["sns","internet_slang","otaku_culture"].includes(v.category || "") ? `<span class="vocab-tag sns-tag">SNS</span>` : ""}
+          </div>
+          ${v.example_sentence ? `<div class="vocab-example mt-2 small"><span class="vocab-label">例句：</span><span class="vocab-example-text">${escapeHtml(v.example_sentence)}</span></div>` : ""}
+          ${v.example_translation_zh ? `<div class="vocab-translation small"><span class="vocab-label">中文：</span><span class="vocab-translation-text">${escapeHtml(v.example_translation_zh)}</span></div>` : ""}
         </div>
-        ${v.example_sentence ? `<div class="mt-2 small" style="overflow-wrap:anywhere;"><span style="color:var(--primary);font-weight:bold;">例句：</span>${escapeHtml(v.example_sentence)}</div>` : ""}
-        ${v.example_translation_zh ? `<div class="small" style="overflow-wrap:anywhere;"><span style="color:var(--secondary);font-weight:bold;">中文：</span>${escapeHtml(v.example_translation_zh)}</div>` : ""}
       </div></div>`).join("");
     document.getElementById("verb-list").innerHTML = data.verbs.map(v => `
       <tr><td style="color:var(--secondary);font-weight:bold;">${escapeHtml(v.base || "-")}</td>
