@@ -890,6 +890,10 @@ def debug_endpoints_enabled():
     return os.environ.get("ENABLE_DEBUG_ENDPOINTS", "false").strip().lower() == "true"
 
 
+def grammar_debug_enabled():
+    return debug_endpoints_enabled() or gemini_smoke_test_enabled()
+
+
 def log_slang(message):
     print(f"[slang-candidates] {message}", flush=True)
 
@@ -1685,6 +1689,30 @@ def gemini_smoke_test_enabled():
     return os.environ.get("GEMINI_ENABLE_MODEL_SMOKE_TEST", "false").strip().lower() == "true"
 
 
+def gemini_error_type(error):
+    text = str(error or "")
+    lower = text.lower()
+    if "尚未設定" in text or "missing api key" in lower or "api key missing" in lower:
+        return "missing_api_key"
+    if "timeout" in lower or "timed out" in lower or "逾時" in text:
+        return "timeout"
+    if "quota" in lower or "resource_exhausted" in lower or "429" in lower:
+        return "quota_exceeded"
+    if "not_found" in lower or "not found" in lower or "404" in lower:
+        return "not_found"
+    if "permission" in lower or "unauthorized" in lower or "403" in lower:
+        return "permission_denied"
+    if "json" in lower:
+        return "json_parse_error"
+    if "unavailable" in lower or "503" in lower or "high demand" in lower:
+        return "model_error"
+    if "格式" in text or "空內容" in text:
+        return "model_error"
+    if "連接" in text or "connection" in lower:
+        return "model_error"
+    return "unknown_error"
+
+
 def compact_gemini_error_detail(raw_detail):
     raw_detail = str(raw_detail or "").strip()
     try:
@@ -1702,25 +1730,7 @@ def compact_gemini_error_detail(raw_detail):
 
 
 def classify_gemini_error(error):
-    text = str(error or "")
-    lower = text.lower()
-    if "timeout" in lower or "timed out" in lower or "逾時" in text:
-        return "timeout"
-    if "unavailable" in lower or "503" in lower or "high demand" in lower:
-        return "service_unavailable"
-    if "not_found" in lower or "not found" in lower or "404" in lower:
-        return "not_found"
-    if "quota" in lower or "resource_exhausted" in lower or "429" in lower:
-        return "quota_exceeded"
-    if "permission" in lower or "unauthorized" in lower or "api key" in lower or "403" in lower:
-        return "permission_or_api_key"
-    if "json" in lower:
-        return "json_parse_error"
-    if "格式" in text or "空內容" in text:
-        return "invalid_response"
-    if "連接" in text or "connection" in lower:
-        return "connection_error"
-    return "error"
+    return gemini_error_type(error)
 
 
 def call_gemini(prompt, model_name=None, timeout_seconds=None):
@@ -3839,6 +3849,27 @@ def persist_analysis_slang_terms(payload, source_context, source):
 
 
 def analyze_grammar_with_gemini(text):
+    started = time.perf_counter()
+    candidates = gemini_model_candidates()
+    diagnostic = {
+        "gemini_api_key_present": bool(GEMINI_API_KEY),
+        "selected_model": candidates[0] if candidates else "",
+        "model_candidates": candidates,
+        "cooldown_active": False,
+        "local_mode_active": False,
+        "gemini_called": False,
+        "elapsed_ms": 0,
+        "exception_type": "",
+        "exception_message": "",
+        "failures": [],
+    }
+    print("[grammar-analyzer] request received")
+    print(f"[grammar-analyzer] input length={len(text or '')}")
+    print(f"[grammar-analyzer] gemini api key present={str(bool(GEMINI_API_KEY)).lower()}")
+    print(f"[grammar-analyzer] model candidates={','.join(candidates)}")
+    print(f"[grammar-analyzer] selected model={diagnostic['selected_model']}")
+    print("[grammar-analyzer] cooldown active=false")
+    print("[grammar-analyzer] local mode active=false")
     if GEMINI_API_KEY:
         print("[feature-boundary] grammar_analyzer gemini enabled")
     else:
@@ -3855,22 +3886,42 @@ def analyze_grammar_with_gemini(text):
 
     prompt = build_grammar_coach_prompt(text, fallback_reading)
     failures = []
-    for model_name in gemini_model_candidates():
+    if not GEMINI_API_KEY:
+        failures.append({"model": diagnostic["selected_model"], "error_type": "missing_api_key", "message": "尚未設定 Gemini API Key。"})
+
+    for model_name in ([] if not GEMINI_API_KEY else candidates):
         raw_response = ""
         try:
             print(f"[grammar-analyzer] using model={model_name}")
+            print(f"[grammar-analyzer] calling gemini model={model_name}")
+            diagnostic["selected_model"] = model_name
+            diagnostic["gemini_called"] = True
+            call_started = time.perf_counter()
             raw_response = call_gemini(prompt, model_name=model_name)
-            ai_payload = parse_gemini_json_safely(raw_response)
+            call_elapsed_ms = round((time.perf_counter() - call_started) * 1000)
+            print(f"[grammar-analyzer] gemini response received elapsed_ms={call_elapsed_ms}")
+            try:
+                ai_payload = parse_gemini_json_safely(raw_response)
+                print("[grammar-analyzer] json parse success=true")
+            except Exception as parse_error:
+                print("[grammar-analyzer] json parse success=false")
+                print(f"[grammar-analyzer] json parse error；model={model_name}；message={parse_error}；raw={raw_response[:500]}")
+                raise
             payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
             print(f"[grammar-analyzer] Gemini 解析成功；model={model_name}")
+            diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+            if grammar_debug_enabled():
+                payload["debug"] = diagnostic
             persist_analysis_slang_terms(payload, text, "grammar_analyzer")
             return payload, 200
         except Exception as e:
             error_text = str(e)
-            error_type = classify_gemini_error(e)
+            error_type = gemini_error_type(e)
+            diagnostic["exception_type"] = type(e).__name__
+            diagnostic["exception_message"] = error_text[:500]
             failures.append({"model": model_name, "error_type": error_type, "message": error_text[:300]})
             if raw_response:
-                print(f"[grammar-analyzer] Gemini 原始回傳；model={model_name}；raw={raw_response[:1200]}")
+                print(f"[grammar-analyzer] Gemini 原始回傳；model={model_name}；raw={raw_response[:500]}")
             if error_type == "timeout":
                 print(f"[grammar-analyzer] Gemini timeout; model={model_name}; timeout={GEMINI_TIMEOUT_SECONDS}s")
             print(f"[grammar-analyzer] Gemini 解析失敗；model={model_name}；error_type={error_type}；message={error_text}")
@@ -3878,10 +3929,19 @@ def analyze_grammar_with_gemini(text):
             continue
 
     if failures:
-        reason = failures[0].get("error_type") or "unknown"
+        reason = failures[0].get("error_type") or "unknown_error"
+        diagnostic["failures"] = failures
+        diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
         print(f"[grammar-analyzer] fallback reason={reason}")
         print(f"[grammar-analyzer] 所有 Gemini 模型皆失敗；failures={json.dumps(failures, ensure_ascii=False)}")
+    else:
+        reason = "unknown_error"
+        diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+        print("[grammar-analyzer] fallback reason=unknown_error")
     payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
+    if grammar_debug_enabled():
+        payload["fallback_reason"] = reason
+        payload["debug"] = diagnostic
     persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
     return payload, 200
 
@@ -4409,7 +4469,7 @@ def api_analyze_grammar():
 
 @app.get("/api/gemini/debug/model-check")
 def api_gemini_debug_model_check():
-    if not gemini_smoke_test_enabled():
+    if not grammar_debug_enabled():
         return jsonify({"error": "Gemini 模型測試端點未啟用。"}), 404
     models = []
     for model_name in gemini_model_candidates():
@@ -4423,6 +4483,7 @@ def api_gemini_debug_model_check():
     recommended = next((item["model"] for item in models if item["status"] == "ok"), "")
     return jsonify(
         {
+            "api_key_present": bool(GEMINI_API_KEY),
             "models": models,
             "recommended_model": recommended,
             "timeout_seconds": GEMINI_TIMEOUT_SECONDS,
