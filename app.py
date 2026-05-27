@@ -58,7 +58,9 @@ TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
+ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
+_ARCHIVE_DATES_CACHE = {"expires_at": None, "payload": None}
 _SCHEMA_LOCK = threading.Lock()
 _SETTINGS_SCHEMA_READY = False
 _MATERIALS_SCHEMA_READY = False
@@ -455,6 +457,13 @@ def invalidate_dashboard_cache(reason=""):
     _DASHBOARD_CACHE["payload"] = None
     if reason:
         print(f"[dashboard-cache] invalidated: {reason}")
+
+
+def invalidate_archive_dates_cache(reason=""):
+    _ARCHIVE_DATES_CACHE["expires_at"] = None
+    _ARCHIVE_DATES_CACHE["payload"] = None
+    if reason:
+        print(f"[archive-dates-cache] invalidated: {reason}")
 
 
 def normalize_settings(raw):
@@ -2962,6 +2971,7 @@ def save_material_for_today(material, settings):
                 cur.execute("DELETE FROM materials WHERE date = %s", (date,))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
+        invalidate_archive_dates_cache("daily material saved")
         return date
 
     df = read_database()
@@ -2969,6 +2979,7 @@ def save_material_for_today(material, settings):
     df = df[df["date"] != date]
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
+    invalidate_archive_dates_cache("daily material saved")
     return date
 
 
@@ -4180,9 +4191,48 @@ def api_save_settings():
 
 @app.get("/api/archive-dates")
 def api_archive_dates():
-    df = read_database()
-    dates = [d for d in df["date"].drop_duplicates().tolist() if d]
-    dates.sort(reverse=True)
+    started = time.perf_counter()
+    now_ts = taipei_now().timestamp()
+    if _ARCHIVE_DATES_CACHE["payload"] is not None and _ARCHIVE_DATES_CACHE["expires_at"] and _ARCHIVE_DATES_CACHE["expires_at"] > now_ts:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[perf] api_archive_dates ms={elapsed_ms} cached=true")
+        return jsonify(_ARCHIVE_DATES_CACHE["payload"])
+
+    limit = max(1, min(int(request.args.get("limit", "90") or 90), 365))
+    ensure_database()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT date
+                    FROM materials
+                    WHERE COALESCE(date, '') <> ''
+                    GROUP BY date
+                    ORDER BY MAX(id) DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                dates = [row[0] for row in cur.fetchall() if row and row[0]]
+    else:
+        try:
+            df = pd.read_csv(
+                DATABASE_FILE,
+                dtype=str,
+                keep_default_na=False,
+                encoding="utf-8-sig",
+                usecols=["date"],
+            )
+            dates = [d for d in df["date"].drop_duplicates().tolist() if d]
+        except (FileNotFoundError, ValueError):
+            dates = []
+        dates = sorted(dates, key=lambda value: parse_material_date(value) or datetime.min.date(), reverse=True)[:limit]
+
+    _ARCHIVE_DATES_CACHE["payload"] = dates
+    _ARCHIVE_DATES_CACHE["expires_at"] = now_ts + ARCHIVE_DATES_CACHE_TTL_SECONDS
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(f"[perf] api_archive_dates ms={elapsed_ms} cached=false")
     return jsonify(dates)
 
 

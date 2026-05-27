@@ -262,6 +262,8 @@
 <script>
   let currentQuiz = [];
   let currentMaterialData = null;
+  let archiveDatesCache = { expiresAt: 0, dates: null };
+  const ARCHIVE_DATES_CACHE_MS = 60000;
 
   function escapeHtml(value) {
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -382,14 +384,27 @@
     document.getElementById("fill-value").innerText = document.getElementById("setting-fill").value;
   }
 
+  function perfLog(label, startedAt) {
+    if (window.console && console.debug) {
+      console.debug(`[perf] ${label} ms=${Math.round(performance.now() - startedAt)}`);
+    }
+  }
+
+  function invalidateArchiveDatesCache() {
+    archiveDatesCache = { expiresAt: 0, dates: null };
+  }
+
   window.onload = async () => {
-    await loadArchiveList().catch(() => {});
-    await loadDaily().catch(() => {
+    const bootStarted = performance.now();
+    const archivePromise = loadArchiveList().catch(() => {});
+    const materialPromise = loadDaily().catch(() => {
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
       document.getElementById("content-loader").style.display = "block";
     });
-    await loadSettings().catch(() => {});
-    await loadDashboard();
+    const settingsPromise = loadSettings().catch(() => {});
+    const dashboardPromise = loadDashboard().catch(() => {});
+    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, dashboardPromise]);
+    perfLog("frontend_bootstrap", bootStarted);
   };
 
   function showTab(event, id) {
@@ -400,6 +415,7 @@
   }
 
   async function loadSettings() {
+    const started = performance.now();
     const settings = await api("/api/settings");
     document.getElementById("setting-level").value = settings.target_level;
     document.getElementById("setting-vocab").value = settings.vocab_count;
@@ -407,6 +423,7 @@
     document.getElementById("setting-mcq").value = settings.mcq_count;
     document.getElementById("setting-fill").value = settings.fill_count;
     syncRangeLabels();
+    perfLog("settings", started);
   }
 
   async function saveSettingsUI() {
@@ -443,7 +460,8 @@
       msg.className = "mt-3 success-text";
       msg.innerText = result.message;
       await loadMaterialByDate(result.date);
-      await loadArchiveList();
+      invalidateArchiveDatesCache();
+      await loadArchiveList(true);
       await loadDashboard();
     } catch (error) {
       msg.className = "mt-3 error-text";
@@ -472,14 +490,36 @@
     }
   }
 
-  async function loadArchiveList() {
-    const dates = await api("/api/archive-dates");
+  function renderArchiveList(dates) {
     const select = document.getElementById("dateSelect");
     select.innerHTML = '<option value="">選擇歷史日期</option>';
     dates.forEach(date => select.add(new Option(date, date)));
   }
 
+  async function loadArchiveList(force = false) {
+    const select = document.getElementById("dateSelect");
+    const now = Date.now();
+    if (!force && archiveDatesCache.dates && archiveDatesCache.expiresAt > now) {
+      renderArchiveList(archiveDatesCache.dates);
+      return archiveDatesCache.dates;
+    }
+    const started = performance.now();
+    select.innerHTML = '<option value="">歷史日期載入中...</option>';
+    try {
+      const dates = await api("/api/archive-dates");
+      archiveDatesCache = { dates, expiresAt: Date.now() + ARCHIVE_DATES_CACHE_MS };
+      renderArchiveList(dates);
+      perfLog("archive_dates", started);
+      return dates;
+    } catch (error) {
+      select.innerHTML = '<option value="">暫時無法載入</option>';
+      perfLog("archive_dates_failed", started);
+      throw error;
+    }
+  }
+
   async function loadDashboard() {
+    const started = performance.now();
     let data;
     try {
       data = await apiWithTimeout("/api/dashboard/summary", 5000);
@@ -487,6 +527,7 @@
       data = fallbackDashboardData("統計資料暫時無法取得。");
     }
     renderDashboard(data);
+    perfLog("dashboard_summary", started);
   }
 
   function renderDashboard(data) {
@@ -519,10 +560,12 @@
   }
 
   async function loadDaily() {
+    const started = performance.now();
     document.getElementById("content-loader").innerHTML = "正在讀取今日學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
     renderMaterial(await api("/api/materials"));
+    perfLog("material", started);
   }
 
   async function loadMaterialByDate(date) {
