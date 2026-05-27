@@ -58,6 +58,9 @@ APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
+_SCHEMA_LOCK = threading.Lock()
+_SETTINGS_SCHEMA_READY = False
+_MATERIALS_SCHEMA_READY = False
 
 LEVELS = ["N5", "N4", "N3", "N2", "N1"]
 VERB_FORM_LABELS = {
@@ -472,7 +475,18 @@ def normalize_settings(raw):
 
 
 def ensure_settings_store():
+    global _SETTINGS_SCHEMA_READY
     prepare_sqlite_path()
+    if _SETTINGS_SCHEMA_READY and os.path.exists(SQLITE_SETTINGS_FILE):
+        return
+    with _SCHEMA_LOCK:
+        if _SETTINGS_SCHEMA_READY and os.path.exists(SQLITE_SETTINGS_FILE):
+            return
+        _ensure_settings_store_uncached()
+        _SETTINGS_SCHEMA_READY = True
+
+
+def _ensure_settings_store_uncached():
     with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
         conn.execute(
             """
@@ -553,8 +567,43 @@ def ensure_settings_store():
         migrate_quiz_records(conn)
         migrate_slang_candidates_sqlite(conn)
         migrate_vocabulary_pool_sqlite(conn)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_records_created_at ON quiz_records(created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_last_reviewed_at ON mistake_logs(last_reviewed_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_next_review_date ON mistake_logs(next_review_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sns_practice_logs_created_at ON sns_practice_logs(created_at)")
+        ensure_optional_sqlite_activity_indexes(conn)
         conn.commit()
     seed_verbs_if_empty()
+
+
+def create_sqlite_index_if_possible(conn, table_name, index_name, columns):
+    exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    if not exists:
+        return
+    existing_columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+    if not set(columns).issubset(existing_columns):
+        return
+    conn.execute(f"CREATE INDEX IF NOT EXISTS {index_name} ON {table_name}({', '.join(columns)})")
+
+
+def ensure_optional_sqlite_activity_indexes(conn):
+    optional_indexes = [
+        ("learning_logs", "idx_learning_logs_created_at", ["created_at"]),
+        ("daily_records", "idx_daily_records_created_at", ["created_at"]),
+        ("daily_records", "idx_daily_records_date", ["date"]),
+        ("quiz_results", "idx_quiz_results_created_at", ["created_at"]),
+        ("test_results", "idx_test_results_created_at", ["created_at"]),
+        ("wrong_answers", "idx_wrong_answers_next_review_at", ["next_review_at"]),
+        ("wrong_answer_reviews", "idx_wrong_answer_reviews_created_at", ["created_at"]),
+        ("grammar_analysis_logs", "idx_grammar_analysis_logs_created_at", ["created_at"]),
+        ("daily_activity_logs", "idx_daily_activity_logs_created_at", ["created_at"]),
+        ("daily_material_views", "idx_daily_material_views_created_at", ["created_at"]),
+    ]
+    for table_name, index_name, columns in optional_indexes:
+        create_sqlite_index_if_possible(conn, table_name, index_name, columns)
 
 
 def migrate_slang_candidates_sqlite(conn):
@@ -625,6 +674,8 @@ def migrate_slang_candidates_sqlite(conn):
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON slang_candidates(status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_category ON slang_candidates(category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status_category ON slang_candidates(status, category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_last_used_at ON slang_candidates(last_used_at)")
 
 
 def migrate_vocabulary_pool_sqlite(conn):
@@ -701,6 +752,8 @@ def migrate_vocabulary_pool_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
 
 
 def migrate_mistake_logs(conn):
@@ -1404,6 +1457,8 @@ def migrate_slang_candidates_postgres():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_slang_candidates_term_unique ON slang_candidates(term)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status ON slang_candidates(status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_category ON slang_candidates(category)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_status_category ON slang_candidates(status, category)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slang_candidates_last_used_at ON slang_candidates(last_used_at)")
             now = utc_now_iso()
             cur.execute(
                 """
@@ -1477,6 +1532,8 @@ def migrate_vocabulary_pool_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
             now = utc_now_iso()
             cur.execute(
                 """
@@ -1513,6 +1570,17 @@ def ensure_vocabulary_pool_store():
 
 
 def ensure_database():
+    global _MATERIALS_SCHEMA_READY
+    if _MATERIALS_SCHEMA_READY:
+        return
+    with _SCHEMA_LOCK:
+        if _MATERIALS_SCHEMA_READY:
+            return
+        _ensure_database_uncached()
+        _MATERIALS_SCHEMA_READY = True
+
+
+def _ensure_database_uncached():
     if DATABASE_URL:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -1544,6 +1612,8 @@ def ensure_database():
                 for col in COLUMNS:
                     if col not in ("date",):
                         cur.execute(f"ALTER TABLE materials ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT ''")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_date ON materials(date)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_created_at ON materials(created_at)")
             conn.commit()
         migrate_slang_candidates_postgres()
         migrate_vocabulary_pool_postgres()
@@ -1567,6 +1637,18 @@ def read_database():
         if col not in df.columns:
             df[col] = ""
     return df[COLUMNS]
+
+
+def read_material_rows_by_date(target_date):
+    ensure_database()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT {', '.join(COLUMNS)} FROM materials WHERE date = %s ORDER BY id", (target_date,))
+                rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
+    df = read_database()
+    return df[df["date"] == target_date]
 
 
 def parse_json_from_ai(text):
@@ -2763,12 +2845,14 @@ def save_material_for_today(material, settings):
         rows = [tuple(clean_db_payload(row)[col] for col in COLUMNS) for row in new_rows]
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                print(f"[history-protection] safe upsert daily_material date={date}")
                 cur.execute("DELETE FROM materials WHERE date = %s", (date,))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
         return date
 
     df = read_database()
+    print(f"[history-protection] safe upsert daily_material date={date}")
     df = df[df["date"] != date]
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
@@ -2776,8 +2860,7 @@ def save_material_for_today(material, settings):
 
 
 def material_by_date(target_date):
-    df = read_database()
-    rows = df[df["date"] == target_date]
+    rows = read_material_rows_by_date(target_date)
     if rows.empty:
         return None
 
@@ -2899,6 +2982,7 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     print(f"[material-generator] mode={mode} start")
 
     if mode == "local":
+        print("[feature-boundary] daily_material mode=local skip gemini")
         raw_material = build_local_material(settings, force_seed=use_sample)
     elif mode == "ai_enhance":
         raw_material = build_local_material(settings)
@@ -3755,6 +3839,10 @@ def persist_analysis_slang_terms(payload, source_context, source):
 
 
 def analyze_grammar_with_gemini(text):
+    if GEMINI_API_KEY:
+        print("[feature-boundary] grammar_analyzer gemini enabled")
+    else:
+        print("[grammar-analyzer] fallback reason=missing_api_key")
     parsed, mecab_error = analyze_with_mecab(text)
     fallback_reading = parsed["reading_hiragana"] if parsed else answer_reading_hiragana(text)
     advanced_mecab = {
@@ -3770,7 +3858,7 @@ def analyze_grammar_with_gemini(text):
     for model_name in gemini_model_candidates():
         raw_response = ""
         try:
-            print(f"[grammar-analyzer] 嘗試 Gemini 模型；model={model_name}")
+            print(f"[grammar-analyzer] using model={model_name}")
             raw_response = call_gemini(prompt, model_name=model_name)
             ai_payload = parse_gemini_json_safely(raw_response)
             payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
@@ -3790,6 +3878,8 @@ def analyze_grammar_with_gemini(text):
             continue
 
     if failures:
+        reason = failures[0].get("error_type") or "unknown"
+        print(f"[grammar-analyzer] fallback reason={reason}")
         print(f"[grammar-analyzer] 所有 Gemini 模型皆失敗；failures={json.dumps(failures, ensure_ascii=False)}")
     payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
     persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
@@ -3797,6 +3887,7 @@ def analyze_grammar_with_gemini(text):
 
 
 def handle_grammar_analyzer_api():
+    started = time.perf_counter()
     data = request.get_json(silent=True) or {}
     text = str(data.get("text", "")).strip()
     if not text:
@@ -3804,6 +3895,8 @@ def handle_grammar_analyzer_api():
     if not is_probably_japanese_text(text):
         return jsonify(grammar_not_japanese_response())
     payload, status = analyze_grammar_with_gemini(text)
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(f"[perf] grammar_analyzer ms={elapsed_ms}")
     return jsonify(payload), status
 
 
@@ -3894,7 +3987,11 @@ def api_archive_dates():
 
 @app.get("/api/materials")
 def api_materials():
-    return jsonify(material_by_date(request.args.get("date", today_string())))
+    started = time.perf_counter()
+    payload = material_by_date(request.args.get("date", today_string()))
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(f"[perf] load_daily_material ms={elapsed_ms}")
+    return jsonify(payload)
 
 
 @app.post("/api/generate")
@@ -4435,12 +4532,17 @@ def api_sns_self_evaluate():
 
 @app.get("/api/dashboard")
 def api_dashboard():
+    started = time.perf_counter()
     now_ts = taipei_now().timestamp()
     if _DASHBOARD_CACHE["payload"] is not None and _DASHBOARD_CACHE["expires_at"] and _DASHBOARD_CACHE["expires_at"] > now_ts:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[perf] dashboard_summary ms={elapsed_ms} cached=true")
         return jsonify(_DASHBOARD_CACHE["payload"])
     payload = safe_dashboard_payload()
     _DASHBOARD_CACHE["payload"] = payload
     _DASHBOARD_CACHE["expires_at"] = now_ts + DASHBOARD_CACHE_TTL_SECONDS
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(f"[perf] dashboard_summary ms={elapsed_ms} cached=false")
     return jsonify(payload)
 
 
@@ -4508,7 +4610,21 @@ def add_sqlite_activity_sources(active_map, table_name, columns, source):
         if not usable_columns:
             return
         select_sql = ", ".join(usable_columns)
-        rows = sqlite_dicts(f"SELECT {select_sql} FROM {table_name}")
+        filters = []
+        params = []
+        for column in usable_columns:
+            for iso_date in active_map:
+                try:
+                    parsed = datetime.strptime(iso_date, "%Y-%m-%d").date()
+                    slash_date = f"{parsed.year}/{parsed.month}/{parsed.day}"
+                except ValueError:
+                    slash_date = iso_date
+                filters.append(f"{column} LIKE ?")
+                params.append(f"{iso_date}%")
+                filters.append(f"{column} LIKE ?")
+                params.append(f"{slash_date}%")
+        where_sql = f" WHERE {' OR '.join(filters)}" if filters else ""
+        rows = sqlite_dicts(f"SELECT {select_sql} FROM {table_name}{where_sql}", tuple(params))
         for row in rows:
             for column in usable_columns:
                 add_activity_source(active_map, row.get(column), source)
@@ -4516,19 +4632,47 @@ def add_sqlite_activity_sources(active_map, table_name, columns, source):
         print(f"[dashboard-summary] activity source skipped; source={source}; reason={e}")
 
 
+def add_material_activity_sources(active_map):
+    slash_dates = []
+    for iso_date in active_map:
+        try:
+            parsed = datetime.strptime(iso_date, "%Y-%m-%d").date()
+            slash_dates.append(f"{parsed.year}/{parsed.month}/{parsed.day}")
+        except ValueError:
+            slash_dates.append(iso_date)
+    try:
+        if DATABASE_URL:
+            ensure_database()
+            placeholders = ", ".join(["%s"] * len(slash_dates))
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT DISTINCT date FROM materials WHERE date IN ({placeholders})",
+                        tuple(slash_dates),
+                    )
+                    rows = cur.fetchall()
+            for (date_value,) in rows:
+                add_activity_source(active_map, date_value, "daily_materials")
+            return
+        df = read_database()
+        if df.empty:
+            return
+        date_values = set(slash_dates) | set(active_map.keys())
+        rows = df[df["date"].isin(date_values)] if "date" in df.columns else df
+        for _, row in rows.iterrows():
+            add_activity_source(active_map, row.get("date"), "daily_materials")
+            add_activity_source(active_map, row.get("created_at"), "daily_materials")
+            add_activity_source(active_map, row.get("updated_at"), "daily_materials")
+    except Exception as e:
+        print(f"[dashboard-summary] material activity source failed; reason={e}")
+
+
 def get_active_days_last_7():
+    started = time.perf_counter()
     base_days = dashboard_safe_dates()
     active_map = {day["date"]: set() for day in base_days}
 
-    try:
-        df = read_database()
-        if not df.empty:
-            for _, row in df.iterrows():
-                add_activity_source(active_map, row.get("date"), "daily_materials")
-                add_activity_source(active_map, row.get("created_at"), "daily_materials")
-                add_activity_source(active_map, row.get("updated_at"), "daily_materials")
-    except Exception as e:
-        print(f"[dashboard-summary] material activity source failed; reason={e}")
+    add_material_activity_sources(active_map)
 
     activity_sources = [
         ("quiz_records", ["created_at"], "quiz_records"),
@@ -4559,6 +4703,8 @@ def get_active_days_last_7():
                 "sources": sources,
             }
         )
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    print(f"[perf] active_days_query ms={elapsed_ms}")
     return {"active_days_last_7": sum(1 for day in days if day["active"]), "days": days}
 
 
@@ -5012,6 +5158,18 @@ def api_quiz_submit():
         conn.commit()
     invalidate_dashboard_cache("quiz submitted")
     return jsonify({"score": score, "total": len(questions), "results": results})
+
+
+def initialize_runtime_schema():
+    try:
+        ensure_database()
+        ensure_settings_store()
+    except Exception as e:
+        print(f"[startup] schema initialization failed; will retry on demand; reason={e}")
+        print(traceback.format_exc())
+
+
+initialize_runtime_schema()
 
 
 if __name__ == "__main__":
