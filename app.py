@@ -4438,51 +4438,181 @@ def api_dashboard():
     now_ts = taipei_now().timestamp()
     if _DASHBOARD_CACHE["payload"] is not None and _DASHBOARD_CACHE["expires_at"] and _DASHBOARD_CACHE["expires_at"] > now_ts:
         return jsonify(_DASHBOARD_CACHE["payload"])
-    payload = build_dashboard_payload()
+    payload = safe_dashboard_payload()
     _DASHBOARD_CACHE["payload"] = payload
     _DASHBOARD_CACHE["expires_at"] = now_ts + DASHBOARD_CACHE_TTL_SECONDS
     return jsonify(payload)
 
 
-def build_dashboard_payload():
+@app.get("/api/dashboard/summary")
+def api_dashboard_summary():
+    return api_dashboard()
+
+
+def dashboard_safe_dates():
+    now = taipei_now()
+    return [
+        {
+            "date": (now - timedelta(days=i)).date().isoformat(),
+            "label": f"{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}",
+            "studied": False,
+            "active": False,
+        }
+        for i in reversed(range(7))
+    ]
+
+
+def dashboard_default_payload(reason=""):
     settings = load_settings()
     today = today_string()
-    today_material = material_by_date(today)
-    df = read_database()
-    now = datetime.now(ZoneInfo("Asia/Taipei"))
-    last_7_dates = [f"{(now - timedelta(days=i)).year}/{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}" for i in range(7)]
-    material_dates = set(d for d in df["date"].drop_duplicates().tolist() if d)
-    active_days = [date for date in last_7_dates if date in material_dates]
-    today_iso = now.date().isoformat()
-    today_mistakes = sqlite_dicts(
-        """
-        SELECT id FROM mistake_logs
-        WHERE mastered = 0 AND substr(last_reviewed_at, 1, 10) = ?
-        """,
-        (today_iso,),
-    )
-    due_review = sqlite_one(
-        """
-        SELECT COUNT(*) AS count
-        FROM mistake_logs
-        WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
-        """,
-        (today_iso_date(), today_iso_date()),
-    )
-    review_items = query_mistakes({}, limit=5)
-    return {
+    quiz_total = int(settings.get("mcq_count", 0) or 0) + int(settings.get("fill_count", 0) or 0)
+    days = dashboard_safe_dates()
+    payload = {
         "today": today,
-        "has_today_material": bool(today_material),
+        "today_iso": today_iso_date(),
+        "has_today_material": False,
         "target_level": settings["target_level"],
-        "vocab_count": len(today_material["vocabulary"]) if today_material else 0,
-        "verb_count": len(today_material["verbs"]) if today_material else 0,
-        "quiz_total": int(settings["mcq_count"]) + int(settings["fill_count"]),
-        "today_new_mistakes": len(today_mistakes),
-        "due_review_count": int(due_review["count"] if due_review else 0),
-        "last_7_days": [{"date": date, "studied": date in material_dates} for date in reversed(last_7_dates)],
-        "streak_days": len(active_days),
-        "review_items": review_items,
+        "vocab_count": 0,
+        "verb_count": 0,
+        "quiz_total": quiz_total,
+        "quiz_completed": 0,
+        "quiz_accuracy_text": "尚無紀錄",
+        "today_new_mistakes": 0,
+        "due_review_count": 0,
+        "last_7_days": days,
+        "streak_days": 0,
+        "review_items": [],
+        "dashboard_warning": reason,
+        "today_material": {
+            "status": "not_generated",
+            "date": today,
+            "target_level": settings["target_level"],
+            "word_count": 0,
+            "verb_count": 0,
+        },
+        "quiz": {
+            "completed": 0,
+            "total": quiz_total,
+            "accuracy_text": "尚無紀錄",
+        },
+        "learning_streak": {
+            "active_days_last_7": 0,
+            "days": days,
+        },
+        "review": {
+            "due_count": 0,
+            "message": "目前沒有待複習錯題。",
+        },
     }
+    return payload
+
+
+def safe_dashboard_payload():
+    try:
+        payload = build_dashboard_payload()
+    except Exception as e:
+        print(f"[dashboard-summary] failed; reason={e}")
+        print(traceback.format_exc())
+        payload = dashboard_default_payload("統計資料暫時無法取得。")
+    return payload
+
+
+def build_dashboard_payload():
+    payload = dashboard_default_payload()
+    settings = load_settings()
+    today = today_string()
+    today_iso = today_iso_date()
+
+    try:
+        today_material = material_by_date(today)
+        payload["has_today_material"] = bool(today_material)
+        payload["vocab_count"] = len(today_material["vocabulary"]) if today_material else 0
+        payload["verb_count"] = len(today_material["verbs"]) if today_material else 0
+        payload["today_material"] = {
+            "status": "generated" if today_material else "not_generated",
+            "date": today,
+            "target_level": today_material.get("targetLevel") if today_material else settings["target_level"],
+            "word_count": payload["vocab_count"],
+            "verb_count": payload["verb_count"],
+        }
+    except Exception as e:
+        print(f"[dashboard-summary] material query failed; reason={e}")
+        today_material = None
+
+    try:
+        df = read_database()
+        now = taipei_now()
+        date_pairs = [
+            (
+                f"{(now - timedelta(days=i)).year}/{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}",
+                (now - timedelta(days=i)).date().isoformat(),
+                f"{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}",
+            )
+            for i in reversed(range(7))
+        ]
+        material_dates = set(d for d in df["date"].drop_duplicates().tolist() if d)
+        days = [
+            {"date": iso_date, "label": label, "studied": legacy_date in material_dates, "active": legacy_date in material_dates}
+            for legacy_date, iso_date, label in date_pairs
+        ]
+        active_days = [day for day in days if day["active"]]
+        payload["last_7_days"] = days
+        payload["streak_days"] = len(active_days)
+        payload["learning_streak"] = {"active_days_last_7": len(active_days), "days": days}
+    except Exception as e:
+        print(f"[dashboard-summary] streak query failed; reason={e}")
+
+    try:
+        today_quiz = sqlite_one(
+            """
+            SELECT COALESCE(SUM(total_questions), 0) AS total_questions,
+                   COALESCE(SUM(correct_count), 0) AS correct_count
+            FROM quiz_records
+            WHERE substr(created_at, 1, 10) = ?
+            """,
+            (today_iso,),
+        )
+        completed = int(today_quiz.get("total_questions", 0) if today_quiz else 0)
+        correct = int(today_quiz.get("correct_count", 0) if today_quiz else 0)
+        accuracy_text = "尚無紀錄" if completed <= 0 else f"{round((correct / completed) * 100)}%"
+        payload["quiz_completed"] = completed
+        payload["quiz_accuracy_text"] = accuracy_text
+        payload["quiz"] = {"completed": completed, "total": payload["quiz_total"], "accuracy_text": accuracy_text}
+    except Exception as e:
+        print(f"[dashboard-summary] quiz query failed; reason={e}")
+
+    try:
+        today_mistakes = sqlite_dicts(
+            """
+            SELECT id FROM mistake_logs
+            WHERE mastered = 0 AND substr(last_reviewed_at, 1, 10) = ?
+            """,
+            (today_iso,),
+        )
+        due_review = sqlite_one(
+            """
+            SELECT COUNT(*) AS count
+            FROM mistake_logs
+            WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
+            """,
+            (today_iso, today_iso),
+        )
+        due_count = int(due_review["count"] if due_review else 0)
+        payload["today_new_mistakes"] = len(today_mistakes)
+        payload["due_review_count"] = due_count
+        payload["review_items"] = query_mistakes({}, limit=5)
+        payload["review"] = {
+            "due_count": due_count,
+            "message": "請前往「錯題複習」頁面完成今日複習。" if due_count > 0 else "目前沒有待複習錯題。",
+        }
+    except Exception as e:
+        print(f"[dashboard-summary] review query failed; reason={e}")
+
+    print(f"[dashboard-summary] material_status={payload['today_material']['status']}")
+    print(f"[dashboard-summary] quiz completed={payload['quiz']['completed']} total={payload['quiz']['total']}")
+    print(f"[dashboard-summary] active_days_last_7={payload['learning_streak']['active_days_last_7']}")
+    print(f"[dashboard-summary] review_due_count={payload['review']['due_count']}")
+    return payload
 
 
 def table_status(table_name):

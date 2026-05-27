@@ -261,6 +261,7 @@
 
 <script>
   let currentQuiz = [];
+  let currentMaterialData = null;
 
   function escapeHtml(value) {
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -289,6 +290,59 @@
   function todayKey() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+
+  function todayDisplay() {
+    const now = new Date();
+    return `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`;
+  }
+
+  function recentSevenDaysFallback() {
+    const days = [];
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const day = new Date(now);
+      day.setDate(now.getDate() - i);
+      days.push({
+        date: `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`,
+        label: `${day.getMonth() + 1}/${day.getDate()}`,
+        active: false,
+        studied: false
+      });
+    }
+    return days;
+  }
+
+  function fallbackDashboardData(warning = "") {
+    const hasMaterial = Boolean(currentMaterialData);
+    const wordCount = hasMaterial ? (currentMaterialData.vocabulary || []).length : 0;
+    const verbCount = hasMaterial ? (currentMaterialData.verbs || []).length : 0;
+    const targetLevel = hasMaterial ? (currentMaterialData.targetLevel || "") : (document.getElementById("setting-level")?.value || "");
+    const quizTotal = Number(document.getElementById("setting-mcq")?.value || 5) + Number(document.getElementById("setting-fill")?.value || 5);
+    const days = recentSevenDaysFallback();
+    if (hasMaterial) days[days.length - 1].active = days[days.length - 1].studied = true;
+    return {
+      today: hasMaterial ? currentMaterialData.date : todayDisplay(),
+      has_today_material: hasMaterial,
+      target_level: targetLevel,
+      vocab_count: wordCount,
+      verb_count: verbCount,
+      quiz_total: quizTotal,
+      due_review_count: 0,
+      last_7_days: days,
+      streak_days: hasMaterial ? 1 : 0,
+      dashboard_warning: warning,
+      today_material: {
+        status: hasMaterial ? "generated" : "not_generated",
+        date: hasMaterial ? currentMaterialData.date : todayDisplay(),
+        target_level: targetLevel,
+        word_count: wordCount,
+        verb_count: verbCount
+      },
+      quiz: { completed: 0, total: quizTotal, accuracy_text: "尚無紀錄" },
+      learning_streak: { active_days_last_7: hasMaterial ? 1 : 0, days },
+      review: { due_count: 0, message: "目前沒有待複習錯題。" }
+    };
   }
 
   function getTodayQuizStats() {
@@ -329,9 +383,12 @@
   }
 
   window.onload = async () => {
-    await loadArchiveList();
-    await loadDaily();
-    await loadSettings();
+    await loadArchiveList().catch(() => {});
+    await loadDaily().catch(() => {
+      document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
+      document.getElementById("content-loader").style.display = "block";
+    });
+    await loadSettings().catch(() => {});
     await loadDashboard();
   };
 
@@ -425,35 +482,40 @@
   async function loadDashboard() {
     let data;
     try {
-      data = await apiWithTimeout("/api/dashboard", 5000);
+      data = await apiWithTimeout("/api/dashboard/summary", 5000);
     } catch (error) {
-      document.getElementById("dash-material").innerText = "整理中";
-      document.getElementById("dash-material-note").innerText = "資料整理中，請稍後重新整理";
-      document.getElementById("dash-quiz").innerText = "- / -";
-      document.getElementById("dash-accuracy").innerText = "資料整理中，請稍後重新整理";
-      document.getElementById("dash-streak").innerText = "- 天";
-      document.getElementById("dash-streak-row").innerHTML = "";
-      document.getElementById("dash-mistakes").innerText = "- 題";
-      document.getElementById("dash-review").innerText = "資料整理中，請稍後重新整理";
-      return;
+      data = fallbackDashboardData("統計資料暫時無法取得。");
     }
+    renderDashboard(data);
+  }
+
+  function renderDashboard(data) {
+    data = data || fallbackDashboardData("統計資料暫時無法取得。");
+    const material = data.today_material || {};
+    const hasMaterial = material.status === "generated" || data.has_today_material;
+    const quiz = data.quiz || {};
+    const streak = data.learning_streak || {};
+    const review = data.review || {};
     const stats = getTodayQuizStats();
-    document.getElementById("dash-material").innerText = data.has_today_material ? "已生成" : "尚未生成";
-    document.getElementById("dash-material-note").innerText = data.has_today_material
-      ? `${data.today}｜${data.target_level}｜${data.vocab_count} 個單字、${data.verb_count} 個動詞`
-      : "今日尚無學習材料，可由控制中心手動生成或等待 Render Cron。";
-    document.getElementById("dash-quiz").innerText = `${stats.completed || 0} / ${data.quiz_total || 0}`;
+    document.getElementById("dash-material").innerText = hasMaterial ? "已生成" : "尚未生成";
+    document.getElementById("dash-material-note").innerText = hasMaterial
+      ? `${material.date || data.today || todayDisplay()}｜${material.target_level || data.target_level || ""}｜${material.word_count ?? data.vocab_count ?? 0} 個單字、${material.verb_count ?? data.verb_count ?? 0} 個動詞`
+      : (data.dashboard_warning || "請到控制中心建立今日教材");
+    const quizCompleted = stats.completed || quiz.completed || 0;
+    const quizTotal = stats.total || quiz.total || data.quiz_total || 10;
+    document.getElementById("dash-quiz").innerText = `${quizCompleted} / ${quizTotal}`;
     const accuracy = stats.total ? Math.round((stats.correct / stats.total) * 100) : null;
-    document.getElementById("dash-accuracy").innerText = accuracy === null ? "今日答對率：尚無紀錄" : `今日答對率：${accuracy}%`;
-    document.getElementById("dash-streak").innerText = `${data.streak_days} 天`;
-    document.getElementById("dash-streak-row").innerHTML = data.last_7_days.map(day => {
-      const label = day.date.split("/").slice(1).join("/");
-      return `<div class="streak-day ${day.studied ? "active" : ""}">${escapeHtml(label)}</div>`;
+    const accuracyText = accuracy === null ? (quiz.accuracy_text || "尚無紀錄") : `${accuracy}%`;
+    document.getElementById("dash-accuracy").innerText = `今日答對率：${accuracyText}`;
+    document.getElementById("dash-streak").innerText = `${streak.active_days_last_7 ?? data.streak_days ?? 0} 天`;
+    const days = streak.days || data.last_7_days || recentSevenDaysFallback();
+    document.getElementById("dash-streak-row").innerHTML = days.map(day => {
+      const label = day.label || String(day.date || "").split("-").slice(1).join("/") || "--";
+      return `<div class="streak-day ${(day.active || day.studied) ? "active" : ""}">${escapeHtml(label)}</div>`;
     }).join("");
-    document.getElementById("dash-mistakes").innerText = `${data.due_review_count || 0} 題`;
-    document.getElementById("dash-review").innerHTML = (data.due_review_count || 0) > 0
-      ? "請前往「錯題複習」頁面完成今日複習。"
-      : "目前沒有待複習錯題。";
+    const dueCount = review.due_count ?? data.due_review_count ?? 0;
+    document.getElementById("dash-mistakes").innerText = `${dueCount} 題`;
+    document.getElementById("dash-review").innerText = review.message || (dueCount > 0 ? "請前往「錯題複習」頁面完成今日複習。" : "目前沒有待複習錯題。");
   }
 
   async function loadDaily() {
@@ -480,10 +542,12 @@
   function renderMaterial(data) {
     document.getElementById("content-loader").style.display = "none";
     if (!data) {
+      currentMaterialData = null;
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日尚無學習材料。請到控制中心生成，或等待 Render Cron 自動生成。</div>";
       document.getElementById("content-loader").style.display = "block";
       return;
     }
+    currentMaterialData = data;
     document.getElementById("material-content").style.display = "block";
     document.getElementById("vocab-list").innerHTML = data.vocabulary.map(v => `
       <div class="col-12 col-md-6"><div class="vocab-card p-3">
