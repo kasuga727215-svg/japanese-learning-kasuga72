@@ -321,6 +321,9 @@ COLUMNS = [
     "vocab_meaning",
     "vocab_part_of_speech",
     "vocab_source",
+    "vocab_jlpt_level",
+    "vocab_category",
+    "vocab_normalized_key",
     "vocab_example_sentence",
     "vocab_example_translation_zh",
     "verb_base",
@@ -635,6 +638,9 @@ def migrate_vocabulary_pool_sqlite(conn):
             meaning_zh TEXT DEFAULT '',
             part_of_speech TEXT DEFAULT '',
             jlpt_level TEXT DEFAULT '',
+            normalized_key TEXT,
+            category TEXT DEFAULT 'general',
+            cooldown_days INTEGER DEFAULT 14,
             example_sentence TEXT DEFAULT '',
             example_translation_zh TEXT DEFAULT '',
             source TEXT DEFAULT 'manual',
@@ -656,6 +662,9 @@ def migrate_vocabulary_pool_sqlite(conn):
         "meaning_zh": "ALTER TABLE vocabulary_pool ADD COLUMN meaning_zh TEXT DEFAULT ''",
         "part_of_speech": "ALTER TABLE vocabulary_pool ADD COLUMN part_of_speech TEXT DEFAULT ''",
         "jlpt_level": "ALTER TABLE vocabulary_pool ADD COLUMN jlpt_level TEXT DEFAULT ''",
+        "normalized_key": "ALTER TABLE vocabulary_pool ADD COLUMN normalized_key TEXT",
+        "category": "ALTER TABLE vocabulary_pool ADD COLUMN category TEXT DEFAULT 'general'",
+        "cooldown_days": "ALTER TABLE vocabulary_pool ADD COLUMN cooldown_days INTEGER DEFAULT 14",
         "example_sentence": "ALTER TABLE vocabulary_pool ADD COLUMN example_sentence TEXT DEFAULT ''",
         "example_translation_zh": "ALTER TABLE vocabulary_pool ADD COLUMN example_translation_zh TEXT DEFAULT ''",
         "source": "ALTER TABLE vocabulary_pool ADD COLUMN source TEXT DEFAULT 'manual'",
@@ -675,6 +684,9 @@ def migrate_vocabulary_pool_sqlite(conn):
         UPDATE vocabulary_pool
         SET surface = COALESCE(NULLIF(surface, ''), base_form),
             base_form = COALESCE(NULLIF(base_form, ''), surface),
+            normalized_key = COALESCE(NULLIF(normalized_key, ''), NULLIF(base_form, ''), surface),
+            category = COALESCE(NULLIF(category, ''), 'general'),
+            cooldown_days = COALESCE(cooldown_days, 14),
             source = COALESCE(NULLIF(source, ''), 'manual'),
             priority = COALESCE(priority, 1),
             is_active = COALESCE(is_active, 1),
@@ -685,6 +697,8 @@ def migrate_vocabulary_pool_sqlite(conn):
         (now, now),
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_base_level ON vocabulary_pool(base_form, jlpt_level)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_normalized_key ON vocabulary_pool(normalized_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
 
@@ -1421,6 +1435,9 @@ def migrate_vocabulary_pool_postgres():
                     meaning_zh TEXT DEFAULT '',
                     part_of_speech TEXT DEFAULT '',
                     jlpt_level TEXT DEFAULT '',
+                    normalized_key TEXT,
+                    category TEXT DEFAULT 'general',
+                    cooldown_days INTEGER DEFAULT 14,
                     example_sentence TEXT DEFAULT '',
                     example_translation_zh TEXT DEFAULT '',
                     source TEXT DEFAULT 'manual',
@@ -1440,6 +1457,9 @@ def migrate_vocabulary_pool_postgres():
                 "meaning_zh": "TEXT DEFAULT ''",
                 "part_of_speech": "TEXT DEFAULT ''",
                 "jlpt_level": "TEXT DEFAULT ''",
+                "normalized_key": "TEXT",
+                "category": "TEXT DEFAULT 'general'",
+                "cooldown_days": "INTEGER DEFAULT 14",
                 "example_sentence": "TEXT DEFAULT ''",
                 "example_translation_zh": "TEXT DEFAULT ''",
                 "source": "TEXT DEFAULT 'manual'",
@@ -1453,6 +1473,8 @@ def migrate_vocabulary_pool_postgres():
             for column, col_type in columns.items():
                 cur.execute(f"ALTER TABLE vocabulary_pool ADD COLUMN IF NOT EXISTS {column} {col_type}")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_base_level ON vocabulary_pool(base_form, jlpt_level)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_normalized_key ON vocabulary_pool(normalized_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
             now = utc_now_iso()
@@ -1461,6 +1483,9 @@ def migrate_vocabulary_pool_postgres():
                 UPDATE vocabulary_pool
                 SET surface = COALESCE(NULLIF(surface, ''), base_form),
                     base_form = COALESCE(NULLIF(base_form, ''), surface),
+                    normalized_key = COALESCE(NULLIF(normalized_key, ''), NULLIF(base_form, ''), surface),
+                    category = COALESCE(NULLIF(category, ''), 'general'),
+                    cooldown_days = COALESCE(cooldown_days, 14),
                     source = COALESCE(NULLIF(source, ''), 'manual'),
                     priority = COALESCE(priority, 1),
                     is_active = COALESCE(is_active, TRUE),
@@ -1863,6 +1888,10 @@ def material_vocab_from_existing(settings, limit):
                 "meaning": str(row.get("vocab_meaning", "")).strip(),
                 "part_of_speech": "",
                 "jlpt_level": row_level,
+                "category": row.get("vocab_category", "") or "materials",
+                "normalized_key": normalize_vocab_key(row.get("vocab_normalized_key", "") or word),
+                "example_sentence": row.get("vocab_example_sentence", ""),
+                "example_translation_zh": row.get("vocab_example_translation_zh", ""),
                 "source": "materials",
             }
         )
@@ -1881,15 +1910,32 @@ def material_vocab_from_approved_slang(limit):
             "reading": item.get("reading_hiragana", ""),
             "meaning": item.get("meaning_zh", "") or "已審核的新詞",
             "part_of_speech": "SNS語彙",
-            "jlpt_level": item.get("category", ""),
+            "jlpt_level": "",
+            "category": item.get("category", "sns"),
+            "normalized_key": normalize_vocab_key(item.get("normalized_term") or item.get("term", "")),
             "source": "slang_candidates",
             "_slang_id": item.get("id"),
         }
         for item in selected
         if item.get("term")
     ]
-    mark_slang_used_in_material(selected[: len(items)])
     return items
+
+
+def dedupe_vocab_items(items, existing_keys=None):
+    selected = []
+    seen = set(existing_keys or [])
+    duplicate_count = 0
+    for item in items or []:
+        key = item_normalized_key(item)
+        if key and key in seen:
+            duplicate_count += 1
+            continue
+        if key:
+            seen.add(key)
+            item["normalized_key"] = key
+        selected.append(item)
+    return selected, duplicate_count, seen
 
 
 def first_text(row, names):
@@ -1900,10 +1946,57 @@ def first_text(row, names):
     return ""
 
 
+def normalize_vocab_key(value):
+    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    text = re.sub(r"\s+", "", text)
+    buzz_base = "\u30d0\u30ba\u308b"
+    buzz_variants = (
+        buzz_base,
+        "\u30d0\u30ba\u3063\u305f",
+        "\u30d0\u30ba\u308a\u305d\u3046",
+        "\u30d0\u30ba\u3063\u3066\u308b",
+        "\u30d0\u30ba\u308a",
+        "\u30d0\u30ba\u308c",
+    )
+    if text == buzz_base or any(text.startswith(variant) for variant in buzz_variants):
+        return buzz_base
+    return text
+
+
+def item_normalized_key(item):
+    if not isinstance(item, dict):
+        return ""
+    for key in ("normalized_key", "normalized_term", "base_form", "surface", "term", "word"):
+        value = item.get(key)
+        if value:
+            return normalize_vocab_key(value)
+    return ""
+
+
+def jlpt_level_rank(level):
+    try:
+        return int(str(level or "").upper().replace("N", ""))
+    except ValueError:
+        return 9
+
+
+def preferred_level_distance(target, level):
+    if not target or not level:
+        return 2
+    target_rank = jlpt_level_rank(target)
+    level_rank = jlpt_level_rank(level)
+    if target_rank == level_rank:
+        return 0
+    if abs(target_rank - level_rank) == 1:
+        return 1
+    return 3 if level_rank < target_rank else 2
+
+
 def normalize_vocabulary_item(raw):
     raw = dict(raw or {})
     surface = first_text(raw, ["surface", "term", "word", "vocab_word", "base_form"])
     base_form = first_text(raw, ["base_form", "dictionary_form", "surface", "term", "word", "vocab_word"]) or surface
+    normalized_key = normalize_vocab_key(first_text(raw, ["normalized_key", "normalized_term", "base_form", "surface", "term", "word"]) or base_form or surface)
     if not surface or not base_form:
         return None
     try:
@@ -1922,6 +2015,9 @@ def normalize_vocabulary_item(raw):
             "meaning_zh": first_text(raw, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"]),
             "part_of_speech": first_text(raw, ["part_of_speech", "pos"]),
             "jlpt_level": first_text(raw, ["jlpt_level", "target_level", "level"]),
+            "normalized_key": normalized_key,
+            "category": first_text(raw, ["category"]) or "general",
+            "cooldown_days": int(raw.get("cooldown_days", 14) or 14),
             "example_sentence": first_text(raw, ["example_sentence", "example_japanese"]),
             "example_translation_zh": first_text(raw, ["example_translation_zh", "example_chinese", "example_translation"]),
             "source": first_text(raw, ["source"]) or "seed_basic",
@@ -1937,7 +2033,7 @@ def normalize_vocabulary_item(raw):
 
 def upsert_vocabulary_pool(items):
     normalized_items = [item for item in (normalize_vocabulary_item(raw) for raw in items or []) if item]
-    result = {"success": 0, "failed": 0, "skipped": 0, "total": len(normalized_items)}
+    result = {"success": 0, "failed": 0, "skipped": 0, "inserted_count": 0, "updated_count": 0, "total_count": len(normalized_items)}
     if not normalized_items:
         return result
     ensure_vocabulary_pool_store()
@@ -1947,8 +2043,8 @@ def upsert_vocabulary_pool(items):
                 try:
                     with conn.cursor() as cur:
                         cur.execute(
-                            "SELECT id FROM vocabulary_pool WHERE base_form = %s AND jlpt_level = %s LIMIT 1",
-                            (item["base_form"], item["jlpt_level"]),
+                            "SELECT id FROM vocabulary_pool WHERE normalized_key = %s LIMIT 1",
+                            (item["normalized_key"],),
                         )
                         existing = cur.fetchone()
                         if existing:
@@ -1956,9 +2052,13 @@ def upsert_vocabulary_pool(items):
                                 """
                                 UPDATE vocabulary_pool
                                 SET surface = COALESCE(NULLIF(surface, ''), %s),
+                                    base_form = COALESCE(NULLIF(base_form, ''), %s),
                                     reading_hiragana = COALESCE(NULLIF(reading_hiragana, ''), %s),
                                     meaning_zh = COALESCE(NULLIF(meaning_zh, ''), %s),
                                     part_of_speech = COALESCE(NULLIF(part_of_speech, ''), %s),
+                                    jlpt_level = COALESCE(NULLIF(jlpt_level, ''), %s),
+                                    category = COALESCE(NULLIF(category, ''), %s),
+                                    cooldown_days = COALESCE(cooldown_days, %s),
                                     example_sentence = COALESCE(NULLIF(example_sentence, ''), %s),
                                     example_translation_zh = COALESCE(NULLIF(example_translation_zh, ''), %s),
                                     source = COALESCE(NULLIF(source, ''), %s),
@@ -1970,9 +2070,13 @@ def upsert_vocabulary_pool(items):
                                 """,
                                 (
                                     item["surface"],
+                                    item["base_form"],
                                     item["reading_hiragana"],
                                     item["meaning_zh"],
                                     item["part_of_speech"],
+                                    item["jlpt_level"],
+                                    item["category"],
+                                    item["cooldown_days"],
                                     item["example_sentence"],
                                     item["example_translation_zh"],
                                     item["source"],
@@ -1986,19 +2090,22 @@ def upsert_vocabulary_pool(items):
                             cur.execute(
                                 """
                                 INSERT INTO vocabulary_pool (
-                                    surface, base_form, reading_hiragana, meaning_zh, part_of_speech,
-                                    jlpt_level, example_sentence, example_translation_zh, source, priority,
+                                    surface, base_form, normalized_key, reading_hiragana, meaning_zh, part_of_speech,
+                                    jlpt_level, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
                                     is_active, used_in_material_count, last_used_at, created_at, updated_at
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                 """,
                                 (
                                     item["surface"],
                                     item["base_form"],
+                                    item["normalized_key"],
                                     item["reading_hiragana"],
                                     item["meaning_zh"],
                                     item["part_of_speech"],
                                     item["jlpt_level"],
+                                    item["category"],
+                                    item["cooldown_days"],
                                     item["example_sentence"],
                                     item["example_translation_zh"],
                                     item["source"],
@@ -2012,6 +2119,7 @@ def upsert_vocabulary_pool(items):
                             )
                     conn.commit()
                     result["success"] += 1
+                    result["updated_count" if existing else "inserted_count"] += 1
                 except Exception:
                     conn.rollback()
                     result["failed"] += 1
@@ -2023,17 +2131,21 @@ def upsert_vocabulary_pool(items):
         for item in normalized_items:
             try:
                 existing = conn.execute(
-                    "SELECT id FROM vocabulary_pool WHERE base_form = ? AND jlpt_level = ? LIMIT 1",
-                    (item["base_form"], item["jlpt_level"]),
+                    "SELECT id FROM vocabulary_pool WHERE normalized_key = ? LIMIT 1",
+                    (item["normalized_key"],),
                 ).fetchone()
                 if existing:
                     conn.execute(
                         """
                         UPDATE vocabulary_pool
                         SET surface = COALESCE(NULLIF(surface, ''), ?),
+                            base_form = COALESCE(NULLIF(base_form, ''), ?),
                             reading_hiragana = COALESCE(NULLIF(reading_hiragana, ''), ?),
                             meaning_zh = COALESCE(NULLIF(meaning_zh, ''), ?),
                             part_of_speech = COALESCE(NULLIF(part_of_speech, ''), ?),
+                            jlpt_level = COALESCE(NULLIF(jlpt_level, ''), ?),
+                            category = COALESCE(NULLIF(category, ''), ?),
+                            cooldown_days = COALESCE(cooldown_days, ?),
                             example_sentence = COALESCE(NULLIF(example_sentence, ''), ?),
                             example_translation_zh = COALESCE(NULLIF(example_translation_zh, ''), ?),
                             source = COALESCE(NULLIF(source, ''), ?),
@@ -2045,9 +2157,13 @@ def upsert_vocabulary_pool(items):
                         """,
                         (
                             item["surface"],
+                            item["base_form"],
                             item["reading_hiragana"],
                             item["meaning_zh"],
                             item["part_of_speech"],
+                            item["jlpt_level"],
+                            item["category"],
+                            item["cooldown_days"],
                             item["example_sentence"],
                             item["example_translation_zh"],
                             item["source"],
@@ -2061,19 +2177,22 @@ def upsert_vocabulary_pool(items):
                     conn.execute(
                         """
                         INSERT INTO vocabulary_pool (
-                            surface, base_form, reading_hiragana, meaning_zh, part_of_speech,
-                            jlpt_level, example_sentence, example_translation_zh, source, priority,
+                            surface, base_form, normalized_key, reading_hiragana, meaning_zh, part_of_speech,
+                            jlpt_level, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
                             is_active, used_in_material_count, last_used_at, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             item["surface"],
                             item["base_form"],
+                            item["normalized_key"],
                             item["reading_hiragana"],
                             item["meaning_zh"],
                             item["part_of_speech"],
                             item["jlpt_level"],
+                            item["category"],
+                            item["cooldown_days"],
                             item["example_sentence"],
                             item["example_translation_zh"],
                             item["source"],
@@ -2086,6 +2205,7 @@ def upsert_vocabulary_pool(items):
                         ),
                     )
                 result["success"] += 1
+                result["updated_count" if existing else "inserted_count"] += 1
             except Exception:
                 result["failed"] += 1
                 print(f"[vocabulary-pool] upsert failed surface={item.get('surface')}")
@@ -2123,11 +2243,12 @@ def fetch_vocabulary_pool_rows():
                         WHERE COALESCE(is_active, TRUE) = TRUE
                           AND COALESCE(NULLIF(meaning_zh, ''), '') <> ''
                           AND COALESCE(NULLIF(reading_hiragana, ''), '') <> ''
+                          AND COALESCE(category, 'general') NOT IN ('named_entity', 'sensitive', 'typo_or_noise', 'unknown')
                         ORDER BY COALESCE(used_in_material_count, 0) ASC,
                                  last_used_at ASC NULLS FIRST,
                                  priority DESC,
                                  id DESC
-                        LIMIT 500
+                        LIMIT 12000
                         """
                     )
                     columns = [desc[0] for desc in cur.description]
@@ -2146,11 +2267,12 @@ def fetch_vocabulary_pool_rows():
                 WHERE COALESCE(is_active, 1) = 1
                   AND COALESCE(NULLIF(meaning_zh, ''), '') <> ''
                   AND COALESCE(NULLIF(reading_hiragana, ''), '') <> ''
+                  AND COALESCE(category, 'general') NOT IN ('named_entity', 'sensitive', 'typo_or_noise', 'unknown')
                 ORDER BY COALESCE(used_in_material_count, 0) ASC,
                          COALESCE(last_used_at, '') ASC,
                          priority DESC,
                          id DESC
-                LIMIT 500
+                LIMIT 12000
                 """
             ).fetchall()
             return [dict(row) for row in rows]
@@ -2195,7 +2317,7 @@ def mark_vocabulary_pool_used(items):
         print(f"[material-generator] vocabulary_pool mark used failed; error={e}")
 
 
-def material_vocab_from_vocabulary_pool(settings, limit):
+def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None):
     if limit <= 0:
         return []
     rows = fetch_vocabulary_pool_rows()
@@ -2203,35 +2325,45 @@ def material_vocab_from_vocabulary_pool(settings, limit):
         return []
 
     target = settings.get("target_level", "")
-    recent_cutoff = taipei_now().date() - timedelta(days=7)
     target_items = []
     backup_items = []
-    seen = set()
+    cooldown_target_items = []
+    cooldown_backup_items = []
+    seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    today = taipei_now().date()
     for row in rows:
         is_active = first_text(row, ["is_active", "active", "enabled"])
         if is_active and is_active.lower() in {"0", "false", "no", "off"}:
             continue
         word = first_text(row, ["term", "surface", "word", "vocab_word", "dictionary_form"])
-        if not word or word in seen:
+        normalized_key = normalize_vocab_key(first_text(row, ["normalized_key", "normalized_term", "base_form", "surface", "term", "word"]) or word)
+        if not word or not normalized_key or normalized_key in seen:
             continue
-        last_seen = parse_loose_date(first_text(row, ["last_seen_at", "last_used_at"]))
-        if last_seen and last_seen >= recent_cutoff:
-            continue
-        seen.add(word)
+        seen.add(normalized_key)
         row_level = first_text(row, ["jlpt_level", "target_level", "level"])
         priority = first_text(row, ["priority", "weight"])
         try:
             priority_value = int(float(priority)) if priority else 0
         except ValueError:
             priority_value = 0
+        try:
+            cooldown_days = max(0, int(row.get("cooldown_days", 14) or 14))
+        except (TypeError, ValueError):
+            cooldown_days = 14
+        last_used = parse_loose_date(first_text(row, ["last_used_at", "last_seen_at"]))
+        in_cooldown = bool(last_used and (today - last_used).days < cooldown_days)
+        cooldown_penalty = 1 if in_cooldown else 0
         next_review = parse_loose_date(first_text(row, ["next_review_at", "next_review_date", "review_at"]))
         due_rank = 0 if not next_review or next_review <= taipei_now().date() else 1
+        level_distance = preferred_level_distance(target, row_level)
         item = {
             "word": word,
             "reading": first_text(row, ["reading_hiragana", "reading", "kana", "vocab_reading"]),
             "meaning": first_text(row, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"]),
             "part_of_speech": first_text(row, ["part_of_speech", "pos"]),
             "jlpt_level": row_level,
+            "category": first_text(row, ["category"]) or "general",
+            "normalized_key": normalized_key,
             "example_sentence": first_text(row, ["example_sentence", "example_japanese"]),
             "example_translation_zh": first_text(row, ["example_translation_zh", "example_chinese", "example_translation"]),
             "source": "vocabulary_pool",
@@ -2242,18 +2374,31 @@ def material_vocab_from_vocabulary_pool(settings, limit):
             "_sort": (
                 0 if first_text(row, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"]) else 1,
                 0 if first_text(row, ["reading_hiragana", "reading", "kana", "vocab_reading"]) else 1,
+                cooldown_penalty,
+                level_distance,
                 due_rank,
                 -priority_value,
                 int(row.get("used_in_material_count", 0) or 0),
                 random.random(),
             ),
         }
-        if target and row_level and row_level != target:
-            backup_items.append(item)
+        if target and row_level and level_distance > 1:
+            if in_cooldown:
+                cooldown_backup_items.append(item)
+            else:
+                backup_items.append(item)
+        elif in_cooldown:
+            cooldown_target_items.append(item)
         else:
             target_items.append(item)
 
-    ordered = sorted(target_items, key=lambda item: item["_sort"]) + sorted(backup_items, key=lambda item: item["_sort"])
+    ordered = sorted(target_items, key=lambda item: item["_sort"])
+    if len(ordered) < limit:
+        ordered.extend(sorted(backup_items, key=lambda item: item["_sort"]))
+    if len(ordered) < limit:
+        ordered.extend(sorted(cooldown_target_items, key=lambda item: item["_sort"]))
+    if len(ordered) < limit:
+        ordered.extend(sorted(cooldown_backup_items, key=lambda item: item["_sort"]))
     selected = ordered[:limit]
     mark_vocabulary_pool_used(selected)
     for item in selected:
@@ -2360,6 +2505,8 @@ def material_seed_vocab(settings, limit):
                 "meaning": item.get("meaning", ""),
                 "part_of_speech": "",
                 "jlpt_level": settings.get("target_level", ""),
+                "category": "seed",
+                "normalized_key": normalize_vocab_key(item.get("normalized_key") or item.get("word", "")),
                 "example_sentence": item.get("example_sentence", ""),
                 "example_translation_zh": item.get("example_translation_zh", ""),
                 "source": "seed",
@@ -2474,24 +2621,53 @@ def build_local_material(settings, force_seed=False):
     verb_count = int(settings["verb_count"])
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     seed_used = False
+    duplicate_filtered_count = 0
 
-    slang_quota = 0 if vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
-    slang_vocab = [] if force_seed else material_vocab_from_approved_slang(slang_quota)
-    source_counts["slang"] = len(slang_vocab)
+    max_slang_quota = 0 if vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
+    slang_quota = 0 if vocab_count < 5 else min(max(1, int(vocab_count * 0.1)), max_slang_quota)
 
-    base_quota = max(0, vocab_count - len(slang_vocab))
+    base_quota = max(0, vocab_count - slang_quota)
     vocab = [] if force_seed else material_vocab_from_vocabulary_pool(settings, base_quota)
     if not force_seed and len(vocab) < base_quota:
         vocab.extend(material_vocab_from_existing(settings, base_quota - len(vocab)))
-    source_counts["vocabulary"] = len(vocab)
+    vocab, duplicates, selected_keys = dedupe_vocab_items(vocab)
+    duplicate_filtered_count += duplicates
+    source_counts["vocabulary"] = len([item for item in vocab if item.get("source") in {"vocabulary_pool", "materials"}])
+
+    slang_vocab = [] if force_seed else material_vocab_from_approved_slang(slang_quota)
+    slang_vocab, duplicates, selected_keys = dedupe_vocab_items(slang_vocab, selected_keys)
+    duplicate_filtered_count += duplicates
+    mark_slang_used_in_material([{"id": item.get("_slang_id")} for item in slang_vocab if item.get("_slang_id")])
+    source_counts["slang"] = len(slang_vocab)
     vocab.extend(slang_vocab)
 
     if len(vocab) < vocab_count:
+        extra_pool = [] if force_seed else material_vocab_from_vocabulary_pool(
+            settings,
+            vocab_count - len(vocab),
+            exclude_keys=selected_keys,
+        )
+        extra_pool, duplicates, selected_keys = dedupe_vocab_items(extra_pool, selected_keys)
+        duplicate_filtered_count += duplicates
+        vocab.extend(extra_pool)
+        source_counts["vocabulary"] += len(extra_pool)
+
+    if len(vocab) < vocab_count and not force_seed:
+        existing_items = material_vocab_from_existing(settings, vocab_count - len(vocab))
+        existing_items, duplicates, selected_keys = dedupe_vocab_items(existing_items, selected_keys)
+        duplicate_filtered_count += duplicates
+        vocab.extend(existing_items)
+        source_counts["vocabulary"] += len(existing_items)
+
+    if len(vocab) < vocab_count:
         seed_items = material_seed_vocab(settings, vocab_count - len(vocab))
+        seed_items, duplicates, selected_keys = dedupe_vocab_items(seed_items, selected_keys)
+        duplicate_filtered_count += duplicates
         vocab.extend(seed_items)
         source_counts["seed"] += len(seed_items)
         seed_used = bool(seed_items)
     vocab = vocab[:vocab_count]
+    selected_normalized_keys = [item_normalized_key(item) for item in vocab if item_normalized_key(item)]
 
     verbs = [] if force_seed else material_verbs_from_db(verb_count)
     if len(verbs) < verb_count:
@@ -2517,6 +2693,8 @@ def build_local_material(settings, force_seed=False):
         "ai_used": False,
         "fallback_used": False,
         "source_summary": source_counts,
+        "selected_normalized_keys": selected_normalized_keys,
+        "duplicate_filtered_count": duplicate_filtered_count,
         "wrong_reviews": wrong_items,
         "quiz": quiz,
         "seed_used": seed_used,
@@ -2553,6 +2731,9 @@ def save_material_for_today(material, settings):
                 "vocab_meaning": vocab.get("meaning", ""),
                 "vocab_part_of_speech": vocab.get("part_of_speech", ""),
                 "vocab_source": vocab.get("source", ""),
+                "vocab_jlpt_level": vocab.get("jlpt_level", ""),
+                "vocab_category": vocab.get("category", ""),
+                "vocab_normalized_key": item_normalized_key(vocab),
                 "vocab_example_sentence": vocab.get("example_sentence", ""),
                 "vocab_example_translation_zh": vocab.get("example_translation_zh", ""),
                 "verb_base": verb.get("base", ""),
@@ -2611,6 +2792,9 @@ def material_by_date(target_date):
                     "meaning": row["vocab_meaning"] or "尚未建立中文意思",
                     "part_of_speech": row.get("vocab_part_of_speech", ""),
                     "source": row.get("vocab_source", ""),
+                    "jlpt_level": row.get("vocab_jlpt_level", ""),
+                    "category": row.get("vocab_category", ""),
+                    "normalized_key": row.get("vocab_normalized_key", ""),
                     "example_sentence": row.get("vocab_example_sentence", ""),
                     "example_translation_zh": row.get("vocab_example_translation_zh", ""),
                 }
