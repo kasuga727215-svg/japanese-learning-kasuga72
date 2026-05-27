@@ -707,6 +707,8 @@ def migrate_vocabulary_pool_sqlite(conn):
             meaning_zh TEXT DEFAULT '',
             part_of_speech TEXT DEFAULT '',
             jlpt_level TEXT DEFAULT '',
+            verb_group INTEGER,
+            conjugation_type TEXT DEFAULT '',
             normalized_key TEXT,
             category TEXT DEFAULT 'general',
             cooldown_days INTEGER DEFAULT 14,
@@ -731,6 +733,8 @@ def migrate_vocabulary_pool_sqlite(conn):
         "meaning_zh": "ALTER TABLE vocabulary_pool ADD COLUMN meaning_zh TEXT DEFAULT ''",
         "part_of_speech": "ALTER TABLE vocabulary_pool ADD COLUMN part_of_speech TEXT DEFAULT ''",
         "jlpt_level": "ALTER TABLE vocabulary_pool ADD COLUMN jlpt_level TEXT DEFAULT ''",
+        "verb_group": "ALTER TABLE vocabulary_pool ADD COLUMN verb_group INTEGER",
+        "conjugation_type": "ALTER TABLE vocabulary_pool ADD COLUMN conjugation_type TEXT DEFAULT ''",
         "normalized_key": "ALTER TABLE vocabulary_pool ADD COLUMN normalized_key TEXT",
         "category": "ALTER TABLE vocabulary_pool ADD COLUMN category TEXT DEFAULT 'general'",
         "cooldown_days": "ALTER TABLE vocabulary_pool ADD COLUMN cooldown_days INTEGER DEFAULT 14",
@@ -771,6 +775,8 @@ def migrate_vocabulary_pool_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_verb_group ON vocabulary_pool(verb_group)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
 
 
@@ -1512,6 +1518,8 @@ def migrate_vocabulary_pool_postgres():
                     meaning_zh TEXT DEFAULT '',
                     part_of_speech TEXT DEFAULT '',
                     jlpt_level TEXT DEFAULT '',
+                    verb_group INTEGER,
+                    conjugation_type TEXT DEFAULT '',
                     normalized_key TEXT,
                     category TEXT DEFAULT 'general',
                     cooldown_days INTEGER DEFAULT 14,
@@ -1534,6 +1542,8 @@ def migrate_vocabulary_pool_postgres():
                 "meaning_zh": "TEXT DEFAULT ''",
                 "part_of_speech": "TEXT DEFAULT ''",
                 "jlpt_level": "TEXT DEFAULT ''",
+                "verb_group": "INTEGER",
+                "conjugation_type": "TEXT DEFAULT ''",
                 "normalized_key": "TEXT",
                 "category": "TEXT DEFAULT 'general'",
                 "cooldown_days": "INTEGER DEFAULT 14",
@@ -1555,6 +1565,8 @@ def migrate_vocabulary_pool_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_verb_group ON vocabulary_pool(verb_group)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
             now = utc_now_iso()
             cur.execute(
@@ -2207,6 +2219,10 @@ def normalize_vocabulary_item(raw):
         priority = int(raw.get("priority", 1) or 1)
     except (TypeError, ValueError):
         priority = 1
+    try:
+        verb_group = int(raw.get("verb_group") or 0) or None
+    except (TypeError, ValueError):
+        verb_group = None
     is_active = raw.get("is_active", True)
     if isinstance(is_active, str):
         is_active = is_active.strip().lower() not in {"0", "false", "no", "off"}
@@ -2219,6 +2235,8 @@ def normalize_vocabulary_item(raw):
             "meaning_zh": first_text(raw, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"]),
             "part_of_speech": first_text(raw, ["part_of_speech", "pos"]),
             "jlpt_level": first_text(raw, ["jlpt_level", "target_level", "level"]),
+            "verb_group": verb_group,
+            "conjugation_type": first_text(raw, ["conjugation_type", "inflection_type"]),
             "normalized_key": normalized_key,
             "category": first_text(raw, ["category"]) or "general",
             "cooldown_days": int(raw.get("cooldown_days", 14) or 14),
@@ -2261,6 +2279,8 @@ def upsert_vocabulary_pool(items):
                                     meaning_zh = COALESCE(NULLIF(meaning_zh, ''), %s),
                                     part_of_speech = COALESCE(NULLIF(part_of_speech, ''), %s),
                                     jlpt_level = COALESCE(NULLIF(jlpt_level, ''), %s),
+                                    verb_group = COALESCE(verb_group, %s),
+                                    conjugation_type = COALESCE(NULLIF(conjugation_type, ''), %s),
                                     category = COALESCE(NULLIF(category, ''), %s),
                                     cooldown_days = COALESCE(cooldown_days, %s),
                                     example_sentence = COALESCE(NULLIF(example_sentence, ''), %s),
@@ -2279,6 +2299,8 @@ def upsert_vocabulary_pool(items):
                                     item["meaning_zh"],
                                     item["part_of_speech"],
                                     item["jlpt_level"],
+                                    item["verb_group"],
+                                    item["conjugation_type"],
                                     item["category"],
                                     item["cooldown_days"],
                                     item["example_sentence"],
@@ -2295,10 +2317,10 @@ def upsert_vocabulary_pool(items):
                                 """
                                 INSERT INTO vocabulary_pool (
                                     surface, base_form, normalized_key, reading_hiragana, meaning_zh, part_of_speech,
-                                    jlpt_level, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
+                                    jlpt_level, verb_group, conjugation_type, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
                                     is_active, used_in_material_count, last_used_at, created_at, updated_at
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                                 """,
                                 (
                                     item["surface"],
@@ -2308,6 +2330,8 @@ def upsert_vocabulary_pool(items):
                                     item["meaning_zh"],
                                     item["part_of_speech"],
                                     item["jlpt_level"],
+                                    item["verb_group"],
+                                    item["conjugation_type"],
                                     item["category"],
                                     item["cooldown_days"],
                                     item["example_sentence"],
@@ -2348,6 +2372,8 @@ def upsert_vocabulary_pool(items):
                             meaning_zh = COALESCE(NULLIF(meaning_zh, ''), ?),
                             part_of_speech = COALESCE(NULLIF(part_of_speech, ''), ?),
                             jlpt_level = COALESCE(NULLIF(jlpt_level, ''), ?),
+                            verb_group = COALESCE(verb_group, ?),
+                            conjugation_type = COALESCE(NULLIF(conjugation_type, ''), ?),
                             category = COALESCE(NULLIF(category, ''), ?),
                             cooldown_days = COALESCE(cooldown_days, ?),
                             example_sentence = COALESCE(NULLIF(example_sentence, ''), ?),
@@ -2366,6 +2392,8 @@ def upsert_vocabulary_pool(items):
                             item["meaning_zh"],
                             item["part_of_speech"],
                             item["jlpt_level"],
+                            item["verb_group"],
+                            item["conjugation_type"],
                             item["category"],
                             item["cooldown_days"],
                             item["example_sentence"],
@@ -2382,10 +2410,10 @@ def upsert_vocabulary_pool(items):
                         """
                         INSERT INTO vocabulary_pool (
                             surface, base_form, normalized_key, reading_hiragana, meaning_zh, part_of_speech,
-                            jlpt_level, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
+                            jlpt_level, verb_group, conjugation_type, category, cooldown_days, example_sentence, example_translation_zh, source, priority,
                             is_active, used_in_material_count, last_used_at, created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             item["surface"],
@@ -2395,6 +2423,8 @@ def upsert_vocabulary_pool(items):
                             item["meaning_zh"],
                             item["part_of_speech"],
                             item["jlpt_level"],
+                            item["verb_group"],
+                            item["conjugation_type"],
                             item["category"],
                             item["cooldown_days"],
                             item["example_sentence"],
@@ -2612,6 +2642,415 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None):
     return selected
 
 
+MATERIAL_VERB_POS_MARKERS = (
+    "動詞",
+    "五段動詞",
+    "一段動詞",
+    "サ變動詞",
+    "サ変動詞",
+    "カ變動詞",
+    "カ変動詞",
+    "ichidan",
+    "godan",
+    "suru_verb",
+    "kuru_verb",
+    "verb",
+)
+MATERIAL_ICHIDAN_HINTS = ("一段", "上一段", "下一段", "ichidan")
+MATERIAL_GODAN_HINTS = ("五段", "godan")
+MATERIAL_SURU_HINTS = ("サ變", "サ変", "suru")
+MATERIAL_KURU_HINTS = ("カ變", "カ変", "kuru")
+MATERIAL_ICHIDAN_PRECEDING_KANA = "いきしちにひみりぎじぢびぴえけせてねへめれげぜでべぺ"
+MATERIAL_GODAN_RU_EXCEPTIONS = {
+    "帰る",
+    "走る",
+    "入る",
+    "切る",
+    "知る",
+    "要る",
+    "減る",
+    "焦る",
+    "限る",
+    "蹴る",
+    "滑る",
+    "散る",
+    "照る",
+    "握る",
+    "練る",
+    "喋る",
+    "参る",
+    "混じる",
+    "交じる",
+    "茂る",
+    "遮る",
+    "湿る",
+    "蘇る",
+}
+MATERIAL_ICHIDAN_RU_VERBS = {
+    "見る",
+    "食べる",
+    "決める",
+    "冷える",
+    "起きる",
+    "借りる",
+    "降りる",
+    "浴びる",
+    "信じる",
+    "着る",
+    "過ぎる",
+}
+MATERIAL_GODAN_FORMS = {
+    "う": ("い", "って", "った", "わない", "えば", "わせる", "われる"),
+    "く": ("き", "いて", "いた", "かない", "けば", "かせる", "かれる"),
+    "ぐ": ("ぎ", "いで", "いだ", "がない", "げば", "がせる", "がれる"),
+    "す": ("し", "して", "した", "さない", "せば", "させる", "される"),
+    "つ": ("ち", "って", "った", "たない", "てば", "たせる", "たれる"),
+    "ぬ": ("に", "んで", "んだ", "なない", "ねば", "なせる", "なれる"),
+    "ぶ": ("び", "んで", "んだ", "ばない", "べば", "ばせる", "ばれる"),
+    "む": ("み", "んで", "んだ", "まない", "めば", "ませる", "まれる"),
+    "る": ("り", "って", "った", "らない", "れば", "らせる", "られる"),
+}
+MATERIAL_SURU_NOUN_SUFFIXES = (
+    "確認",
+    "準備",
+    "改善",
+    "提案",
+    "管理",
+    "分析",
+    "評価",
+    "検討",
+    "共有",
+    "修正",
+    "報告",
+    "相談",
+    "調整",
+    "運用",
+    "設計",
+    "構築",
+    "強化",
+    "最適化",
+    "効率化",
+    "可視化",
+    "標準化",
+    "自動化",
+    "高度化",
+    "安定化",
+    "拡大",
+    "縮小",
+    "削減",
+    "維持",
+    "支援",
+    "連絡",
+    "登録",
+    "申請",
+    "依頼",
+    "交渉",
+    "契約",
+    "確保",
+    "実施",
+    "推進",
+    "作成",
+    "開発",
+    "導入",
+    "整理",
+    "保存",
+)
+
+
+def material_verb_group_label(group):
+    return {1: "五段", 2: "一段", 3: "不規則"}.get(int(group or 0), "未判定")
+
+
+def row_is_explicit_verb(row):
+    text = " ".join(
+        filter(
+            None,
+            [
+                first_text(row, ["part_of_speech", "pos"]),
+                first_text(row, ["conjugation_type", "inflection_type"]),
+                first_text(row, ["category"]),
+            ],
+        )
+    ).lower()
+    if first_text(row, ["verb_group"]):
+        return True
+    return any(marker.lower() in text for marker in MATERIAL_VERB_POS_MARKERS)
+
+
+def row_can_be_suru_verb(row):
+    if row_is_explicit_verb(row):
+        return False
+    category = first_text(row, ["category"]).lower()
+    if category in {"sns", "internet_slang", "otaku_culture", "named_entity", "sensitive", "typo_or_noise", "unknown"}:
+        return False
+    part_of_speech = first_text(row, ["part_of_speech", "pos"])
+    if part_of_speech and "名詞" not in part_of_speech:
+        return False
+    base = first_text(row, ["base_form", "surface", "term", "word"])
+    if not base or base.endswith("する"):
+        return False
+    return any(base.endswith(suffix) for suffix in MATERIAL_SURU_NOUN_SUFFIXES)
+
+
+def infer_material_verb_group(row, base_form):
+    raw_group = first_text(row, ["verb_group"])
+    if raw_group:
+        try:
+            group = int(raw_group)
+            if group in {1, 2, 3}:
+                return group
+        except ValueError:
+            pass
+
+    hints = " ".join(
+        filter(
+            None,
+            [
+                first_text(row, ["conjugation_type", "inflection_type"]),
+                first_text(row, ["part_of_speech", "pos"]),
+                first_text(row, ["category"]),
+            ],
+        )
+    ).lower()
+    if base_form in {"する", "来る", "くる"} or base_form.endswith("する"):
+        return 3
+    if any(hint.lower() in hints for hint in MATERIAL_SURU_HINTS + MATERIAL_KURU_HINTS):
+        return 3
+    if any(hint.lower() in hints for hint in MATERIAL_ICHIDAN_HINTS):
+        return 2
+    if any(hint.lower() in hints for hint in MATERIAL_GODAN_HINTS):
+        return 1
+    if base_form.endswith("る"):
+        if base_form in MATERIAL_ICHIDAN_RU_VERBS:
+            return 2
+        if base_form in MATERIAL_GODAN_RU_EXCEPTIONS:
+            return 1
+        reading = first_text(row, ["reading_hiragana", "reading", "kana"])
+        reading_or_base = reading if reading.endswith("る") else base_form
+        previous = reading_or_base[-2] if len(reading_or_base) >= 2 else ""
+        return 2 if previous in MATERIAL_ICHIDAN_PRECEDING_KANA else 1
+    if base_form[-1:] in MATERIAL_GODAN_FORMS:
+        return 1
+    return None
+
+
+def conjugate_material_verb(base_form, group):
+    if not base_form:
+        return None
+    if group == 3:
+        if base_form in {"来る", "くる"}:
+            if base_form == "くる":
+                return {
+                    "renyou": "き",
+                    "te": "きて",
+                    "ta": "きた",
+                    "nai": "こない",
+                    "ba": "くれば",
+                    "causative": "こさせる",
+                    "passive": "こられる",
+                }
+            prefix = "来"
+            return {
+                "renyou": prefix,
+                "te": f"{prefix}て",
+                "ta": f"{prefix}た",
+                "nai": f"{prefix}ない",
+                "ba": f"{prefix}れば",
+                "causative": f"{prefix}させる",
+                "passive": f"{prefix}られる",
+            }
+        stem = base_form[:-2] if base_form.endswith("する") else ""
+        return {
+            "renyou": f"{stem}し",
+            "te": f"{stem}して",
+            "ta": f"{stem}した",
+            "nai": f"{stem}しない",
+            "ba": f"{stem}すれば",
+            "causative": f"{stem}させる",
+            "passive": f"{stem}される",
+        }
+    if group == 2:
+        stem = base_form[:-1]
+        return {
+            "renyou": stem,
+            "te": f"{stem}て",
+            "ta": f"{stem}た",
+            "nai": f"{stem}ない",
+            "ba": f"{stem}れば",
+            "causative": f"{stem}させる",
+            "passive": f"{stem}られる",
+        }
+    if group == 1:
+        if base_form == "行く":
+            return {
+                "renyou": "行き",
+                "te": "行って",
+                "ta": "行った",
+                "nai": "行かない",
+                "ba": "行けば",
+                "causative": "行かせる",
+                "passive": "行かれる",
+            }
+        ending = base_form[-1:]
+        forms = MATERIAL_GODAN_FORMS.get(ending)
+        if not forms:
+            return None
+        stem = base_form[:-1]
+        renyou, te, ta, nai, ba, causative, passive = forms
+        return {
+            "renyou": f"{stem}{renyou}",
+            "te": f"{stem}{te}",
+            "ta": f"{stem}{ta}",
+            "nai": f"{stem}{nai}",
+            "ba": f"{stem}{ba}",
+            "causative": f"{stem}{causative}",
+            "passive": f"{stem}{passive}",
+        }
+    return None
+
+
+def build_material_verb_from_vocab_row(row):
+    explicit = row_is_explicit_verb(row)
+    suru_candidate = row_can_be_suru_verb(row)
+    if not explicit and not suru_candidate:
+        return None
+
+    surface = first_text(row, ["surface", "term", "word", "base_form"])
+    base_form = first_text(row, ["base_form", "dictionary_form", "surface", "term", "word"]) or surface
+    reading = first_text(row, ["reading_hiragana", "reading", "kana"])
+    source = "vocabulary_pool"
+    if suru_candidate and not explicit:
+        base_form = f"{base_form}する"
+        reading = f"{reading}する" if reading else ""
+        source = "vocabulary_pool_suru"
+
+    group = infer_material_verb_group(row, base_form)
+    forms = conjugate_material_verb(base_form, group)
+    if not forms:
+        return None
+
+    meaning = first_text(row, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"])
+    level = first_text(row, ["jlpt_level", "target_level", "level"])
+    group_text = material_verb_group_label(group)
+    normalized_key = normalize_vocab_key(first_text(row, ["normalized_key", "normalized_term", "base_form", "surface", "term", "word"]) or base_form)
+    base_parts = [f"{base_form}（{reading}）" if reading else base_form]
+    if meaning:
+        base_parts.append(meaning)
+    meta_parts = [group_text]
+    if level:
+        meta_parts.append(level)
+    base_display = " - ".join(base_parts)
+    if meta_parts:
+        base_display = f"{base_display}｜{'｜'.join(meta_parts)}"
+    return {
+        "base": base_display,
+        "dictionary_form": base_form,
+        "reading": reading,
+        "meaning": meaning,
+        "verb_group": group,
+        "verb_group_label": group_text,
+        "jlpt_level": level,
+        "part_of_speech": first_text(row, ["part_of_speech", "pos"]) or group_text,
+        "normalized_key": normalized_key,
+        "masuStem": forms["renyou"],
+        "te": forms["te"],
+        "ta": forms["ta"],
+        "nai": forms["nai"],
+        "ba": forms["ba"],
+        "causative": forms["causative"],
+        "passive": forms["passive"],
+        "causativePassive": "",
+        "source": source,
+        "_pool_id": row.get("id"),
+        "_pool_has_last_seen": "last_seen_at" in row,
+        "_pool_has_last_used": "last_used_at" in row,
+        "_pool_has_used_count": "used_in_material_count" in row,
+    }
+
+
+def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
+    stats = {
+        "duplicate_filtered_count": 0,
+        "selected_keys": [],
+        "source_summary": {"vocabulary_pool": 0, "vocabulary_pool_suru": 0},
+    }
+    if limit <= 0:
+        return [], stats
+    rows = fetch_vocabulary_pool_rows()
+    if not rows:
+        return [], stats
+
+    target = settings.get("target_level", "")
+    seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    today = taipei_now().date()
+    buckets = {
+        "target_fresh": [],
+        "target_relaxed7": [],
+        "adjacent_fresh": [],
+        "adjacent_relaxed7": [],
+        "distant_fresh": [],
+        "cooldown_any": [],
+    }
+
+    for row in rows:
+        item = build_material_verb_from_vocab_row(row)
+        if not item:
+            continue
+        key = item_normalized_key(item)
+        if not key or key in seen:
+            stats["duplicate_filtered_count"] += 1
+            continue
+        seen.add(key)
+        row_level = first_text(row, ["jlpt_level", "target_level", "level"])
+        level_distance = preferred_level_distance(target, row_level)
+        try:
+            cooldown_days = max(14, int(row.get("cooldown_days", 14) or 14))
+        except (TypeError, ValueError):
+            cooldown_days = 14
+        last_used = parse_loose_date(first_text(row, ["last_used_at", "last_seen_at"]))
+        days_since = 99999 if not last_used else (today - last_used).days
+        priority = first_text(row, ["priority", "weight"])
+        try:
+            priority_value = int(float(priority)) if priority else 0
+        except ValueError:
+            priority_value = 0
+        item["_sort"] = (
+            0 if item.get("source") == "vocabulary_pool" else 1,
+            level_distance,
+            int(row.get("used_in_material_count", 0) or 0),
+            -priority_value,
+            random.random(),
+        )
+        if level_distance == 0 and days_since >= cooldown_days:
+            buckets["target_fresh"].append(item)
+        elif level_distance == 0 and days_since >= 7:
+            buckets["target_relaxed7"].append(item)
+        elif level_distance == 1 and days_since >= cooldown_days:
+            buckets["adjacent_fresh"].append(item)
+        elif level_distance == 1 and days_since >= 7:
+            buckets["adjacent_relaxed7"].append(item)
+        elif level_distance > 1 and days_since >= cooldown_days:
+            buckets["distant_fresh"].append(item)
+        else:
+            buckets["cooldown_any"].append(item)
+
+    ordered = []
+    for bucket_name in ("target_fresh", "target_relaxed7", "adjacent_fresh", "adjacent_relaxed7", "distant_fresh", "cooldown_any"):
+        ordered.extend(sorted(buckets[bucket_name], key=lambda item: item["_sort"]))
+        if len(ordered) >= limit:
+            break
+    selected = ordered[:limit]
+    mark_vocabulary_pool_used(selected)
+    for item in selected:
+        key = item_normalized_key(item)
+        if key:
+            stats["selected_keys"].append(key)
+        stats["source_summary"][item.get("source", "vocabulary_pool")] = stats["source_summary"].get(item.get("source", "vocabulary_pool"), 0) + 1
+        for private_key in list(item):
+            if private_key.startswith("_"):
+                item.pop(private_key, None)
+    return selected, stats
+
 LOCAL_SEED_VOCAB = [
     {"word": "予定", "reading": "よてい", "meaning": "預定；計畫"},
     {"word": "準備", "reading": "じゅんび", "meaning": "準備"},
@@ -2724,47 +3163,64 @@ def material_seed_vocab(settings, limit):
     return items[:limit]
 
 
-def material_verbs_from_db(limit):
+def material_verbs_from_db(limit, exclude_keys=None):
     if limit <= 0:
         return []
     ensure_settings_store()
-    rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (limit,))
-    return [
-        {
-            "base": f"{row['dictionary_form']}（{row['reading']}） - {row['meaning']}",
-            "masuStem": answer_display_value(row["renyou_form"]),
-            "te": answer_display_value(row["te_form"]),
-            "ta": answer_display_value(row["ta_form"]),
-            "nai": answer_display_value(row["nai_form"]),
-            "ba": answer_display_value(row["ba_form"]),
-            "causative": answer_display_value(row["shieki_form"]),
-            "passive": answer_display_value(row["ukemi_form"]),
-            "causativePassive": "",
-            "source": "verbs",
-        }
-        for row in rows
-    ]
+    rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (max(limit * 4, limit),))
+    seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    items = []
+    for row in rows:
+        key = normalize_vocab_key(row.get("dictionary_form", ""))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        group = row.get("verb_group", "")
+        group_text = material_verb_group_label(group)
+        base_display = f"{row['dictionary_form']}（{row['reading']}） - {row['meaning']}｜{group_text}"
+        items.append(
+            {
+                "base": base_display,
+                "dictionary_form": row["dictionary_form"],
+                "reading": row["reading"],
+                "meaning": row["meaning"],
+                "verb_group": group,
+                "verb_group_label": group_text,
+                "normalized_key": key,
+                "masuStem": answer_display_value(row["renyou_form"]),
+                "te": answer_display_value(row["te_form"]),
+                "ta": answer_display_value(row["ta_form"]),
+                "nai": answer_display_value(row["nai_form"]),
+                "ba": answer_display_value(row["ba_form"]),
+                "causative": answer_display_value(row["shieki_form"]),
+                "passive": answer_display_value(row["ukemi_form"]),
+                "causativePassive": "",
+                "source": "verbs",
+            }
+        )
+        if len(items) >= limit:
+            break
+    return items
 
 
-def material_seed_verbs(settings, limit):
+def material_seed_verbs(settings, limit, exclude_keys=None):
     if limit <= 0:
         return []
     seed = list(sample_material(settings).get("verbs", [])) + LOCAL_SEED_VERBS
     items = []
-    seen = set()
+    seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     for item in seed:
         base = str(item.get("base", "")).strip()
-        if not base or base in seen:
+        key = normalize_vocab_key(item.get("normalized_key") or item.get("dictionary_form") or item.get("base") or base)
+        if not base or not key or key in seen:
             continue
-        seen.add(base)
+        seen.add(key)
         copied = dict(item)
+        copied.setdefault("normalized_key", key)
         copied["source"] = "seed"
         items.append(copied)
         if len(items) >= limit:
             return items
-    base_items = list(items)
-    while len(items) < limit and base_items:
-        items.append(dict(base_items[len(items) % len(base_items)]))
     return items[:limit]
 
 
@@ -2873,13 +3329,32 @@ def build_local_material(settings, force_seed=False):
     vocab = vocab[:vocab_count]
     selected_normalized_keys = [item_normalized_key(item) for item in vocab if item_normalized_key(item)]
 
-    verbs = [] if force_seed else material_verbs_from_db(verb_count)
+    verb_duplicate_filtered_count = 0
+    verb_source_summary = {"vocabulary_pool": 0, "vocabulary_pool_suru": 0, "verbs": 0, "seed_fallback": 0}
+    verbs = []
+    selected_verb_keys = []
+    if not force_seed:
+        verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(settings, verb_count, exclude_keys=selected_keys)
+        verb_duplicate_filtered_count += verb_pool_stats.get("duplicate_filtered_count", 0)
+        selected_verb_keys.extend(verb_pool_stats.get("selected_keys", []))
+        for source, count in verb_pool_stats.get("source_summary", {}).items():
+            verb_source_summary[source] = verb_source_summary.get(source, 0) + count
+    if len(verbs) < verb_count and not force_seed:
+        db_verbs = material_verbs_from_db(verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
+        verbs.extend(db_verbs)
+        db_keys = [item_normalized_key(item) for item in db_verbs if item_normalized_key(item)]
+        selected_verb_keys.extend(db_keys)
+        verb_source_summary["verbs"] += len(db_verbs)
     if len(verbs) < verb_count:
-        seed_verbs = material_seed_verbs(settings, verb_count - len(verbs))
+        seed_verbs = material_seed_verbs(settings, verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
         verbs.extend(seed_verbs)
+        seed_keys = [item_normalized_key(item) for item in seed_verbs if item_normalized_key(item)]
+        selected_verb_keys.extend(seed_keys)
         source_counts["seed"] += len(seed_verbs)
+        verb_source_summary["seed_fallback"] += len(seed_verbs)
         seed_used = bool(seed_verbs)
     verbs = verbs[:verb_count]
+    selected_verb_keys = [item_normalized_key(item) for item in verbs if item_normalized_key(item)]
 
     wrong_items = due_wrong_answer_summary()
     source_counts["wrong"] = len(wrong_items)
@@ -2899,6 +3374,11 @@ def build_local_material(settings, force_seed=False):
         "source_summary": source_counts,
         "selected_normalized_keys": selected_normalized_keys,
         "duplicate_filtered_count": duplicate_filtered_count,
+        "selected_verb_keys": selected_verb_keys,
+        "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
+        "verb_source_summary": verb_source_summary,
+        "seed_fallback_count": verb_source_summary.get("seed_fallback", 0),
+        "fallback_reason": "insufficient_verbs" if verb_source_summary.get("seed_fallback", 0) else "",
         "wrong_reviews": wrong_items,
         "quiz": quiz,
         "seed_used": seed_used,
@@ -2908,6 +3388,13 @@ def build_local_material(settings, force_seed=False):
         "[material-generator] local sources "
         f"vocabulary={source_counts['vocabulary']} slang={source_counts['slang']} "
         f"wrong={source_counts['wrong']} seed={source_counts['seed']}"
+    )
+    print(
+        "[material-generator] local verb sources "
+        f"vocabulary_pool={verb_source_summary.get('vocabulary_pool', 0)} "
+        f"vocabulary_pool_suru={verb_source_summary.get('vocabulary_pool_suru', 0)} "
+        f"verbs={verb_source_summary.get('verbs', 0)} seed_fallback={verb_source_summary.get('seed_fallback', 0)} "
+        f"duplicates={verb_duplicate_filtered_count}"
     )
     return {"vocab": vocab, "verbs": verbs, "grammar": grammar, "metadata": metadata}
 
