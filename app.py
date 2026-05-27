@@ -4462,6 +4462,106 @@ def dashboard_safe_dates():
     ]
 
 
+def activity_iso_date(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "T" in text or text.endswith("Z") or re.search(r"[+-]\d{2}:\d{2}$", text):
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+            return parsed.astimezone(ZoneInfo("Asia/Taipei")).date().isoformat()
+        except ValueError:
+            pass
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text[:10], fmt).date().isoformat()
+        except ValueError:
+            pass
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Taipei"))
+    return parsed.astimezone(ZoneInfo("Asia/Taipei")).date().isoformat()
+
+
+def sqlite_table_columns(table_name):
+    ensure_settings_store()
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row[1] for row in rows}
+
+
+def add_activity_source(active_map, date_value, source):
+    iso_date = activity_iso_date(date_value)
+    if iso_date in active_map:
+        active_map[iso_date].add(source)
+
+
+def add_sqlite_activity_sources(active_map, table_name, columns, source):
+    try:
+        existing_columns = sqlite_table_columns(table_name)
+        usable_columns = [column for column in columns if column in existing_columns]
+        if not usable_columns:
+            return
+        select_sql = ", ".join(usable_columns)
+        rows = sqlite_dicts(f"SELECT {select_sql} FROM {table_name}")
+        for row in rows:
+            for column in usable_columns:
+                add_activity_source(active_map, row.get(column), source)
+    except Exception as e:
+        print(f"[dashboard-summary] activity source skipped; source={source}; reason={e}")
+
+
+def get_active_days_last_7():
+    base_days = dashboard_safe_dates()
+    active_map = {day["date"]: set() for day in base_days}
+
+    try:
+        df = read_database()
+        if not df.empty:
+            for _, row in df.iterrows():
+                add_activity_source(active_map, row.get("date"), "daily_materials")
+                add_activity_source(active_map, row.get("created_at"), "daily_materials")
+                add_activity_source(active_map, row.get("updated_at"), "daily_materials")
+    except Exception as e:
+        print(f"[dashboard-summary] material activity source failed; reason={e}")
+
+    activity_sources = [
+        ("quiz_records", ["created_at"], "quiz_records"),
+        ("mistake_logs", ["last_reviewed_at", "reviewed_at", "created_at", "updated_at"], "mistake_logs"),
+        ("sns_practice_logs", ["created_at"], "sns_practice_logs"),
+        ("learning_logs", ["created_at", "date", "activity_date"], "learning_logs"),
+        ("daily_records", ["created_at", "date", "activity_date"], "daily_records"),
+        ("quiz_results", ["created_at", "date", "activity_date"], "quiz_results"),
+        ("test_results", ["created_at", "date", "activity_date"], "test_results"),
+        ("wrong_answers", ["created_at", "last_reviewed_at", "date"], "wrong_answers"),
+        ("wrong_answer_reviews", ["created_at", "reviewed_at", "date"], "wrong_answer_reviews"),
+        ("grammar_analysis_logs", ["created_at", "date"], "grammar_analysis_logs"),
+        ("daily_activity_logs", ["created_at", "date", "activity_date"], "daily_activity_logs"),
+        ("daily_material_views", ["created_at", "date", "viewed_at"], "daily_material_views"),
+    ]
+    for table_name, columns, source in activity_sources:
+        add_sqlite_activity_sources(active_map, table_name, columns, source)
+
+    days = []
+    for day in base_days:
+        sources = sorted(active_map[day["date"]])
+        days.append(
+            {
+                "date": day["date"],
+                "label": day["label"],
+                "active": bool(sources),
+                "studied": bool(sources),
+                "sources": sources,
+            }
+        )
+    return {"active_days_last_7": sum(1 for day in days if day["active"]), "days": days}
+
+
 def dashboard_default_payload(reason=""):
     settings = load_settings()
     today = today_string()
@@ -4540,25 +4640,11 @@ def build_dashboard_payload():
         today_material = None
 
     try:
-        df = read_database()
-        now = taipei_now()
-        date_pairs = [
-            (
-                f"{(now - timedelta(days=i)).year}/{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}",
-                (now - timedelta(days=i)).date().isoformat(),
-                f"{(now - timedelta(days=i)).month}/{(now - timedelta(days=i)).day}",
-            )
-            for i in reversed(range(7))
-        ]
-        material_dates = set(d for d in df["date"].drop_duplicates().tolist() if d)
-        days = [
-            {"date": iso_date, "label": label, "studied": legacy_date in material_dates, "active": legacy_date in material_dates}
-            for legacy_date, iso_date, label in date_pairs
-        ]
-        active_days = [day for day in days if day["active"]]
+        learning_streak = get_active_days_last_7()
+        days = learning_streak["days"]
         payload["last_7_days"] = days
-        payload["streak_days"] = len(active_days)
-        payload["learning_streak"] = {"active_days_last_7": len(active_days), "days": days}
+        payload["streak_days"] = learning_streak["active_days_last_7"]
+        payload["learning_streak"] = learning_streak
     except Exception as e:
         print(f"[dashboard-summary] streak query failed; reason={e}")
 
