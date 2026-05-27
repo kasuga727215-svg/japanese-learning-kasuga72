@@ -2710,51 +2710,37 @@ MATERIAL_GODAN_FORMS = {
     "む": ("み", "んで", "んだ", "まない", "めば", "ませる", "まれる"),
     "る": ("り", "って", "った", "らない", "れば", "らせる", "られる"),
 }
-MATERIAL_SURU_NOUN_SUFFIXES = (
+SAFE_SURU_NOUNS = {
     "確認",
     "準備",
     "改善",
     "提案",
-    "管理",
-    "分析",
-    "評価",
-    "検討",
     "共有",
-    "修正",
-    "報告",
+    "説明",
     "相談",
-    "調整",
-    "運用",
-    "設計",
-    "構築",
-    "強化",
-    "最適化",
-    "効率化",
-    "可視化",
-    "標準化",
-    "自動化",
-    "高度化",
-    "安定化",
-    "拡大",
-    "縮小",
-    "削減",
-    "維持",
-    "支援",
     "連絡",
+    "参加",
     "登録",
-    "申請",
-    "依頼",
-    "交渉",
-    "契約",
-    "確保",
-    "実施",
-    "推進",
-    "作成",
-    "開発",
-    "導入",
-    "整理",
+    "利用",
+    "予約",
+    "勉強",
+    "練習",
+    "運動",
+    "検索",
     "保存",
-)
+    "変更",
+    "更新",
+    "開始",
+    "終了",
+    "報告",
+    "連携",
+    "対応",
+    "管理",
+    "整理",
+    "分析",
+    "調整",
+}
+SAFE_SURU_VERBS = {f"{noun}する" for noun in SAFE_SURU_NOUNS}
 
 
 def material_verb_group_label(group):
@@ -2762,11 +2748,13 @@ def material_verb_group_label(group):
 
 
 def row_is_explicit_verb(row):
+    base = first_text(row, ["base_form", "dictionary_form", "surface", "term", "word"])
+    part_of_speech = first_text(row, ["part_of_speech", "pos"])
     text = " ".join(
         filter(
             None,
             [
-                first_text(row, ["part_of_speech", "pos"]),
+                part_of_speech,
                 first_text(row, ["conjugation_type", "inflection_type"]),
                 first_text(row, ["category"]),
             ],
@@ -2774,7 +2762,32 @@ def row_is_explicit_verb(row):
     ).lower()
     if first_text(row, ["verb_group"]):
         return True
-    return any(marker.lower() in text for marker in MATERIAL_VERB_POS_MARKERS)
+    if any(marker.lower() in text for marker in MATERIAL_VERB_POS_MARKERS):
+        return True
+    if base in SAFE_SURU_VERBS:
+        return True
+    if "名詞" in part_of_speech:
+        return False
+    return base[-1:] in MATERIAL_GODAN_FORMS or base.endswith("る")
+
+
+def fake_suru_rejection_reason(row):
+    if row_is_explicit_verb(row):
+        return ""
+    base = first_text(row, ["base_form", "surface", "term", "word"])
+    if not base or base in SAFE_SURU_NOUNS or base in SAFE_SURU_VERBS:
+        return ""
+    part_of_speech = first_text(row, ["part_of_speech", "pos"])
+    category = first_text(row, ["category"]).lower()
+    if "名詞" not in part_of_speech and category not in {"business", "advanced", "general"}:
+        return ""
+    if any(base.endswith(noun) for noun in SAFE_SURU_NOUNS):
+        return "not_safe_suru_noun"
+    if category in {"business", "advanced"}:
+        return "business_or_advanced_noun"
+    if len(re.findall(r"[\u4e00-\u9fff]", base)) > 4:
+        return "compound_noun_too_long"
+    return ""
 
 
 def row_can_be_suru_verb(row):
@@ -2789,7 +2802,13 @@ def row_can_be_suru_verb(row):
     base = first_text(row, ["base_form", "surface", "term", "word"])
     if not base or base.endswith("する"):
         return False
-    return any(base.endswith(suffix) for suffix in MATERIAL_SURU_NOUN_SUFFIXES)
+    return base in SAFE_SURU_NOUNS
+
+
+def is_valid_verb_candidate(row):
+    if row_is_explicit_verb(row) or row_can_be_suru_verb(row):
+        return True, ""
+    return False, fake_suru_rejection_reason(row)
 
 
 def infer_material_verb_group(row, base_form):
@@ -2910,10 +2929,11 @@ def conjugate_material_verb(base_form, group):
 
 
 def build_material_verb_from_vocab_row(row):
+    is_valid, _reason = is_valid_verb_candidate(row)
+    if not is_valid:
+        return None
     explicit = row_is_explicit_verb(row)
     suru_candidate = row_can_be_suru_verb(row)
-    if not explicit and not suru_candidate:
-        return None
 
     surface = first_text(row, ["surface", "term", "word", "base_form"])
     base_form = first_text(row, ["base_form", "dictionary_form", "surface", "term", "word"]) or surface
@@ -2973,6 +2993,8 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
         "duplicate_filtered_count": 0,
         "selected_keys": [],
         "source_summary": {"vocabulary_pool": 0, "vocabulary_pool_suru": 0},
+        "rejected_fake_suru_count": 0,
+        "verb_candidate_count": 0,
     }
     if limit <= 0:
         return [], stats
@@ -2992,10 +3014,24 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
         "cooldown_any": [],
     }
 
+    rejected_log_count = 0
     for row in rows:
+        is_valid, rejection_reason = is_valid_verb_candidate(row)
+        if not is_valid:
+            if rejection_reason:
+                stats["rejected_fake_suru_count"] += 1
+                if rejected_log_count < 25:
+                    rejected_log_count += 1
+                    print(
+                        "[verb-selector] rejected fake suru verb "
+                        f"surface={first_text(row, ['surface', 'base_form', 'term', 'word'])} "
+                        f"reason={rejection_reason}"
+                    )
+            continue
         item = build_material_verb_from_vocab_row(row)
         if not item:
             continue
+        stats["verb_candidate_count"] += 1
         key = item_normalized_key(item)
         if not key or key in seen:
             stats["duplicate_filtered_count"] += 1
@@ -3041,6 +3077,11 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
             break
     selected = ordered[:limit]
     mark_vocabulary_pool_used(selected)
+    if stats["rejected_fake_suru_count"] > rejected_log_count:
+        print(
+            "[verb-selector] rejected fake suru verb "
+            f"additional_count={stats['rejected_fake_suru_count'] - rejected_log_count}"
+        )
     for item in selected:
         key = item_normalized_key(item)
         if key:
@@ -3203,10 +3244,64 @@ def material_verbs_from_db(limit, exclude_keys=None):
     return items
 
 
+NATURAL_SEED_VERB_ROWS = [
+    ("見る", "みる", "看", "動詞", "N5"),
+    ("食べる", "たべる", "吃", "動詞", "N5"),
+    ("話す", "はなす", "說話", "動詞", "N5"),
+    ("行く", "いく", "去", "動詞", "N5"),
+    ("書く", "かく", "寫", "動詞", "N5"),
+    ("読む", "よむ", "讀", "動詞", "N5"),
+    ("聞く", "きく", "聽、詢問", "動詞", "N5"),
+    ("使う", "つかう", "使用", "動詞", "N5"),
+    ("作る", "つくる", "製作", "動詞", "N5"),
+    ("買う", "かう", "買", "動詞", "N5"),
+    ("会う", "あう", "見面", "動詞", "N5"),
+    ("思う", "おもう", "想、認為", "動詞", "N5"),
+    ("考える", "かんがえる", "思考、考慮", "動詞", "N4"),
+    ("決める", "きめる", "決定", "動詞", "N4"),
+    ("始める", "はじめる", "開始", "動詞", "N5"),
+    ("続ける", "つづける", "繼續", "動詞", "N4"),
+    ("入る", "はいる", "進入", "動詞", "N5"),
+    ("出る", "でる", "出去、出現", "動詞", "N5"),
+    ("働く", "はたらく", "工作", "動詞", "N5"),
+    ("選ぶ", "えらぶ", "選擇", "動詞", "N4"),
+    ("確認する", "かくにんする", "確認", "サ変動詞", "N3"),
+    ("提案する", "ていあんする", "提案", "サ変動詞", "N3"),
+    ("改善する", "かいぜんする", "改善", "サ変動詞", "N3"),
+    ("共有する", "きょうゆうする", "共享", "サ変動詞", "N3"),
+    ("準備する", "じゅんびする", "準備", "サ変動詞", "N5"),
+    ("説明する", "せつめいする", "說明", "サ変動詞", "N4"),
+    ("相談する", "そうだんする", "商量、諮詢", "サ変動詞", "N4"),
+]
+
+
+def natural_seed_verb_items(settings):
+    items = []
+    for surface, reading, meaning, part_of_speech, level in NATURAL_SEED_VERB_ROWS:
+        item = build_material_verb_from_vocab_row(
+            {
+                "surface": surface,
+                "base_form": surface,
+                "reading_hiragana": reading,
+                "meaning_zh": meaning,
+                "part_of_speech": part_of_speech,
+                "jlpt_level": level,
+                "category": "seed",
+                "source": "seed_natural",
+            }
+        )
+        if not item:
+            continue
+        item["source"] = "seed"
+        item["normalized_key"] = normalize_vocab_key(surface)
+        items.append(item)
+    return items
+
+
 def material_seed_verbs(settings, limit, exclude_keys=None):
     if limit <= 0:
         return []
-    seed = list(sample_material(settings).get("verbs", [])) + LOCAL_SEED_VERBS
+    seed = natural_seed_verb_items(settings) + list(sample_material(settings).get("verbs", [])) + LOCAL_SEED_VERBS
     items = []
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     for item in seed:
@@ -3331,20 +3426,18 @@ def build_local_material(settings, force_seed=False):
 
     verb_duplicate_filtered_count = 0
     verb_source_summary = {"vocabulary_pool": 0, "vocabulary_pool_suru": 0, "verbs": 0, "seed_fallback": 0}
+    rejected_fake_suru_count = 0
+    verb_candidate_count = 0
     verbs = []
     selected_verb_keys = []
     if not force_seed:
         verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(settings, verb_count, exclude_keys=selected_keys)
         verb_duplicate_filtered_count += verb_pool_stats.get("duplicate_filtered_count", 0)
+        rejected_fake_suru_count += verb_pool_stats.get("rejected_fake_suru_count", 0)
+        verb_candidate_count += verb_pool_stats.get("verb_candidate_count", 0)
         selected_verb_keys.extend(verb_pool_stats.get("selected_keys", []))
         for source, count in verb_pool_stats.get("source_summary", {}).items():
             verb_source_summary[source] = verb_source_summary.get(source, 0) + count
-    if len(verbs) < verb_count and not force_seed:
-        db_verbs = material_verbs_from_db(verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
-        verbs.extend(db_verbs)
-        db_keys = [item_normalized_key(item) for item in db_verbs if item_normalized_key(item)]
-        selected_verb_keys.extend(db_keys)
-        verb_source_summary["verbs"] += len(db_verbs)
     if len(verbs) < verb_count:
         seed_verbs = material_seed_verbs(settings, verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
         verbs.extend(seed_verbs)
@@ -3353,6 +3446,16 @@ def build_local_material(settings, force_seed=False):
         source_counts["seed"] += len(seed_verbs)
         verb_source_summary["seed_fallback"] += len(seed_verbs)
         seed_used = bool(seed_verbs)
+        if seed_verbs:
+            print(f"[verb-selector] seed fallback used count={len(seed_verbs)} source=natural_seed")
+    if len(verbs) < verb_count and not force_seed:
+        db_verbs = material_verbs_from_db(verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
+        verbs.extend(db_verbs)
+        db_keys = [item_normalized_key(item) for item in db_verbs if item_normalized_key(item)]
+        selected_verb_keys.extend(db_keys)
+        verb_source_summary["verbs"] += len(db_verbs)
+        if db_verbs:
+            print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
     verbs = verbs[:verb_count]
     selected_verb_keys = [item_normalized_key(item) for item in verbs if item_normalized_key(item)]
 
@@ -3377,8 +3480,10 @@ def build_local_material(settings, force_seed=False):
         "selected_verb_keys": selected_verb_keys,
         "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
         "verb_source_summary": verb_source_summary,
-        "seed_fallback_count": verb_source_summary.get("seed_fallback", 0),
-        "fallback_reason": "insufficient_verbs" if verb_source_summary.get("seed_fallback", 0) else "",
+        "rejected_fake_suru_count": rejected_fake_suru_count,
+        "verb_candidate_count": verb_candidate_count,
+        "seed_fallback_count": verb_source_summary.get("verbs", 0) + verb_source_summary.get("seed_fallback", 0),
+        "fallback_reason": "insufficient_verbs" if (verb_source_summary.get("verbs", 0) or verb_source_summary.get("seed_fallback", 0)) else "",
         "wrong_reviews": wrong_items,
         "quiz": quiz,
         "seed_used": seed_used,
