@@ -52,6 +52,7 @@ GEMINI_MODEL_CANDIDATES = os.environ.get(
     "GEMINI_MODEL_CANDIDATES",
     "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
 ).strip()
+GEMINI_BILLING_BLOCK_SECONDS = read_int_env("GEMINI_BILLING_BLOCK_SECONDS", 600, 60, 86400)
 TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
@@ -61,6 +62,14 @@ _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
 _SCHEMA_LOCK = threading.Lock()
 _SETTINGS_SCHEMA_READY = False
 _MATERIALS_SCHEMA_READY = False
+_GEMINI_BILLING_LOCK = threading.Lock()
+_GEMINI_BILLING_STATE = {
+    "prepayment_depleted": False,
+    "gemini_billing_block_until": 0.0,
+    "last_model_check_ok_at": 0.0,
+    "last_billing_status": "unknown",
+    "last_recommended_model": "",
+}
 
 LEVELS = ["N5", "N4", "N3", "N2", "N1"]
 VERB_FORM_LABELS = {
@@ -1689,6 +1698,79 @@ def gemini_smoke_test_enabled():
     return os.environ.get("GEMINI_ENABLE_MODEL_SMOKE_TEST", "false").strip().lower() == "true"
 
 
+def gemini_billing_block_message():
+    return "Gemini API 暫時被帳務保護機制暫停，請稍後或執行 model-check 確認額度恢復。"
+
+
+def timestamp_to_utc_iso(value):
+    try:
+        ts = float(value or 0)
+    except (TypeError, ValueError):
+        ts = 0
+    if ts <= 0:
+        return ""
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat(timespec="seconds")
+
+
+def gemini_billing_snapshot():
+    now_ts = time.time()
+    with _GEMINI_BILLING_LOCK:
+        block_until = float(_GEMINI_BILLING_STATE.get("gemini_billing_block_until") or 0)
+        if block_until and block_until <= now_ts:
+            _GEMINI_BILLING_STATE["prepayment_depleted"] = False
+            _GEMINI_BILLING_STATE["gemini_billing_block_until"] = 0.0
+            _GEMINI_BILLING_STATE["last_billing_status"] = "expired"
+            print("[gemini-billing] billing block expired; retrying gemini", flush=True)
+        block_until = float(_GEMINI_BILLING_STATE.get("gemini_billing_block_until") or 0)
+        return {
+            "prepayment_depleted": bool(_GEMINI_BILLING_STATE.get("prepayment_depleted")),
+            "gemini_billing_block_until": block_until,
+            "gemini_billing_block_until_iso": timestamp_to_utc_iso(block_until),
+            "billing_block_active": bool(block_until and block_until > now_ts),
+            "last_model_check_ok_at": float(_GEMINI_BILLING_STATE.get("last_model_check_ok_at") or 0),
+            "last_model_check_ok_at_iso": timestamp_to_utc_iso(
+                _GEMINI_BILLING_STATE.get("last_model_check_ok_at")
+            ),
+            "last_billing_status": str(_GEMINI_BILLING_STATE.get("last_billing_status") or "unknown"),
+            "last_recommended_model": str(_GEMINI_BILLING_STATE.get("last_recommended_model") or ""),
+        }
+
+
+def clear_gemini_billing_block(recommended_model="", reason=""):
+    with _GEMINI_BILLING_LOCK:
+        _GEMINI_BILLING_STATE["prepayment_depleted"] = False
+        _GEMINI_BILLING_STATE["gemini_billing_block_until"] = 0.0
+        _GEMINI_BILLING_STATE["last_model_check_ok_at"] = time.time()
+        _GEMINI_BILLING_STATE["last_billing_status"] = "ok"
+        if recommended_model:
+            _GEMINI_BILLING_STATE["last_recommended_model"] = recommended_model
+    print("[gemini-billing] model-check success; clearing billing block", flush=True)
+    if reason:
+        print(f"[gemini-billing] clear reason={reason}", flush=True)
+
+
+def set_gemini_billing_block(reason="prepayment_depleted"):
+    block_until = time.time() + GEMINI_BILLING_BLOCK_SECONDS
+    with _GEMINI_BILLING_LOCK:
+        _GEMINI_BILLING_STATE["prepayment_depleted"] = True
+        _GEMINI_BILLING_STATE["gemini_billing_block_until"] = block_until
+        _GEMINI_BILLING_STATE["last_billing_status"] = "prepayment_depleted"
+    print(
+        f"[gemini-billing] prepayment depleted; blocking gemini until={timestamp_to_utc_iso(block_until)}; reason={reason}",
+        flush=True,
+    )
+
+
+def is_prepayment_depleted_error(error):
+    lower = str(error or "").lower()
+    return (
+        ("prepayment" in lower and ("deplet" in lower or "credit" in lower))
+        or "credits are depleted" in lower
+        or "credit balance" in lower
+        or "prepayment credits" in lower
+    )
+
+
 def gemini_error_type(error):
     text = str(error or "")
     lower = text.lower()
@@ -1696,6 +1778,8 @@ def gemini_error_type(error):
         return "missing_api_key"
     if "timeout" in lower or "timed out" in lower or "逾時" in text:
         return "timeout"
+    if is_prepayment_depleted_error(error):
+        return "prepayment_depleted"
     if "quota" in lower or "resource_exhausted" in lower or "429" in lower:
         return "quota_exceeded"
     if "not_found" in lower or "not found" in lower or "404" in lower:
@@ -1731,6 +1815,25 @@ def compact_gemini_error_detail(raw_detail):
 
 def classify_gemini_error(error):
     return gemini_error_type(error)
+
+
+def choose_gemini_failure_reason(failures):
+    priority = [
+        "prepayment_depleted",
+        "missing_api_key",
+        "quota_exceeded",
+        "timeout",
+        "permission_denied",
+        "not_found",
+        "json_parse_error",
+        "model_error",
+        "unknown_error",
+    ]
+    error_types = {item.get("error_type") for item in failures or [] if isinstance(item, dict)}
+    for reason in priority:
+        if reason in error_types:
+            return reason
+    return next((item.get("error_type") for item in failures or [] if isinstance(item, dict) and item.get("error_type")), "unknown_error")
 
 
 def call_gemini(prompt, model_name=None, timeout_seconds=None):
@@ -3863,6 +3966,15 @@ def analyze_grammar_with_gemini(text):
         "exception_message": "",
         "failures": [],
     }
+    billing_snapshot = gemini_billing_snapshot()
+    diagnostic.update(
+        {
+            "billing_block_active": billing_snapshot["billing_block_active"],
+            "billing_status": billing_snapshot["last_billing_status"],
+            "gemini_billing_block_until": billing_snapshot["gemini_billing_block_until_iso"],
+            "prepayment_depleted": billing_snapshot["prepayment_depleted"],
+        }
+    )
     print("[grammar-analyzer] request received")
     print(f"[grammar-analyzer] input length={len(text or '')}")
     print(f"[grammar-analyzer] gemini api key present={str(bool(GEMINI_API_KEY)).lower()}")
@@ -3870,6 +3982,7 @@ def analyze_grammar_with_gemini(text):
     print(f"[grammar-analyzer] selected model={diagnostic['selected_model']}")
     print("[grammar-analyzer] cooldown active=false")
     print("[grammar-analyzer] local mode active=false")
+    print(f"[grammar-analyzer] billing block active={str(billing_snapshot['billing_block_active']).lower()}")
     if GEMINI_API_KEY:
         print("[feature-boundary] grammar_analyzer gemini enabled")
     else:
@@ -3883,6 +3996,23 @@ def analyze_grammar_with_gemini(text):
         "verb_forms": parsed["verb_forms"] if parsed else [],
         "error": mecab_error or "",
     }
+
+    if billing_snapshot["billing_block_active"]:
+        reason = "prepayment_depleted"
+        diagnostic["cooldown_active"] = True
+        diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+        diagnostic["exception_type"] = "billing_block_active"
+        diagnostic["exception_message"] = gemini_billing_block_message()
+        print(f"[grammar-analyzer] fallback reason={reason}")
+        payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
+        payload["error_message"] = gemini_billing_block_message()
+        payload["naturalness_check"]["reason"] = gemini_billing_block_message()
+        payload["sentence_summary"] = "Gemini API 帳務保護機制仍在暫停中，目前僅回傳本地規則偵測結果。"
+        if grammar_debug_enabled():
+            payload["fallback_reason"] = reason
+            payload["debug"] = diagnostic
+        persist_analysis_slang_terms(payload, text, "grammar_analyzer_billing_block")
+        return payload, 200
 
     prompt = build_grammar_coach_prompt(text, fallback_reading)
     failures = []
@@ -3929,7 +4059,14 @@ def analyze_grammar_with_gemini(text):
             continue
 
     if failures:
-        reason = failures[0].get("error_type") or "unknown_error"
+        reason = choose_gemini_failure_reason(failures)
+        if reason == "prepayment_depleted":
+            set_gemini_billing_block("grammar analyzer prepayment_depleted")
+            billing_snapshot = gemini_billing_snapshot()
+            diagnostic["billing_block_active"] = billing_snapshot["billing_block_active"]
+            diagnostic["billing_status"] = billing_snapshot["last_billing_status"]
+            diagnostic["gemini_billing_block_until"] = billing_snapshot["gemini_billing_block_until_iso"]
+            diagnostic["prepayment_depleted"] = billing_snapshot["prepayment_depleted"]
         diagnostic["failures"] = failures
         diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
         print(f"[grammar-analyzer] fallback reason={reason}")
@@ -3939,6 +4076,10 @@ def analyze_grammar_with_gemini(text):
         diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
         print("[grammar-analyzer] fallback reason=unknown_error")
     payload = grammar_fallback_response(text, fallback_reading, advanced_mecab)
+    if reason == "prepayment_depleted":
+        payload["error_message"] = gemini_billing_block_message()
+        payload["naturalness_check"]["reason"] = gemini_billing_block_message()
+        payload["sentence_summary"] = "Gemini API 帳務保護機制已啟動，目前僅回傳本地規則偵測結果。"
     if grammar_debug_enabled():
         payload["fallback_reason"] = reason
         payload["debug"] = diagnostic
@@ -4481,9 +4622,29 @@ def api_gemini_debug_model_check():
             f"elapsed_ms={result['elapsed_ms']}；error_type={result['error_type']}"
         )
     recommended = next((item["model"] for item in models if item["status"] == "ok"), "")
+    if recommended:
+        billing_status = "ok"
+        gemini_available = True
+        clear_gemini_billing_block(recommended_model=recommended, reason="model-check ok")
+    elif not GEMINI_API_KEY:
+        billing_status = "missing_api_key"
+        gemini_available = False
+    elif any(item.get("error_type") == "prepayment_depleted" for item in models):
+        billing_status = "prepayment_depleted"
+        gemini_available = False
+        set_gemini_billing_block("model-check prepayment_depleted")
+    else:
+        billing_status = "error"
+        gemini_available = False
+    billing_snapshot = gemini_billing_snapshot()
     return jsonify(
         {
             "api_key_present": bool(GEMINI_API_KEY),
+            "gemini_available": gemini_available,
+            "billing_status": billing_status,
+            "billing_block_active": billing_snapshot["billing_block_active"],
+            "prepayment_depleted": billing_snapshot["prepayment_depleted"],
+            "gemini_billing_block_until": billing_snapshot["gemini_billing_block_until_iso"],
             "models": models,
             "recommended_model": recommended,
             "timeout_seconds": GEMINI_TIMEOUT_SECONDS,
