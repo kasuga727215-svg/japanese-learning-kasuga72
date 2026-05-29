@@ -136,6 +136,22 @@
     .streak-day { min-height: 42px; border: 1px solid var(--border-color); border-radius: 6px; display: grid; place-items: center; color: #aeb4c8; font-size: .75rem; }
     .streak-day.active { color: #00110d; background: var(--primary); border-color: var(--primary); font-weight: 800; }
     .review-chip { display: block; color: #f4f7ff; border-left: 3px solid var(--secondary); background: rgba(255,255,255,.07); border-radius: 6px; padding: 10px; margin-top: 8px; }
+    .rules-toolbar { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 14px; }
+    .rule-group { border: 1px solid rgba(0,255,204,.18); border-radius: 8px; margin-bottom: 12px; background: rgba(255,255,255,.025); overflow: hidden; }
+    .rule-group summary { cursor: pointer; padding: 12px 14px; color: var(--primary); font-weight: 800; list-style: none; }
+    .rule-group summary::-webkit-details-marker { display: none; }
+    .rule-grid { display: grid; grid-template-columns: 1fr; gap: 10px; padding: 0 12px 12px; }
+    .rule-card { border: 1px solid rgba(102,209,255,.22); border-radius: 8px; padding: 12px; background: rgba(13,14,21,.72); overflow-wrap: anywhere; word-wrap: break-word; }
+    .rule-title { color: #35f2e1; font-weight: 800; font-size: 1.04rem; }
+    .rule-meta { color: #b8c4e0; font-size: .86rem; margin-top: 3px; }
+    .rule-controls { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 10px; }
+    .rule-chip { display: inline-block; color: #ffd6f6; border: 1px solid rgba(255,0,255,.35); background: rgba(255,0,255,.1); border-radius: 999px; padding: 2px 8px; font-size: .78rem; font-weight: 700; margin-left: 6px; }
+    .rule-small-label { color: #9fe8ff; font-size: .82rem; font-weight: 700; margin-bottom: 3px; }
+    .rule-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    @media (min-width: 768px) {
+      .rules-toolbar { grid-template-columns: 1fr auto auto auto; align-items: center; }
+      .rule-controls { grid-template-columns: repeat(6, minmax(96px, 1fr)); align-items: end; }
+    }
     @media (max-width: 768px) {
       .app-shell { width: min(100% - 20px, 1320px); }
       .app-title { font-size: 1.55rem; }
@@ -256,6 +272,20 @@
       </p>
       <div id="save-msg" class="mt-3"></div>
     </div>
+    <div class="card p-4">
+      <h4 class="mb-2" style="color:var(--primary);">單字出現設置</h4>
+      <p class="text-muted mb-3">可設定各類單字在本地教材中的出現週期與次數，避免某類詞彙過度出現。</p>
+      <div class="rules-toolbar">
+        <input id="vocab-rule-search" class="form-control" placeholder="搜尋類型、來源、詞性..." oninput="renderVocabRules()">
+        <button class="neon-btn" onclick="saveAllVocabRules()" id="rules-save-all-btn">儲存設定</button>
+        <button class="neon-btn" onclick="syncVocabRules()" id="rules-sync-btn">同步目前詞庫類型</button>
+        <button class="neon-btn accent-btn" onclick="resetVocabRules()" id="rules-reset-btn">還原預設值</button>
+      </div>
+      <div id="vocab-rules-msg" class="mb-3"></div>
+      <div id="vocab-rules-container">
+        <div class="text-muted">正在讀取單字出現規則...</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -263,6 +293,7 @@
   let currentQuiz = [];
   let currentMaterialData = null;
   let archiveDatesCache = { expiresAt: 0, dates: null };
+  let vocabRulesPayload = { groups: [] };
   const ARCHIVE_DATES_CACHE_MS = 60000;
 
   function escapeHtml(value) {
@@ -403,7 +434,10 @@
     });
     const settingsPromise = loadSettings().catch(() => {});
     const dashboardPromise = loadDashboard().catch(() => {});
-    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, dashboardPromise]);
+    const rulesPromise = loadVocabRules().catch(() => {
+      document.getElementById("vocab-rules-container").innerHTML = "<div class='error-text'>單字出現規則暫時無法載入。</div>";
+    });
+    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, dashboardPromise, rulesPromise]);
     perfLog("frontend_bootstrap", bootStarted);
   };
 
@@ -445,6 +479,157 @@
     }
   }
 
+  async function loadVocabRules() {
+    vocabRulesPayload = await api("/api/vocab-rules");
+    renderVocabRules();
+  }
+
+  function periodLabel(value) {
+    return { daily: "每日", weekly: "每週", monthly: "每月" }[value] || value;
+  }
+
+  function renderVocabRules() {
+    const container = document.getElementById("vocab-rules-container");
+    if (!container) return;
+    const keyword = (document.getElementById("vocab-rule-search")?.value || "").trim().toLowerCase();
+    const groups = vocabRulesPayload.groups || [];
+    if (!groups.length) {
+      container.innerHTML = "<div class='text-muted'>目前尚無可設定的單字類型。</div>";
+      return;
+    }
+    container.innerHTML = groups.map(group => {
+      const rules = (group.rules || []).filter(rule => {
+        if (!keyword) return true;
+        return [rule.display_name, rule.group_name, rule.source_type, rule.match_value, rule.rule_key].some(value => String(value || "").toLowerCase().includes(keyword));
+      });
+      if (!rules.length) return "";
+      return `
+        <details class="rule-group" open>
+          <summary>${escapeHtml(group.group_name || group.group_key)} <span class="rule-chip">${rules.length} 類</span></summary>
+          <div class="rule-grid">
+            ${rules.map(renderRuleCard).join("")}
+          </div>
+        </details>
+      `;
+    }).join("") || "<div class='text-muted'>沒有符合搜尋條件的類型。</div>";
+  }
+
+  function renderRuleCard(rule) {
+    const key = escapeHtml(rule.rule_key);
+    const maxValue = rule.max_per_material ?? "";
+    return `
+      <div class="rule-card" data-rule-key="${key}" data-source-type="${escapeHtml(rule.source_type)}" data-match-value="${escapeHtml(rule.match_value)}" data-display-name="${escapeHtml(rule.display_name)}">
+        <div class="d-flex justify-content-between gap-2 flex-wrap">
+          <div>
+            <div class="rule-title">${escapeHtml(rule.display_name || rule.match_value)} ${rule.is_new_detected_type ? "<span class='rule-chip'>新偵測</span>" : ""}</div>
+            <div class="rule-meta">來源：${escapeHtml(rule.source_type)} = ${escapeHtml(rule.match_value)}｜目前 ${Number(rule.available_count || 0)} 筆｜已用 ${Number(rule.used_count || 0)} 次${rule.remaining_count === null || rule.remaining_count === undefined ? "" : `｜剩餘 ${Number(rule.remaining_count || 0)} 次`}</div>
+          </div>
+        </div>
+        <div class="rule-controls">
+          <label><div class="rule-small-label">啟用</div><input class="form-check-input rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""}></label>
+          <label><div class="rule-small-label">週期</div><select class="form-select rule-period">
+            ${["daily","weekly","monthly"].map(v => `<option value="${v}" ${rule.period === v ? "selected" : ""}>${periodLabel(v)}</option>`).join("")}
+          </select></label>
+          <label><div class="rule-small-label">次數</div><input class="form-control rule-quota" type="number" min="0" value="${Number(rule.quota_count || 0)}"></label>
+          <label><div class="rule-small-label">單份上限</div><input class="form-control rule-max" type="number" min="0" value="${escapeHtml(maxValue)}" placeholder="不限制"></label>
+          <label><div class="rule-small-label">優先度</div><input class="form-control rule-priority" type="number" min="0" max="100" value="${Number(rule.priority || 50)}"></label>
+          <label><div class="rule-small-label">嚴格限制</div><input class="form-check-input rule-strict" type="checkbox" ${rule.strict_mode ? "checked" : ""}></label>
+        </div>
+        <div class="rule-actions">
+          <button class="neon-btn" onclick="saveVocabRuleFromButton(this)">儲存此類型</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function collectRuleFromCard(card) {
+    return {
+      rule_key: card.dataset.ruleKey,
+      display_name: card.dataset.displayName,
+      group_key: card.dataset.sourceType,
+      source_type: card.dataset.sourceType,
+      match_value: card.dataset.matchValue,
+      enabled: card.querySelector(".rule-enabled").checked,
+      period: card.querySelector(".rule-period").value,
+      quota_count: Number(card.querySelector(".rule-quota").value || 0),
+      max_per_material: card.querySelector(".rule-max").value === "" ? null : Number(card.querySelector(".rule-max").value || 0),
+      priority: Number(card.querySelector(".rule-priority").value || 50),
+      strict_mode: card.querySelector(".rule-strict").checked
+    };
+  }
+
+  function allRuleCards() {
+    return Array.from(document.querySelectorAll(".rule-card"));
+  }
+
+  function setRuleMessage(text, isError = false) {
+    const msg = document.getElementById("vocab-rules-msg");
+    msg.className = isError ? "error-text" : "success-text";
+    msg.innerText = text;
+  }
+
+  async function saveVocabRule(ruleKey) {
+    const card = allRuleCards().find(item => item.dataset.ruleKey === ruleKey);
+    if (!card) return;
+    try {
+      const result = await api("/api/vocab-rules", { method: "POST", body: JSON.stringify({ rules: [collectRuleFromCard(card)] }) });
+      setRuleMessage(result.message || "單字出現規則已保存。");
+      await loadVocabRules();
+    } catch (error) {
+      setRuleMessage(error.message, true);
+    }
+  }
+
+  async function saveVocabRuleFromButton(button) {
+    const card = button.closest(".rule-card");
+    if (!card) return;
+    await saveVocabRule(card.dataset.ruleKey);
+  }
+
+  async function saveAllVocabRules() {
+    const btn = document.getElementById("rules-save-all-btn");
+    btn.disabled = true;
+    try {
+      const result = await api("/api/vocab-rules", { method: "POST", body: JSON.stringify({ rules: allRuleCards().map(collectRuleFromCard) }) });
+      setRuleMessage(result.message || "單字出現規則已保存。");
+      await loadVocabRules();
+    } catch (error) {
+      setRuleMessage(error.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function syncVocabRules() {
+    const btn = document.getElementById("rules-sync-btn");
+    btn.disabled = true;
+    try {
+      const result = await api("/api/vocab-rules/sync", { method: "POST" });
+      setRuleMessage(`${result.message || "已同步目前詞庫類型。"} 新增 ${result.created_count || 0} 類。`);
+      vocabRulesPayload = result;
+      renderVocabRules();
+    } catch (error) {
+      setRuleMessage(error.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function resetVocabRules() {
+    const btn = document.getElementById("rules-reset-btn");
+    btn.disabled = true;
+    try {
+      const result = await api("/api/vocab-rules/reset-defaults", { method: "POST" });
+      setRuleMessage(result.message || "已還原預設規則。");
+      vocabRulesPayload = result;
+      renderVocabRules();
+    } catch (error) {
+      setRuleMessage(error.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function triggerNowUI(mode = "local") {
     const useSample = mode === true || mode === "sample";
     const generationMode = useSample ? "local" : (mode || "local");
@@ -463,6 +648,7 @@
       invalidateArchiveDatesCache();
       await loadArchiveList(true);
       await loadDashboard();
+      await loadVocabRules();
     } catch (error) {
       msg.className = "mt-3 error-text";
       msg.innerText = error.message;
