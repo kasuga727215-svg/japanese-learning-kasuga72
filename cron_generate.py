@@ -1,8 +1,8 @@
 import os
 
-from app import APP_URL, generate_daily_material
+from app import APP_URL, run_daily_schedule
 
 
 if __name__ == "__main__":
-    result = generate_daily_material(app_url=os.environ.get("APP_URL", APP_URL))
+    result = run_daily_schedule(app_url=os.environ.get("APP_URL", APP_URL))
     print(result["message"])

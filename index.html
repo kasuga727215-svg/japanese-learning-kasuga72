@@ -300,21 +300,48 @@
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
   }
 
-  async function api(url, options = {}) {
-    const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "請求失敗，請稍後再試。");
+  async function safeFetchJson(url, options = {}) {
+    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+    const res = await fetch(url, { ...options, headers });
+    const contentType = res.headers.get("content-type") || "";
+    const text = await res.text();
+    if (!contentType.includes("application/json")) {
+      console.error("[safeFetchJson] Non-JSON response", {
+        url,
+        status: res.status,
+        contentType,
+        preview: text.slice(0, 300)
+      });
+      if (res.status === 404) throw new Error("API \u8def\u7531\u4e0d\u5b58\u5728\uff0c\u8acb\u78ba\u8a8d\u524d\u5f8c\u7aef\u8def\u7531\u662f\u5426\u4e00\u81f4\u3002");
+      if (res.status >= 500) throw new Error("\u4f3a\u670d\u5668\u8655\u7406\u5931\u6557\uff0c\u8acb\u67e5\u770b Render Logs\u3002");
+      throw new Error("\u7cfb\u7d71 API \u56de\u50b3\u683c\u5f0f\u7570\u5e38\uff0c\u53ef\u80fd\u662f\u8def\u7531\u4e0d\u5b58\u5728\u6216\u4f3a\u670d\u5668\u932f\u8aa4\u3002\u8acb\u7a0d\u5f8c\u518d\u8a66\u6216\u67e5\u770b Render Logs\u3002");
+    }
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      console.error("[safeFetchJson] JSON parse failed", {
+        url,
+        status: res.status,
+        preview: text.slice(0, 300)
+      });
+      throw new Error("API \u56de\u50b3\u683c\u5f0f\u932f\u8aa4\uff0c\u7121\u6cd5\u89e3\u6790 JSON\u3002");
+    }
+    if (!res.ok || (data && data.ok === false)) {
+      throw new Error((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+    }
     return data;
+  }
+
+  async function api(url, options = {}) {
+    return safeFetchJson(url, options);
   }
 
   async function apiWithTimeout(url, timeoutMs = 5000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { headers: { "Content-Type": "application/json" }, signal: controller.signal });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "請求失敗，請稍後再試。");
-      return data;
+      return await safeFetchJson(url, { signal: controller.signal });
     } finally {
       clearTimeout(timer);
     }

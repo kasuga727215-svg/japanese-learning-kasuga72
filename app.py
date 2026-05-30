@@ -19,10 +19,57 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from flask import Flask, jsonify, render_template, request
+from werkzeug.exceptions import HTTPException
 from services.grammar_debugger import debug_grammar
 
 
 app = Flask(__name__, template_folder=".")
+
+
+def api_error_payload(status_code, error, message):
+    return {
+        "ok": False,
+        "error": error,
+        "message": message,
+        "path": request.path,
+        "status": status_code,
+    }
+
+
+@app.errorhandler(404)
+def handle_not_found(error):
+    if request.path.startswith("/api/"):
+        return jsonify(api_error_payload(404, "api_not_found", "API 路由不存在")), 404
+    return error
+
+
+@app.errorhandler(405)
+def handle_method_not_allowed(error):
+    if request.path.startswith("/api/"):
+        return jsonify(api_error_payload(405, "method_not_allowed", "API 方法不允許")), 405
+    return error
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    if isinstance(error, HTTPException):
+        if request.path.startswith("/api/"):
+            status_code = int(error.code or 500)
+            message = "API 請求失敗"
+            error_code = "http_error"
+            if status_code == 404:
+                message = "API 路由不存在"
+                error_code = "api_not_found"
+            elif status_code == 405:
+                message = "API 方法不允許"
+                error_code = "method_not_allowed"
+            return jsonify(api_error_payload(status_code, error_code, message)), status_code
+        return error
+    if request.path.startswith("/api/"):
+        print(f"[api-error] unhandled path={request.path}; reason={error}")
+        print(traceback.format_exc())
+        return jsonify(api_error_payload(500, "internal_server_error", "伺服器處理失敗，請查看 Render Logs")), 500
+    raise error
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -404,6 +451,40 @@ def today_string():
     return f"{now.year}/{now.month}/{now.day}"
 
 
+def get_today_taipei_date():
+    return today_string()
+
+
+def material_date_display(value):
+    parsed = parse_material_date(value)
+    if parsed:
+        return f"{parsed.year}/{parsed.month}/{parsed.day}"
+    text = str(value or "").strip()
+    return text or today_string()
+
+
+def material_date_iso(value):
+    parsed = parse_material_date(value)
+    return parsed.isoformat() if parsed else ""
+
+
+def material_date_variants(value):
+    parsed = parse_material_date(value)
+    text = str(value or "").strip()
+    variants = []
+    if parsed:
+        variants.extend([f"{parsed.year}/{parsed.month}/{parsed.day}", parsed.isoformat()])
+    elif text:
+        variants.append(text)
+    else:
+        variants.append(today_string())
+    output = []
+    for item in variants:
+        if item and item not in output:
+            output.append(item)
+    return output
+
+
 def today_iso_date():
     return datetime.now(ZoneInfo("Asia/Taipei")).date().isoformat()
 
@@ -452,10 +533,24 @@ def rolling_start(days):
 
 
 def parse_material_date(value):
-    try:
-        return datetime.strptime(str(value), "%Y/%m/%d").date()
-    except ValueError:
+    text = str(value or "").strip()
+    if not text:
         return None
+    if "T" in text:
+        text = text.split("T", 1)[0]
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text[: len(datetime.now().strftime(fmt))], fmt).date()
+        except ValueError:
+            pass
+    for separator in ("/", "-"):
+        parts = text.split(separator)
+        if len(parts) >= 3 and all(part.isdigit() for part in parts[:3]):
+            try:
+                return datetime(int(parts[0]), int(parts[1]), int(parts[2])).date()
+            except ValueError:
+                return None
+    return None
 
 
 def prepare_sqlite_path():
@@ -2278,14 +2373,16 @@ def read_database():
 
 def read_material_rows_by_date(target_date):
     ensure_database()
+    variants = material_date_variants(target_date)
     if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(variants))
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(f"SELECT {', '.join(COLUMNS)} FROM materials WHERE date = %s ORDER BY id", (target_date,))
+                cur.execute(f"SELECT {', '.join(COLUMNS)} FROM materials WHERE date IN ({placeholders}) ORDER BY id", tuple(variants))
                 rows = cur.fetchall()
         return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
     df = read_database()
-    return df[df["date"] == target_date]
+    return df[df["date"].isin(variants)]
 
 
 def parse_json_from_ai(text):
@@ -4539,9 +4636,9 @@ def build_local_material(settings, force_seed=False):
     return {"vocab": vocab, "verbs": verbs, "grammar": grammar, "metadata": metadata}
 
 
-def save_material_for_today(material, settings):
+def save_material_for_date(material_date, material, settings):
     ensure_database()
-    date = today_string()
+    date = material_date_display(material_date)
     vocab_list = material.get("vocab") or []
     verb_list = material.get("verbs") or []
     grammar = material.get("grammar") or {}
@@ -4592,22 +4689,28 @@ def save_material_for_today(material, settings):
         placeholders = ", ".join(["%s"] * len(COLUMNS))
         columns_sql = ", ".join(COLUMNS)
         rows = [tuple(clean_db_payload(row)[col] for col in COLUMNS) for row in new_rows]
+        date_variants = material_date_variants(date)
+        delete_placeholders = ", ".join(["%s"] * len(date_variants))
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                print(f"[history-protection] safe upsert daily_material date={date}")
-                cur.execute("DELETE FROM materials WHERE date = %s", (date,))
+                print(f"[history-protection] safe upsert material date={date}")
+                cur.execute(f"DELETE FROM materials WHERE date IN ({delete_placeholders})", tuple(date_variants))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
         invalidate_archive_dates_cache("daily material saved")
         return date
 
     df = read_database()
-    print(f"[history-protection] safe upsert daily_material date={date}")
-    df = df[df["date"] != date]
+    print(f"[history-protection] safe upsert material date={date}")
+    df = df[~df["date"].isin(material_date_variants(date))]
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
     invalidate_archive_dates_cache("daily material saved")
     return date
+
+
+def save_material_for_today(material, settings):
+    return save_material_for_date(get_today_taipei_date(), material, settings)
 
 
 def material_by_date(target_date):
@@ -4666,7 +4769,8 @@ def material_by_date(target_date):
         }
 
     return {
-        "date": target_date,
+        "date": material_date_display(first.get("date", target_date)),
+        "date_iso": material_date_iso(first.get("date", target_date)),
         "targetLevel": first.get("target_level", ""),
         "vocabulary": vocabulary,
         "verbs": verbs,
@@ -4675,7 +4779,13 @@ def material_by_date(target_date):
     }
 
 
+def get_material_by_date(material_date):
+    return material_by_date(material_date)
+
+
 def build_telegram_notification(material, date, app_url=None):
+    if not material:
+        raise RuntimeError("教材尚未寫入資料庫，無法推送 Telegram。")
     link = html.escape(app_url or APP_URL)
     words = "、".join(html.escape(v.get("word", "")) for v in material.get("vocabulary", []) if v.get("word"))
     grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
@@ -4727,7 +4837,7 @@ def material_success_message(date, settings, material, telegram_status):
     return f"{base} {telegram_status}"
 
 
-def generate_daily_material(use_sample=False, posted_settings=None, app_url=None, mode="local"):
+def generate_daily_material(use_sample=False, posted_settings=None, app_url=None, mode="local", material_date=None, notify_telegram=True):
     settings = save_settings_file(posted_settings) if posted_settings else load_settings()
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
@@ -4762,10 +4872,12 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     if mode == "local" and raw_material.get("metadata", {}).get("ai_used"):
         print("[material-generator] ERROR local mode attempted to call Gemini")
 
-    date = save_material_for_today(raw_material, settings)
+    date = save_material_for_date(material_date or get_today_taipei_date(), raw_material, settings)
     print(f"[material-generator] local material generated; ai_used={str(raw_material.get('metadata', {}).get('ai_used', False)).lower()}")
     print(f"[material-generator] material saved date={date}")
-    material = material_by_date(date)
+    material = get_material_by_date(date)
+    if not material:
+        raise RuntimeError(f"教材寫入後重新讀取失敗：{date}")
 
     telegram_status = "未發送"
     try:
@@ -4776,8 +4888,10 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
 
     invalidate_dashboard_cache("daily material generated")
     return {
+        "ok": True,
         "message": material_success_message(date, settings, raw_material, telegram_status),
         "date": date,
+        "material_date": date,
         "telegram": telegram_status,
         "generation_mode": raw_material.get("metadata", {}).get("generation_mode", mode),
         "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
@@ -4786,15 +4900,52 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     }
 
 
+def run_daily_schedule(app_url=None, mode="local"):
+    date = get_today_taipei_date()
+    print(f"[daily-schedule] start date={date}")
+    try:
+        material = get_material_by_date(date)
+        print(f"[daily-schedule] material exists={str(bool(material)).lower()}")
+        if not material:
+            print(f"[daily-schedule] generating local material date={date}")
+            result = generate_daily_material(app_url=app_url, mode=mode, material_date=date)
+            print(f"[daily-schedule] save material success date={date}")
+            print(f"[daily-schedule] reload material from db success date={date}")
+            print(f"[daily-schedule] telegram push success date={date}")
+            return result
+        print(f"[daily-schedule] reload material from db success date={date}")
+        send_telegram_message(build_telegram_notification(material, date, app_url))
+        print(f"[daily-schedule] telegram push success date={date}")
+        invalidate_dashboard_cache("daily schedule material ready")
+        return {
+            "ok": True,
+            "message": f"{date} 的學習材料已確認落地，Telegram 已推送。",
+            "date": date,
+            "material_date": date,
+            "generation_mode": material.get("metadata", {}).get("generation_mode", "local"),
+            "ai_used": bool(material.get("metadata", {}).get("ai_used", False)),
+            "telegram": "Telegram 通知已發送",
+        }
+    except Exception as exc:
+        print(f"[daily-schedule] failed reason={exc}")
+        print(traceback.format_exc())
+        raise
+
+
 def material_generation_error_payload(error):
     detail = str(error or "")
     print(f"[material-generator] ERROR generate failed: {detail}")
     print(traceback.format_exc())
     lower = detail.lower()
     if "timestamp" in lower or "timestamptz" in lower or "timestamp with time zone" in lower:
-        return {"error": "本地教材生成失敗，資料庫時間欄位格式異常，請稍後再試。"}
-    return {"error": "本地教材生成失敗，請稍後再試。"}
-
+        return {
+            "error": "local_generation_failed",
+            "message": "\u672c\u5730\u6559\u6750\u751f\u6210\u5931\u6557\uff0c\u8cc7\u6599\u5eab\u6642\u9593\u6b04\u4f4d\u683c\u5f0f\u7570\u5e38\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002",
+        }
+    return {
+        "error": "local_generation_failed",
+        "message": "\u672c\u5730\u6559\u6750\u751f\u6210\u5931\u6557\uff0c\u8acb\u67e5\u770b\u7cfb\u7d71\u7d00\u9304\u3002",
+    }
 
 def shuffled(items):
     items = list(items)
@@ -5808,7 +5959,7 @@ def learning_report_page():
 
 @app.get("/api/vocab-rules")
 def api_vocab_rules():
-    return jsonify(build_vocab_rules_payload(create_missing=False))
+    return jsonify({"ok": True, **build_vocab_rules_payload(create_missing=False)})
 
 
 @app.post("/api/vocab-rules")
@@ -5816,14 +5967,14 @@ def api_save_vocab_rules():
     data = request.get_json(silent=True) or {}
     rules = data.get("rules")
     if not isinstance(rules, list):
-        return jsonify({"error": "請提供要儲存的單字出現規則。"}), 400
+        return jsonify({"ok": False, "error": "invalid_rules_payload", "message": "\u8acb\u63d0\u4f9b\u8981\u5132\u5b58\u7684\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u3002"}), 400
     try:
         result = insert_or_update_vocab_rules(rules)
-        return jsonify({"success": True, "message": "單字出現規則已保存。", **result})
+        return jsonify({"ok": True, "success": True, "message": "\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u5df2\u5132\u5b58\u3002", **result})
     except Exception as exc:
         print(f"[vocab-rules] save failed; reason={exc}")
         print(traceback.format_exc())
-        return jsonify({"error": "單字出現規則保存失敗，請稍後再試。"}), 500
+        return jsonify({"ok": False, "error": "vocab_rules_save_failed", "message": "\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u4fdd\u5b58\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002"}), 500
 
 
 @app.post("/api/vocab-rules/sync")
@@ -5832,11 +5983,11 @@ def api_sync_vocab_rules():
         before = {row["rule_key"] for row in load_vocab_rule_rows()}
         payload = build_vocab_rules_payload(create_missing=True)
         after = {row["rule_key"] for row in load_vocab_rule_rows()}
-        return jsonify({"success": True, "message": "已同步目前詞庫類型。", "created_count": len(after - before), **payload})
+        return jsonify({"ok": True, "success": True, "message": "\u5df2\u540c\u6b65\u76ee\u524d\u8a5e\u5eab\u985e\u578b\u3002", "created_count": len(after - before), **payload})
     except Exception as exc:
         print(f"[vocab-rules] sync failed; reason={exc}")
         print(traceback.format_exc())
-        return jsonify({"error": "同步詞庫類型失敗，請稍後再試。"}), 500
+        return jsonify({"ok": False, "error": "vocab_rules_sync_failed", "message": "\u540c\u6b65\u8a5e\u5eab\u985e\u578b\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002"}), 500
 
 
 @app.post("/api/vocab-rules/reset-defaults")
@@ -5853,11 +6004,11 @@ def api_reset_vocab_rules():
                 conn.execute("DELETE FROM vocab_appearance_rules")
                 conn.commit()
         insert_or_update_vocab_rules(default_vocab_rule_seed())
-        return jsonify({"success": True, "message": "已還原預設單字出現規則。", **build_vocab_rules_payload(create_missing=False)})
+        return jsonify({"ok": True, "success": True, "message": "\u5df2\u9084\u539f\u9810\u8a2d\u898f\u5247\u3002", **build_vocab_rules_payload(create_missing=False)})
     except Exception as exc:
         print(f"[vocab-rules] reset failed; reason={exc}")
         print(traceback.format_exc())
-        return jsonify({"error": "還原預設規則失敗，請稍後再試。"}), 500
+        return jsonify({"ok": False, "error": "vocab_rules_reset_failed", "message": "\u9084\u539f\u9810\u8a2d\u898f\u5247\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002"}), 500
 
 
 @app.get("/api/settings")
@@ -5908,7 +6059,16 @@ def api_archive_dates():
             dates = [d for d in df["date"].drop_duplicates().tolist() if d]
         except (FileNotFoundError, ValueError):
             dates = []
-        dates = sorted(dates, key=lambda value: parse_material_date(value) or datetime.min.date(), reverse=True)[:limit]
+    normalized_dates = []
+    seen_dates = set()
+    for value in dates:
+        normalized = material_date_display(value)
+        parsed = parse_material_date(normalized)
+        sort_key = parsed or datetime.min.date()
+        if normalized not in seen_dates:
+            seen_dates.add(normalized)
+            normalized_dates.append((normalized, sort_key))
+    dates = [item[0] for item in sorted(normalized_dates, key=lambda item: item[1], reverse=True)[:limit]]
 
     _ARCHIVE_DATES_CACHE["payload"] = dates
     _ARCHIVE_DATES_CACHE["expires_at"] = now_ts + ARCHIVE_DATES_CACHE_TTL_SECONDS
@@ -5940,17 +6100,17 @@ def api_generate():
             )
         )
     except Exception as e:
-        return jsonify(material_generation_error_payload(e)), 500
+        return jsonify({"ok": False, "error": "local_generation_failed", **material_generation_error_payload(e)}), 500
 
 
 @app.get("/api/cron/daily-push")
 def api_cron_daily_push():
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
-        return jsonify({"error": "unauthorized"}), 401
+        return jsonify({"ok": False, "error": "unauthorized", "message": "unauthorized"}), 401
     try:
-        return jsonify(generate_daily_material(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
+        return jsonify(run_daily_schedule(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
     except Exception as e:
-        return jsonify(material_generation_error_payload(e)), 500
+        return jsonify({"ok": False, "error": "daily_schedule_failed", **material_generation_error_payload(e)}), 500
 
 
 @app.post("/api/test-telegram")
@@ -6586,22 +6746,23 @@ def add_sqlite_activity_sources(active_map, table_name, columns, source):
 
 
 def add_material_activity_sources(active_map):
-    slash_dates = []
+    candidate_dates = []
     for iso_date in active_map:
         try:
             parsed = datetime.strptime(iso_date, "%Y-%m-%d").date()
-            slash_dates.append(f"{parsed.year}/{parsed.month}/{parsed.day}")
+            candidate_dates.extend([f"{parsed.year}/{parsed.month}/{parsed.day}", parsed.isoformat()])
         except ValueError:
-            slash_dates.append(iso_date)
+            candidate_dates.extend(material_date_variants(iso_date))
+    candidate_dates = list(dict.fromkeys(candidate_dates))
     try:
         if DATABASE_URL:
             ensure_database()
-            placeholders = ", ".join(["%s"] * len(slash_dates))
+            placeholders = ", ".join(["%s"] * len(candidate_dates))
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         f"SELECT DISTINCT date FROM materials WHERE date IN ({placeholders})",
-                        tuple(slash_dates),
+                        tuple(candidate_dates),
                     )
                     rows = cur.fetchall()
             for (date_value,) in rows:
@@ -6610,7 +6771,7 @@ def add_material_activity_sources(active_map):
         df = read_database()
         if df.empty:
             return
-        date_values = set(slash_dates) | set(active_map.keys())
+        date_values = set(candidate_dates) | set(active_map.keys())
         rows = df[df["date"].isin(date_values)] if "date" in df.columns else df
         for _, row in rows.iterrows():
             add_activity_source(active_map, row.get("date"), "daily_materials")
