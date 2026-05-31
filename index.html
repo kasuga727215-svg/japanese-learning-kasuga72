@@ -116,6 +116,55 @@
       background: rgba(255, 0, 255, 0.12);
       border-color: rgba(255, 0, 255, 0.35);
     }
+    .grammar-section-card,
+    .grammar-section-card * {
+      opacity: 1;
+      mix-blend-mode: normal;
+      -webkit-text-fill-color: currentColor;
+    }
+    .grammar-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+    }
+    .grammar-card {
+      background: rgba(255,255,255,.055);
+      border: 1px solid rgba(0,255,204,.22);
+      border-left: 4px solid var(--primary);
+      border-radius: 8px;
+      padding: 14px;
+      overflow-wrap: anywhere;
+      word-wrap: break-word;
+    }
+    .grammar-card-title {
+      color: #35f2e1;
+      font-size: 1.12rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .grammar-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .grammar-tag {
+      display: inline-block;
+      padding: 0.18rem 0.55rem;
+      border-radius: 999px;
+      color: #9fe8ff;
+      background: rgba(102, 209, 255, 0.12);
+      border: 1px solid rgba(102, 209, 255, 0.35);
+      font-size: .82rem;
+      font-weight: 700;
+    }
+    .grammar-label { color: #9fe8ff; font-weight: 800; }
+    .grammar-formula { color: #eef4ff; background: rgba(0,0,0,.22); border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+    .grammar-desc { color: #dfe7ff; line-height: 1.7; }
+    .grammar-example { color: #ffffff; font-weight: 700; line-height: 1.65; }
+    .grammar-reading { color: #b8c4e0; line-height: 1.65; }
+    .grammar-translation { color: #ffd6f6; line-height: 1.65; }
+    .grammar-note { color: #f2f5ff; background: rgba(255,255,255,.045); border-radius: 6px; padding: 8px 10px; margin-top: 8px; line-height: 1.65; }
     .range-value { color: var(--secondary); font-weight: 800; min-width: 34px; display: inline-block; text-align: right; }
     .answer-ok { border-left-color: var(--primary) !important; box-shadow: inset 0 0 0 1px rgba(0,255,204,.4); }
     .answer-bad { border-left-color: var(--secondary) !important; box-shadow: inset 0 0 0 1px rgba(255,0,255,.35); }
@@ -222,7 +271,12 @@
           </table>
         </div>
       </div>
-      <div class="card p-3"><h5 class="fw-bold" id="grammar-title" style="color:var(--primary)"></h5><p id="grammar-exp"></p><div id="example-list"></div></div>
+      <div class="card p-3 grammar-section-card">
+        <h5 class="fw-bold" id="grammar-title" style="color:var(--primary)">今日文法</h5>
+        <p id="grammar-exp"></p>
+        <div id="grammar-points-list" class="grammar-grid"></div>
+        <div id="example-list"></div>
+      </div>
     </div>
   </div>
 
@@ -259,6 +313,16 @@
         <div class="col-md-6">
           <label class="control-label">填充題數量 <span class="range-value" id="fill-value">5</span></label>
           <input type="range" id="setting-fill" class="form-range" min="0" max="30" value="5" oninput="syncRangeLabels()">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">文法等級</label>
+          <select id="setting-grammar-level" class="form-select">
+            <option>N5</option><option>N4</option><option>N3</option><option>N2</option><option>N1</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="control-label">文法數量 <span class="range-value" id="grammar-value">3</span></label>
+          <input type="range" id="setting-grammar" class="form-range" min="0" max="10" value="3" oninput="syncRangeLabels()">
         </div>
       </div>
       <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
@@ -298,6 +362,10 @@
 
   function escapeHtml(value) {
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+  }
+
+  function multilineHtml(value) {
+    return escapeHtml(value || "").replace(/\n/g, "<br>");
   }
 
   async function safeFetchJson(url, options = {}) {
@@ -431,7 +499,9 @@
       vocab_count: document.getElementById("setting-vocab").value,
       verb_count: document.getElementById("setting-verb").value,
       mcq_count: document.getElementById("setting-mcq").value,
-      fill_count: document.getElementById("setting-fill").value
+      fill_count: document.getElementById("setting-fill").value,
+      grammar_level: document.getElementById("setting-grammar-level").value,
+      grammar_count: document.getElementById("setting-grammar").value
     };
   }
 
@@ -440,6 +510,7 @@
     document.getElementById("verb-value").innerText = document.getElementById("setting-verb").value;
     document.getElementById("mcq-value").innerText = document.getElementById("setting-mcq").value;
     document.getElementById("fill-value").innerText = document.getElementById("setting-fill").value;
+    document.getElementById("grammar-value").innerText = document.getElementById("setting-grammar").value;
   }
 
   function perfLog(label, startedAt) {
@@ -483,6 +554,8 @@
     document.getElementById("setting-verb").value = settings.verb_count;
     document.getElementById("setting-mcq").value = settings.mcq_count;
     document.getElementById("setting-fill").value = settings.fill_count;
+    document.getElementById("setting-grammar-level").value = settings.grammar_level || "N5";
+    document.getElementById("setting-grammar").value = settings.grammar_count || 3;
     syncRangeLabels();
     perfLog("settings", started);
   }
@@ -798,6 +871,30 @@
     renderMaterial(await api(`/api/materials?date=${encodeURIComponent(date)}`));
   }
 
+  function renderGrammarPoints(points) {
+    const items = Array.isArray(points) ? points : [];
+    if (!items.length) {
+      return "<div class='error-text'>今日尚未建立文法說明。</div>";
+    }
+    return items.map(item => `
+      <article class="grammar-card">
+        <div class="grammar-card-title">${escapeHtml(item.display_name || item.title || item.grammar_key || "文法點")}</div>
+        <div class="grammar-tags">
+          ${item.jlpt_level ? `<span class="grammar-tag">${escapeHtml(item.jlpt_level)}</span>` : ""}
+          ${item.grammar_type ? `<span class="grammar-tag">${escapeHtml(item.grammar_type)}</span>` : ""}
+        </div>
+        ${item.structure_formula ? `<div class="grammar-formula"><span class="grammar-label">結構：</span>${multilineHtml(item.structure_formula)}</div>` : ""}
+        ${item.usage_summary_zh ? `<p class="grammar-desc"><span class="grammar-label">用法：</span>${multilineHtml(item.usage_summary_zh)}</p>` : ""}
+        ${item.usage_detail_zh ? `<p class="grammar-desc">${multilineHtml(item.usage_detail_zh)}</p>` : ""}
+        ${item.example_japanese ? `<div class="grammar-example"><span class="grammar-label">例句：</span>${multilineHtml(item.example_japanese)}</div>` : ""}
+        ${item.example_hiragana ? `<div class="grammar-reading"><span class="grammar-label">假名：</span>${multilineHtml(item.example_hiragana)}</div>` : ""}
+        ${item.example_zh ? `<div class="grammar-translation"><span class="grammar-label">中文：</span>${multilineHtml(item.example_zh)}</div>` : ""}
+        ${item.learning_tip_zh ? `<div class="grammar-note"><span class="grammar-label">學習提示：</span>${multilineHtml(item.learning_tip_zh)}</div>` : ""}
+        ${item.common_mistake_zh ? `<div class="grammar-note"><span class="grammar-label">常見錯誤：</span>${multilineHtml(item.common_mistake_zh)}</div>` : ""}
+      </article>
+    `).join("");
+  }
+
   function renderMaterial(data) {
     document.getElementById("content-loader").style.display = "none";
     if (!data) {
@@ -831,9 +928,13 @@
       <td>${escapeHtml(v.masuStem || "-")}</td><td>${escapeHtml(v.te || "-")}</td><td>${escapeHtml(v.ta || "-")}</td>
       <td>${escapeHtml(v.nai || "-")}</td><td>${escapeHtml(v.ba || "-")}</td><td>${escapeHtml(v.causative || "-")}</td>
       <td>${escapeHtml(v.passive || "-")}</td><td>${escapeHtml(v.causativePassive || "-")}</td></tr>`).join("");
-    document.getElementById("grammar-title").innerText = `${data.targetLevel || ""} ${data.grammar.title || "文法"}`;
-    document.getElementById("grammar-exp").innerText = data.grammar.exp || "";
-    document.getElementById("example-list").innerHTML = (data.grammar.examples || []).map(ex => `
+    const grammar = data.grammar || {};
+    const grammarPoints = Array.isArray(data.grammar_points) ? data.grammar_points : [];
+    const grammarLevel = data.grammarLevel || data.metadata?.grammar_level || "";
+    document.getElementById("grammar-title").innerText = `${grammarLevel || data.targetLevel || ""} 今日文法`;
+    document.getElementById("grammar-exp").innerText = grammar.exp || "今日尚未建立文法說明。";
+    document.getElementById("grammar-points-list").innerHTML = renderGrammarPoints(grammarPoints);
+    document.getElementById("example-list").innerHTML = grammarPoints.length ? "" : (grammar.examples || []).map(ex => `
       <div class="example-box"><span style="color:var(--primary);font-weight:bold;">日文：</span><span class="example-jp">${escapeHtml(ex.jp)}</span><br>
       <span style="color:var(--secondary);font-weight:bold;">中文：</span><span class="example-cn">${escapeHtml(ex.cn)}</span></div>`).join("");
   }

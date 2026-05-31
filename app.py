@@ -415,6 +415,8 @@ DEFAULT_SETTINGS = {
     "verb_count": "4",
     "mcq_count": "5",
     "fill_count": "5",
+    "grammar_level": "N5",
+    "grammar_count": "3",
 }
 
 VOCAB_RULE_GROUPS = {
@@ -436,6 +438,14 @@ JLPT_ADJACENCY = {
     "N2": ["N2", "N3", "N1"],
     "N1": ["N1", "N2", "N3"],
 }
+GRAMMAR_LEVEL_FALLBACKS = {
+    "N5": ["N5"],
+    "N4": ["N4", "N5"],
+    "N3": ["N3", "N4", "N5"],
+    "N2": ["N2", "N3", "N4"],
+    "N1": ["N1", "N2", "N3"],
+}
+DEFAULT_GRAMMAR_COUNT_BY_LEVEL = {"N5": 3, "N4": 2, "N3": 2, "N2": 1, "N1": 1}
 
 
 SETTING_ALIASES = {
@@ -444,6 +454,8 @@ SETTING_ALIASES = {
     "verbCount": "verb_count",
     "quizMcqCount": "mcq_count",
     "quizFillCount": "fill_count",
+    "grammarLevel": "grammar_level",
+    "grammarCount": "grammar_count",
 }
 
 
@@ -594,12 +606,15 @@ def normalize_settings(raw):
 
     if settings["target_level"] not in LEVELS:
         settings["target_level"] = DEFAULT_SETTINGS["target_level"]
+    if settings["grammar_level"] not in LEVELS:
+        settings["grammar_level"] = DEFAULT_SETTINGS["grammar_level"]
 
     for key, default, min_value, max_value in [
         ("vocab_count", 8, 1, 30),
         ("verb_count", 4, 0, 20),
         ("mcq_count", 5, 0, 30),
         ("fill_count", 5, 0, 30),
+        ("grammar_count", 3, 0, 10),
     ]:
         try:
             value = int(settings[key])
@@ -704,6 +719,7 @@ def _ensure_settings_store_uncached():
         migrate_slang_candidates_sqlite(conn)
         migrate_vocabulary_pool_sqlite(conn)
         migrate_vocab_rules_sqlite(conn)
+        migrate_grammar_points_sqlite(conn)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_records_created_at ON quiz_records(created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_last_reviewed_at ON mistake_logs(last_reviewed_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_next_review_date ON mistake_logs(next_review_date)")
@@ -962,6 +978,354 @@ def migrate_vocab_rules_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
+
+
+def n5_grammar_seed_rows():
+    now = utc_now_iso()
+    rows = [
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_wa_topic",
+            "title": "は",
+            "display_name": "は：主題提示 / 對比",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示句子的主題，也可用來做對比。",
+            "usage_detail_zh": "「は」用來提示接下來要說明的主題，中文常可理解為「至於～」「～的話」。也常用在兩個事物的對比中。",
+            "structure_formula": "名詞 + は",
+            "example_japanese": "これは本です。\nラーメンは好きですが、すしはまあまあです。",
+            "example_hiragana": "これはほんです。\nらーめんはすきですが、すしはまあまあです。",
+            "example_zh": "這是書。\n拉麵我喜歡，但壽司還好。",
+            "common_mistake_zh": "初學者常把「は」當成主詞標記；其實它更像是在提示「接下來要談的主題」。",
+            "learning_tip_zh": "看到「は」時，先想成「至於～」，會比較容易抓到句子的焦點。",
+            "priority": 100,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_mo_also",
+            "title": "も",
+            "display_name": "も：也 / 都",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示「也」「都」，也可用在全面否定或表示很多次。",
+            "usage_detail_zh": "「も」表示前面的項目也符合後面的狀態。若搭配疑問詞與否定，會變成「哪裡都不」「什麼都不」的意思。",
+            "structure_formula": "名詞 + も",
+            "example_japanese": "この荷物もお願いします。\n明日はどこも行きません。\n何回もダイエットをしたことがあります。",
+            "example_hiragana": "このにもつもおねがいします。\nあしたはどこもいきません。\nなんかいもだいえっとをしたことがあります。",
+            "example_zh": "這個行李也麻煩了。\n明天哪裡都不去。\n我減肥過很多次。",
+            "common_mistake_zh": "「も」不只表示「也」，搭配疑問詞與否定時意思會變成全面否定。",
+            "learning_tip_zh": "把「も」記成「同樣納入」會比只背「也」更準。",
+            "priority": 98,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_no_possession",
+            "title": "の",
+            "display_name": "の：所有 / 屬性 / 代名詞化",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示所有、屬性、所屬，也可以代替前面提過的名詞。",
+            "usage_detail_zh": "「の」常用來連接兩個名詞，表示前面的名詞修飾後面的名詞。也可以用來代替已知名詞，例如「大きいの」表示「大的那個」。",
+            "structure_formula": "名詞 + の + 名詞",
+            "example_japanese": "日本語の本です。\nもう少し大きいのはありませんか。",
+            "example_hiragana": "にほんごのほんです。\nもうすこしおおきいのはありませんか。",
+            "example_zh": "這是日文書。\n有沒有再大一點的？",
+            "common_mistake_zh": "不要把所有「の」都翻成「的」；有時它是代替前面已知的名詞。",
+            "learning_tip_zh": "名詞接名詞時，先檢查中間是否需要「の」來連接修飾關係。",
+            "priority": 96,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_wo_object",
+            "title": "を",
+            "display_name": "を：動作受詞 / 移動經過點",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示動作作用的對象，也可表示移動經過的場所或出發點。",
+            "usage_detail_zh": "「を」最常用來標示動作的受詞，例如喝果汁、讀書。也可用於表示經過某個空間，或離開某地。",
+            "structure_formula": "名詞 + を + 動詞",
+            "example_japanese": "ジュースを飲みます。\n公園を散歩します。\n毎朝8時にうちを出ます。",
+            "example_hiragana": "じゅーすをのみます。\nこうえんをさんぽします。\nまいあさはちじにうちをでます。",
+            "example_zh": "喝果汁。\n在公園散步。\n每天早上八點出門。",
+            "common_mistake_zh": "「公園を散歩します」的「を」不是受詞，而是表示移動經過的範圍。",
+            "learning_tip_zh": "看到移動動詞時，注意「を」可能表示經過或離開的位置。",
+            "priority": 94,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_e_direction",
+            "title": "へ",
+            "display_name": "へ：方向",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示移動的方向。",
+            "usage_detail_zh": "「へ」表示朝某個方向移動，重點在方向感，不一定強調最終抵達點。",
+            "structure_formula": "場所 + へ + 行く / 来る / 帰る",
+            "example_japanese": "フランスへ料理を習いに行きます。",
+            "example_hiragana": "ふらんすへりょうりをならいにいきます。",
+            "example_zh": "去法國學料理。",
+            "common_mistake_zh": "「へ」重點是方向；若要強調到達點，常會使用「に」。",
+            "learning_tip_zh": "移動句中可以先分辨你要說的是方向感，還是到達目的地。",
+            "priority": 92,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_de_place_method",
+            "title": "で",
+            "display_name": "で：方式 / 工具 / 動作場所",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示動作發生的場所，也可表示手段、工具、交通方式。",
+            "usage_detail_zh": "「で」用在動作發生的場所，例如在車站買報紙。也可表示使用某種工具或方式，例如用日文寫報告、搭計程車回家。",
+            "structure_formula": "場所 + で + 動作\n工具 / 手段 + で + 動作",
+            "example_japanese": "タクシーで家へ帰ります。\n日本語でレポートを書きます。\n駅で新聞を買います。",
+            "example_hiragana": "たくしーでいえへかえります。\nにほんごでれぽーとをかきます。\nえきでしんぶんをかいます。",
+            "example_zh": "搭計程車回家。\n用日文寫報告。\n在車站買報紙。",
+            "common_mistake_zh": "存在場所通常用「に」，動作發生場所通常用「で」。",
+            "learning_tip_zh": "問自己「這裡是在做動作嗎？」如果是，常常用「で」。",
+            "priority": 90,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_ni_place_time_target",
+            "title": "に",
+            "display_name": "に：存在場所 / 時間點 / 對象",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示存在場所、時間點、目的地或動作對象。",
+            "usage_detail_zh": "「に」常用於表示某物存在的位置、動作發生的時間點，也能表示動作指向的對象。",
+            "structure_formula": "場所 + に + あります / います\n時間 + に\n對象 + に + 動作",
+            "example_japanese": "部屋に猫がいます。\n7月に京都でお祭りがあります。\n先生に質問します。",
+            "example_hiragana": "へやにねこがいます。\nしちがつにきょうとでおまつりがあります。\nせんせいにしつもんします。",
+            "example_zh": "房間裡有貓。\n七月在京都有祭典。\n向老師提問。",
+            "common_mistake_zh": "「に」用途很多，但核心常是指向某個點：位置點、時間點、對象點。",
+            "learning_tip_zh": "先把「に」理解成「指向某個點」，再依語境細分意思。",
+            "priority": 88,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_to_with_quote",
+            "title": "と",
+            "display_name": "と：一起 / 完全列舉 / 引用",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示一起做事的對象、完整列舉，也可用於引用內容。",
+            "usage_detail_zh": "「と」可以表示「和～一起」，也能表示完整列舉。另外放在句子後面時，常用來接「思います」「言います」，表示想法或說話內容。",
+            "structure_formula": "名詞 + と\n句子 + と + 思う / 言う",
+            "example_japanese": "私は家族と日本へ来ました。\n本屋は花屋とスーパーの間にあります。\n明日雨が降ると思います。",
+            "example_hiragana": "わたしはかぞくとにほんへきました。\nほんやははなやとすーぱーのあいだにあります。\nあしたあめがふるとおもいます。",
+            "example_zh": "我和家人來日本。\n書店在花店和超市之間。\n我覺得明天會下雨。",
+            "common_mistake_zh": "列舉全部項目時用「と」；只舉部分例子時更常用「や」。",
+            "learning_tip_zh": "「と」常有「精確連接」的感覺：一起、完整列舉、引用。",
+            "priority": 86,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_ya_examples",
+            "title": "や",
+            "display_name": "や：部分列舉",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示列舉部分例子，常和「など」一起使用。",
+            "usage_detail_zh": "「や」表示只舉出幾個代表例，不是全部列出。比「と」更有「等等」的感覺。",
+            "structure_formula": "名詞 + や + 名詞 + など",
+            "example_japanese": "箱の中に古い手紙や写真などがあります。",
+            "example_hiragana": "はこのなかにふるいてがみやしゃしんなどがあります。",
+            "example_zh": "箱子裡有舊信和照片等等。",
+            "common_mistake_zh": "不要把「や」當成完整列舉；它表示還有其他未列出的同類事物。",
+            "learning_tip_zh": "如果中文想說「A、B 之類的」，日文常用「AやBなど」。",
+            "priority": 84,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_kara_start_reason",
+            "title": "から",
+            "display_name": "から：起點 / 原因",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示時間或地點的起點，也可表示原因。",
+            "usage_detail_zh": "「から」可表示「從～開始」，也可放在句子後面表示原因，相當於「因為～」。",
+            "structure_formula": "時間 / 地點 + から\n句子 + から",
+            "example_japanese": "日本語の授業は1時半からです。\n寒いですから、窓を閉めます。",
+            "example_hiragana": "にほんごのじゅぎょうはいちじはんからです。\nさむいですから、まどをしめます。",
+            "example_zh": "日文課從一點半開始。\n因為很冷，所以關窗。",
+            "common_mistake_zh": "表示原因時，「から」通常放在完整句子後面。",
+            "learning_tip_zh": "「から」的核心是起點，可以是時間起點，也可以是理由的起點。",
+            "priority": 82,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_made_endpoint",
+            "title": "まで",
+            "display_name": "まで：終點",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示時間或地點的終點。",
+            "usage_detail_zh": "「まで」表示「到～為止」，可用於時間或地點。",
+            "structure_formula": "時間 / 地點 + まで",
+            "example_japanese": "日本語の授業は3時までです。\n駅まで歩きます。",
+            "example_hiragana": "にほんごのじゅぎょうはさんじまでです。\nえきまであるきます。",
+            "example_zh": "日文課到三點。\n走到車站。",
+            "common_mistake_zh": "「まで」只標示終點，不表示開始時間。",
+            "learning_tip_zh": "和「から」一起背，會更容易建立範圍感。",
+            "priority": 80,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern_kara_made_range",
+            "title": "から〜まで",
+            "display_name": "から〜まで：從～到～",
+            "grammar_type": "particle",
+            "usage_summary_zh": "表示從某個起點到某個終點。",
+            "usage_detail_zh": "「から〜まで」可用於時間或地點，表示範圍的開始與結束。",
+            "structure_formula": "起點 + から + 終點 + まで",
+            "example_japanese": "日本語の授業は1時半から3時までです。",
+            "example_hiragana": "にほんごのじゅぎょうはいちじはんからさんじまでです。",
+            "example_zh": "日文課從一點半到三點。",
+            "common_mistake_zh": "時間範圍與地點範圍都能用，但要注意起點和終點的順序。",
+            "learning_tip_zh": "先記成「から = 從」「まで = 到」，再合成範圍。",
+            "priority": 78,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "particle_yori_comparison",
+            "title": "より",
+            "display_name": "より：比較基準",
+            "grammar_type": "comparison",
+            "usage_summary_zh": "表示比較的基準。",
+            "usage_detail_zh": "「より」表示「比～」，用來說明 A 相對於 B 的差異。",
+            "structure_formula": "A は B より + 形容詞です",
+            "example_japanese": "東京は台北より大きいです。",
+            "example_hiragana": "とうきょうはたいぺいよりおおきいです。",
+            "example_zh": "東京比台北大。",
+            "common_mistake_zh": "「より」後面是被比較的基準，不是主角。",
+            "learning_tip_zh": "句子的重點通常在「は」前面的 A，B 是比較基準。",
+            "priority": 76,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern_desu_masu_polite",
+            "title": "です / ます",
+            "display_name": "です / ます：丁寧體基本句",
+            "grammar_type": "sentence_pattern",
+            "usage_summary_zh": "表示禮貌語氣，是日語初學最基本的句型。",
+            "usage_detail_zh": "「です」常接在名詞或形容詞後面。「ます」接在動詞ます形後面，使句子聽起來禮貌。",
+            "structure_formula": "名詞 / 形容詞 + です\n動詞ます形 + ます",
+            "example_japanese": "これは本です。\n毎日学校へ行きます。",
+            "example_hiragana": "これはほんです。\nまいにちがっこうへいきます。",
+            "example_zh": "這是書。\n每天去學校。",
+            "common_mistake_zh": "「です」不能直接接在一般動詞原形後面。",
+            "learning_tip_zh": "先把「です」和「ます」當成禮貌句的基本骨架。",
+            "priority": 74,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern_masen_negative",
+            "title": "ません / ませんでした",
+            "display_name": "ません / ませんでした：丁寧體否定",
+            "grammar_type": "sentence_pattern",
+            "usage_summary_zh": "表示禮貌體的現在否定與過去否定。",
+            "usage_detail_zh": "「ません」表示現在或未來不做某事。「ませんでした」表示過去沒有做某事。",
+            "structure_formula": "動詞ます形 + ません\n動詞ます形 + ませんでした",
+            "example_japanese": "今日は行きません。\n昨日は食べませんでした。",
+            "example_hiragana": "きょうはいきません。\nきのうはたべませんでした。",
+            "example_zh": "今天不去。\n昨天沒有吃。",
+            "common_mistake_zh": "過去否定要用「ませんでした」，不是「ませんです」。",
+            "learning_tip_zh": "把「ます → ません → ませんでした」當成禮貌體否定的基本變化。",
+            "priority": 72,
+        },
+    ]
+    for row in rows:
+        row["is_active"] = True
+        row["used_count"] = 0
+        row["last_used_at"] = None
+        row["created_at"] = now
+        row["updated_at"] = now
+    return rows
+
+
+def migrate_grammar_points_sqlite(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS grammar_points (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            jlpt_level TEXT NOT NULL,
+            grammar_key TEXT UNIQUE NOT NULL,
+            title TEXT NOT NULL,
+            display_name TEXT NOT NULL,
+            grammar_type TEXT,
+            usage_summary_zh TEXT NOT NULL,
+            usage_detail_zh TEXT,
+            structure_formula TEXT,
+            example_japanese TEXT NOT NULL,
+            example_hiragana TEXT,
+            example_zh TEXT NOT NULL,
+            common_mistake_zh TEXT,
+            learning_tip_zh TEXT,
+            is_active INTEGER DEFAULT 1,
+            priority INTEGER DEFAULT 50,
+            used_count INTEGER DEFAULT 0,
+            last_used_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(grammar_points)").fetchall()}
+    migrations = {
+        "jlpt_level": "ALTER TABLE grammar_points ADD COLUMN jlpt_level TEXT DEFAULT 'N5'",
+        "grammar_key": "ALTER TABLE grammar_points ADD COLUMN grammar_key TEXT",
+        "title": "ALTER TABLE grammar_points ADD COLUMN title TEXT DEFAULT ''",
+        "display_name": "ALTER TABLE grammar_points ADD COLUMN display_name TEXT DEFAULT ''",
+        "grammar_type": "ALTER TABLE grammar_points ADD COLUMN grammar_type TEXT",
+        "usage_summary_zh": "ALTER TABLE grammar_points ADD COLUMN usage_summary_zh TEXT DEFAULT ''",
+        "usage_detail_zh": "ALTER TABLE grammar_points ADD COLUMN usage_detail_zh TEXT",
+        "structure_formula": "ALTER TABLE grammar_points ADD COLUMN structure_formula TEXT",
+        "example_japanese": "ALTER TABLE grammar_points ADD COLUMN example_japanese TEXT DEFAULT ''",
+        "example_hiragana": "ALTER TABLE grammar_points ADD COLUMN example_hiragana TEXT",
+        "example_zh": "ALTER TABLE grammar_points ADD COLUMN example_zh TEXT DEFAULT ''",
+        "common_mistake_zh": "ALTER TABLE grammar_points ADD COLUMN common_mistake_zh TEXT",
+        "learning_tip_zh": "ALTER TABLE grammar_points ADD COLUMN learning_tip_zh TEXT",
+        "is_active": "ALTER TABLE grammar_points ADD COLUMN is_active INTEGER DEFAULT 1",
+        "priority": "ALTER TABLE grammar_points ADD COLUMN priority INTEGER DEFAULT 50",
+        "used_count": "ALTER TABLE grammar_points ADD COLUMN used_count INTEGER DEFAULT 0",
+        "last_used_at": "ALTER TABLE grammar_points ADD COLUMN last_used_at TEXT",
+        "created_at": "ALTER TABLE grammar_points ADD COLUMN created_at TEXT",
+        "updated_at": "ALTER TABLE grammar_points ADD COLUMN updated_at TEXT",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS grammar_selection_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            material_date TEXT NOT NULL,
+            grammar_point_id INTEGER,
+            grammar_key TEXT,
+            jlpt_level TEXT,
+            grammar_type TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
+    count = conn.execute("SELECT COUNT(*) FROM grammar_points").fetchone()[0]
+    if count == 0:
+        rows = n5_grammar_seed_rows()
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO grammar_points (
+                jlpt_level, grammar_key, title, display_name, grammar_type,
+                usage_summary_zh, usage_detail_zh, structure_formula,
+                example_japanese, example_hiragana, example_zh,
+                common_mistake_zh, learning_tip_zh, is_active, priority,
+                used_count, last_used_at, created_at, updated_at
+            )
+            VALUES (
+                :jlpt_level, :grammar_key, :title, :display_name, :grammar_type,
+                :usage_summary_zh, :usage_detail_zh, :structure_formula,
+                :example_japanese, :example_hiragana, :example_zh,
+                :common_mistake_zh, :learning_tip_zh, :is_active, :priority,
+                :used_count, :last_used_at, :created_at, :updated_at
+            )
+            """,
+            rows,
+        )
 
 
 def migrate_mistake_logs(conn):
@@ -2277,6 +2641,106 @@ def migrate_vocab_rules_postgres():
         conn.commit()
 
 
+def migrate_grammar_points_postgres():
+    if not DATABASE_URL:
+        return
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS grammar_points (
+                    id BIGSERIAL PRIMARY KEY,
+                    jlpt_level TEXT NOT NULL,
+                    grammar_key TEXT UNIQUE NOT NULL,
+                    title TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    grammar_type TEXT,
+                    usage_summary_zh TEXT NOT NULL,
+                    usage_detail_zh TEXT,
+                    structure_formula TEXT,
+                    example_japanese TEXT NOT NULL,
+                    example_hiragana TEXT,
+                    example_zh TEXT NOT NULL,
+                    common_mistake_zh TEXT,
+                    learning_tip_zh TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    priority INTEGER DEFAULT 50,
+                    used_count INTEGER DEFAULT 0,
+                    last_used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+            columns = {
+                "jlpt_level": "TEXT DEFAULT 'N5'",
+                "grammar_key": "TEXT",
+                "title": "TEXT DEFAULT ''",
+                "display_name": "TEXT DEFAULT ''",
+                "grammar_type": "TEXT",
+                "usage_summary_zh": "TEXT DEFAULT ''",
+                "usage_detail_zh": "TEXT",
+                "structure_formula": "TEXT",
+                "example_japanese": "TEXT DEFAULT ''",
+                "example_hiragana": "TEXT",
+                "example_zh": "TEXT DEFAULT ''",
+                "common_mistake_zh": "TEXT",
+                "learning_tip_zh": "TEXT",
+                "is_active": "BOOLEAN DEFAULT TRUE",
+                "priority": "INTEGER DEFAULT 50",
+                "used_count": "INTEGER DEFAULT 0",
+                "last_used_at": "TIMESTAMPTZ",
+                "created_at": "TIMESTAMPTZ",
+                "updated_at": "TIMESTAMPTZ",
+            }
+            for column, col_type in columns.items():
+                cur.execute(f"ALTER TABLE grammar_points ADD COLUMN IF NOT EXISTS {column} {col_type}")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS grammar_selection_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    material_date DATE NOT NULL,
+                    grammar_point_id BIGINT,
+                    grammar_key TEXT,
+                    jlpt_level TEXT,
+                    grammar_type TEXT,
+                    created_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
+            cur.execute("SELECT COUNT(*) FROM grammar_points")
+            count = cur.fetchone()[0]
+            if count == 0:
+                rows = n5_grammar_seed_rows()
+                cur.executemany(
+                    """
+                    INSERT INTO grammar_points (
+                        jlpt_level, grammar_key, title, display_name, grammar_type,
+                        usage_summary_zh, usage_detail_zh, structure_formula,
+                        example_japanese, example_hiragana, example_zh,
+                        common_mistake_zh, learning_tip_zh, is_active, priority,
+                        used_count, last_used_at, created_at, updated_at
+                    )
+                    VALUES (
+                        %(jlpt_level)s, %(grammar_key)s, %(title)s, %(display_name)s, %(grammar_type)s,
+                        %(usage_summary_zh)s, %(usage_detail_zh)s, %(structure_formula)s,
+                        %(example_japanese)s, %(example_hiragana)s, %(example_zh)s,
+                        %(common_mistake_zh)s, %(learning_tip_zh)s, %(is_active)s, %(priority)s,
+                        %(used_count)s, %(last_used_at)s, %(created_at)s, %(updated_at)s
+                    )
+                    ON CONFLICT (grammar_key) DO NOTHING
+                    """,
+                    rows,
+                )
+        conn.commit()
+
+
 def ensure_slang_candidates_store():
     if DATABASE_URL:
         migrate_slang_candidates_postgres()
@@ -2294,6 +2758,13 @@ def ensure_vocabulary_pool_store():
 def ensure_vocab_rules_store():
     if DATABASE_URL:
         migrate_vocab_rules_postgres()
+    else:
+        ensure_settings_store()
+
+
+def ensure_grammar_points_store():
+    if DATABASE_URL:
+        migrate_grammar_points_postgres()
     else:
         ensure_settings_store()
 
@@ -2347,6 +2818,7 @@ def _ensure_database_uncached():
         migrate_slang_candidates_postgres()
         migrate_vocabulary_pool_postgres()
         migrate_vocab_rules_postgres()
+        migrate_grammar_points_postgres()
         return
 
     if not os.path.exists(DATABASE_FILE):
@@ -4493,11 +4965,232 @@ def build_local_quiz(vocab, verbs, settings):
     return questions
 
 
-def build_local_material(settings, force_seed=False):
+def default_grammar_count(grammar_level):
+    return DEFAULT_GRAMMAR_COUNT_BY_LEVEL.get(grammar_level, 3)
+
+
+def grammar_item_from_row(row):
+    return {
+        "id": row.get("id"),
+        "jlpt_level": row.get("jlpt_level", ""),
+        "grammar_key": row.get("grammar_key", ""),
+        "title": row.get("title", ""),
+        "display_name": row.get("display_name", "") or row.get("title", ""),
+        "grammar_type": row.get("grammar_type", ""),
+        "usage_summary_zh": row.get("usage_summary_zh", ""),
+        "usage_detail_zh": row.get("usage_detail_zh", ""),
+        "structure_formula": row.get("structure_formula", ""),
+        "example_japanese": row.get("example_japanese", ""),
+        "example_hiragana": row.get("example_hiragana", ""),
+        "example_zh": row.get("example_zh", ""),
+        "common_mistake_zh": row.get("common_mistake_zh", ""),
+        "learning_tip_zh": row.get("learning_tip_zh", ""),
+    }
+
+
+def fetch_grammar_candidates(grammar_level, limit, cutoff_date=None):
+    ensure_grammar_points_store()
+    limit = max(1, int(limit or 1))
+    if DATABASE_URL:
+        params = [grammar_level]
+        recent_filter = ""
+        if cutoff_date:
+            recent_filter = """
+                AND id NOT IN (
+                    SELECT grammar_point_id
+                    FROM grammar_selection_logs
+                    WHERE material_date >= %s AND grammar_point_id IS NOT NULL
+                )
+            """
+            params.append(cutoff_date)
+        params.append(limit)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT *
+                    FROM grammar_points
+                    WHERE jlpt_level = %s
+                      AND COALESCE(is_active, TRUE) = TRUE
+                      {recent_filter}
+                    ORDER BY priority DESC,
+                             COALESCE(used_count, 0) ASC,
+                             last_used_at ASC NULLS FIRST,
+                             id ASC
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                columns = [desc[0] for desc in cur.description]
+                return [dict(zip(columns, row)) for row in cur.fetchall()]
+    ensure_settings_store()
+    params = [grammar_level]
+    recent_filter = ""
+    if cutoff_date:
+        recent_filter = """
+            AND id NOT IN (
+                SELECT grammar_point_id
+                FROM grammar_selection_logs
+                WHERE material_date >= ? AND grammar_point_id IS NOT NULL
+            )
+        """
+        params.append(cutoff_date)
+    params.append(limit)
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM grammar_points
+            WHERE jlpt_level = ?
+              AND COALESCE(is_active, 1) = 1
+              {recent_filter}
+            ORDER BY priority DESC,
+                     COALESCE(used_count, 0) ASC,
+                     COALESCE(last_used_at, '') ASC,
+                     id ASC
+            LIMIT ?
+            """,
+            params,
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def record_grammar_selection(grammar_items, material_date):
+    if not grammar_items:
+        return
+    ensure_grammar_points_store()
+    now = utc_now_iso()
+    date_iso = material_date_iso(material_date) or today_iso_date()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for item in grammar_items:
+                    grammar_id = item.get("id")
+                    if grammar_id:
+                        cur.execute(
+                            """
+                            UPDATE grammar_points
+                            SET used_count = COALESCE(used_count, 0) + 1,
+                                last_used_at = %s,
+                                updated_at = %s
+                            WHERE id = %s
+                            """,
+                            (now, now, grammar_id),
+                        )
+                    cur.execute(
+                        """
+                        INSERT INTO grammar_selection_logs (
+                            material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type, created_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            date_iso,
+                            grammar_id,
+                            item.get("grammar_key", ""),
+                            item.get("jlpt_level", ""),
+                            item.get("grammar_type", ""),
+                            now,
+                        ),
+                    )
+            conn.commit()
+        return
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        for item in grammar_items:
+            grammar_id = item.get("id")
+            if grammar_id:
+                conn.execute(
+                    """
+                    UPDATE grammar_points
+                    SET used_count = COALESCE(used_count, 0) + 1,
+                        last_used_at = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, now, grammar_id),
+                )
+            conn.execute(
+                """
+                INSERT INTO grammar_selection_logs (
+                    material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    date_iso,
+                    grammar_id,
+                    item.get("grammar_key", ""),
+                    item.get("jlpt_level", ""),
+                    item.get("grammar_type", ""),
+                    now,
+                ),
+            )
+        conn.commit()
+
+
+def select_grammar_points(grammar_level, grammar_count, material_date=None):
+    grammar_level = grammar_level if grammar_level in LEVELS else "N5"
+    try:
+        grammar_count = int(grammar_count)
+    except (TypeError, ValueError):
+        grammar_count = default_grammar_count(grammar_level)
+    grammar_count = max(0, min(grammar_count, 10))
+    if grammar_count <= 0:
+        return [], {"grammar_pool_empty": False, "grammar_fallback_used": False, "grammar_warnings": []}
+
+    selected = []
+    selected_keys = set()
+    fallback_used = False
+    warnings = []
+    cutoff_date = (parse_material_date(material_date) or taipei_now().date()) - timedelta(days=7)
+    levels = GRAMMAR_LEVEL_FALLBACKS.get(grammar_level, [grammar_level])
+    try:
+        for level in levels:
+            if len(selected) >= grammar_count:
+                break
+            rows = fetch_grammar_candidates(level, grammar_count - len(selected), cutoff_date.isoformat())
+            for row in rows:
+                item = grammar_item_from_row(row)
+                key = item.get("grammar_key")
+                if key and key not in selected_keys:
+                    selected.append(item)
+                    selected_keys.add(key)
+        if len(selected) < grammar_count:
+            fallback_used = True
+            for level in levels:
+                if len(selected) >= grammar_count:
+                    break
+                rows = fetch_grammar_candidates(level, grammar_count - len(selected), None)
+                for row in rows:
+                    item = grammar_item_from_row(row)
+                    key = item.get("grammar_key")
+                    if key and key not in selected_keys:
+                        selected.append(item)
+                        selected_keys.add(key)
+        if not selected:
+            warnings.append("grammar_pool_empty")
+        elif len(selected) < grammar_count:
+            warnings.append("grammar_pool_insufficient")
+        record_grammar_selection(selected, material_date or get_today_taipei_date())
+        return selected, {
+            "grammar_pool_empty": not bool(selected),
+            "grammar_fallback_used": fallback_used,
+            "grammar_warnings": warnings,
+        }
+    except Exception as exc:
+        print(f"[grammar-pool] local grammar selection failed; reason={exc}")
+        print(traceback.format_exc())
+        return [], {"grammar_pool_empty": True, "grammar_fallback_used": True, "grammar_warnings": ["grammar_pool_empty"]}
+
+
+def build_local_material(settings, force_seed=False, material_date=None):
     material_started = time.perf_counter()
     settings = normalize_settings(settings)
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
+    grammar_level = settings.get("grammar_level", "N5") if settings.get("grammar_level") in LEVELS else "N5"
+    grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
         "selection_strategy": "jlpt_first_category_second",
@@ -4591,13 +5284,16 @@ def build_local_material(settings, force_seed=False):
     wrong_items = due_wrong_answer_summary()
     source_counts["wrong"] = len(wrong_items)
     quiz = build_local_quiz(vocab, verbs, settings)
+    grammar_points, grammar_stats = select_grammar_points(grammar_level, grammar_count, material_date or get_today_taipei_date())
+    grammar_examples = [
+        {"jp": item.get("example_japanese", ""), "cn": item.get("example_zh", "")}
+        for item in grammar_points[:2]
+        if item.get("example_japanese") or item.get("example_zh")
+    ]
     grammar = {
-        "title": "本地題庫複習",
-        "exp": "本日教材由本地詞庫、已審核新詞與錯題紀錄組成，適合用來穩定複習，不消耗 Gemini API 額度。",
-        "examples": [
-            {"jp": "今日は新しい言葉を復習します。", "cn": "今天複習新的詞彙。"},
-            {"jp": "間違えたところをもう一度確認します。", "cn": "再確認一次曾經答錯的地方。"},
-        ],
+        "title": f"{grammar_level} 本地文法題庫",
+        "exp": "今日文法由本地題庫抽取，不消耗 Gemini API 額度。請先掌握例句中的助詞、句型功能與常見錯誤。",
+        "examples": grammar_examples,
     }
     metadata = {
         "generation_mode": "local",
@@ -4634,6 +5330,11 @@ def build_local_material(settings, force_seed=False):
         "fallback_reason": "insufficient_vocab" if len(vocab) < vocab_count else ("insufficient_verbs" if (verb_source_summary.get("verbs", 0) or verb_source_summary.get("seed_fallback", 0)) else ""),
         "wrong_reviews": wrong_items,
         "quiz": quiz,
+        "grammar_count": len(grammar_points),
+        "grammar_level": grammar_level,
+        "grammar_keys": [item.get("grammar_key", "") for item in grammar_points if item.get("grammar_key")],
+        "grammar_fallback_used": bool(grammar_stats.get("grammar_fallback_used")),
+        "grammar_warnings": grammar_stats.get("grammar_warnings", []),
         "seed_used": seed_used,
         "generated_at": utc_now_iso(),
     }
@@ -4655,7 +5356,16 @@ def build_local_material(settings, force_seed=False):
         f"verbs={verb_source_summary.get('verbs', 0)} seed_fallback={verb_source_summary.get('seed_fallback', 0)} "
         f"duplicates={verb_duplicate_filtered_count}"
     )
-    return {"vocab": vocab, "verbs": verbs, "grammar": grammar, "metadata": metadata}
+    return {
+        "date": material_date_display(material_date or get_today_taipei_date()),
+        "level": settings.get("target_level", ""),
+        "grammar_level": grammar_level,
+        "vocab": vocab,
+        "verbs": verbs,
+        "grammar": grammar,
+        "grammar_points": grammar_points,
+        "metadata": metadata,
+    }
 
 
 def save_material_for_date(material_date, material, settings):
@@ -4778,10 +5488,12 @@ def material_by_date(target_date):
         examples = json.loads(first["grammar_examples"]) if first["grammar_examples"] else []
     except json.JSONDecodeError:
         examples = []
+    material_payload = {}
     try:
-        metadata = json.loads(first.get("material_json", "") or "{}")
-        metadata = metadata.get("metadata", metadata) if isinstance(metadata, dict) else {}
+        material_payload = json.loads(first.get("material_json", "") or "{}")
+        metadata = material_payload.get("metadata", material_payload) if isinstance(material_payload, dict) else {}
     except json.JSONDecodeError:
+        material_payload = {}
         metadata = {}
     if not metadata:
         metadata = {
@@ -4797,6 +5509,8 @@ def material_by_date(target_date):
         "vocabulary": vocabulary,
         "verbs": verbs,
         "grammar": {"title": first["grammar_title"], "exp": first["grammar_exp"], "examples": examples},
+        "grammar_points": material_payload.get("grammar_points", []) if isinstance(material_payload, dict) else [],
+        "grammarLevel": metadata.get("grammar_level", ""),
         "metadata": metadata,
     }
 
@@ -4810,14 +5524,22 @@ def build_telegram_notification(material, date, app_url=None):
         raise RuntimeError("教材尚未寫入資料庫，無法推送 Telegram。")
     link = html.escape(app_url or APP_URL)
     words = "、".join(html.escape(v.get("word", "")) for v in material.get("vocabulary", []) if v.get("word"))
-    grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
+    grammar_points = material.get("grammar_points") or []
+    if grammar_points:
+        grammar_title = "\n".join(
+            f"・{html.escape(item.get('display_name') or item.get('title') or item.get('grammar_key') or '')}"
+            for item in grammar_points[:5]
+            if item.get("display_name") or item.get("title") or item.get("grammar_key")
+        ) or html.escape(material.get("grammar", {}).get("title", "今日文法"))
+    else:
+        grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
     level = html.escape(material.get("targetLevel", ""))
     return (
         f"<b>日語學習自動化系統</b>\n"
         f"日期：{html.escape(date)}\n"
         f"等級：{level}\n\n"
         f"<b>今日單字：</b>{words or '暫無'}\n"
-        f"<b>今日文法：</b>{grammar_title}\n\n"
+        f"<b>今日文法：</b>\n{grammar_title}\n\n"
         f'<a href="{link}">點擊開啟學習頁面</a>'
     )
 
@@ -4866,9 +5588,9 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
 
     if mode == "local":
         print("[feature-boundary] daily_material mode=local skip gemini")
-        raw_material = build_local_material(settings, force_seed=use_sample)
+        raw_material = build_local_material(settings, force_seed=use_sample, material_date=material_date or get_today_taipei_date())
     elif mode == "ai_enhance":
-        raw_material = build_local_material(settings)
+        raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date())
         raw_material["metadata"]["generation_mode"] = "ai_enhance"
         raw_material["metadata"]["ai_used"] = False
         raw_material["metadata"]["fallback_used"] = False
@@ -4886,7 +5608,7 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
             }
         except Exception as e:
             print(f"[material-generator] ai_full failed; fallback local; error={classify_gemini_error(e)}")
-            raw_material = build_local_material(settings)
+            raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date())
             raw_material["metadata"]["generation_mode"] = "local"
             raw_material["metadata"]["ai_used"] = False
             raw_material["metadata"]["fallback_used"] = True
@@ -6869,6 +7591,7 @@ def dashboard_default_payload(reason=""):
         "target_level": settings["target_level"],
         "vocab_count": 0,
         "verb_count": 0,
+        "grammar_count": 0,
         "quiz_total": quiz_total,
         "quiz_completed": 0,
         "quiz_accuracy_text": "尚無紀錄",
@@ -6884,6 +7607,7 @@ def dashboard_default_payload(reason=""):
             "target_level": settings["target_level"],
             "word_count": 0,
             "verb_count": 0,
+            "grammar_count": 0,
         },
         "quiz": {
             "completed": 0,
@@ -6923,12 +7647,14 @@ def build_dashboard_payload():
         payload["has_today_material"] = bool(today_material)
         payload["vocab_count"] = len(today_material["vocabulary"]) if today_material else 0
         payload["verb_count"] = len(today_material["verbs"]) if today_material else 0
+        payload["grammar_count"] = len(today_material.get("grammar_points", [])) if today_material else 0
         payload["today_material"] = {
             "status": "generated" if today_material else "not_generated",
             "date": today,
             "target_level": today_material.get("targetLevel") if today_material else settings["target_level"],
             "word_count": payload["vocab_count"],
             "verb_count": payload["verb_count"],
+            "grammar_count": payload["grammar_count"],
         }
     except Exception as e:
         print(f"[dashboard-summary] material query failed; reason={e}")
