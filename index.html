@@ -78,6 +78,57 @@
     }
     .verb-form-cell { color: #eef4ff; font-weight: 700; }
     .verb-no-form { color: #aeb4c8; font-weight: 700; }
+    .verb-conjugation-section {
+      color: #111827;
+    }
+    .verb-conjugation-section .verb-conjugation-table {
+      --bs-table-color: #111827;
+      --bs-table-bg: #ffffff;
+      --bs-table-striped-color: #111827;
+      --bs-table-striped-bg: #f8fafc;
+      --bs-table-hover-color: #111827;
+      --bs-table-hover-bg: #eefcfb;
+      color: #111827;
+      background: #ffffff;
+    }
+    .verb-conjugation-section .verb-conjugation-table th {
+      color: #006d77 !important;
+      background: #ffffff;
+      border-bottom: 2px solid #5eead4;
+      font-weight: 800;
+    }
+    .verb-conjugation-section .verb-conjugation-table td {
+      color: #111827 !important;
+      background: #ffffff;
+      border-bottom: 1px solid #d1d5db;
+      font-weight: 600;
+    }
+    .verb-conjugation-section .verb-surface {
+      color: #007f73 !important;
+      font-weight: 900;
+    }
+    .verb-conjugation-section .verb-reading {
+      color: #4b5563 !important;
+      font-weight: 700;
+    }
+    .verb-conjugation-section .verb-meaning {
+      color: #374151 !important;
+      font-weight: 700;
+    }
+    .verb-conjugation-section .verb-meta-tag {
+      color: #0f172a !important;
+      background: #dff6f8;
+      border-color: #8edbe0;
+      font-weight: 800;
+    }
+    .verb-conjugation-section .verb-form-cell {
+      color: #111827 !important;
+      font-weight: 700;
+    }
+    .verb-conjugation-section .verb-no-form {
+      color: #6b7280 !important;
+      font-weight: 700;
+    }
     .table thead th { color: var(--primary); border-bottom-color: var(--primary); }
     #grammar-exp { color: #f2f5ff; line-height: 1.75; font-size: 1.04rem; background: rgba(255,255,255,.045); border: 1px solid rgba(0,255,204,.16); border-radius: 6px; padding: 12px 14px; }
     .example-box, .question-box { background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.08); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 10px; border-radius: 4px; }
@@ -319,7 +370,7 @@
     <div id="content-loader" class="text-center py-5 text-muted">正在讀取今日學習材料...</div>
     <div id="material-content" style="display:none;">
       <div class="card p-3"><h5 class="fw-bold mb-3" style="color:var(--primary)">單字</h5><div id="vocab-list" class="row g-2"></div></div>
-      <div class="card p-3">
+      <div class="card p-3 verb-conjugation-section">
         <h5 class="fw-bold mb-3" style="color:var(--primary)">動詞變化表</h5>
         <div class="verb-table-wrapper">
           <table class="table verb-conjugation-table">
