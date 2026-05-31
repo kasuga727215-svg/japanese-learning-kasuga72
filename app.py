@@ -107,6 +107,7 @@ APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
+LOCAL_GENERATION_SAFE_MODE_DEFAULT = os.environ.get("LOCAL_GENERATION_SAFE_MODE", "true").strip().lower()
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
 _ARCHIVE_DATES_CACHE = {"expires_at": None, "payload": None}
 _BASIC_SEED_VOCAB_CACHE = None
@@ -2803,6 +2804,11 @@ def scan_vocab_rule_types():
         if source_type not in VOCAB_RULE_VISIBLE_TYPES:
             return
         value = clean_rule_match_value(value)
+        if local_generation_safe_mode_enabled():
+            if source_type == "jlpt_level" and value not in LOCAL_SAFE_MODE_JLPT_LEVELS:
+                return
+            if source_type == "category" and value not in LOCAL_SAFE_MODE_CATEGORIES:
+                return
         key = make_vocab_rule_key(source_type, value)
         if key not in discovered:
             discovered[key] = default_vocab_rule(source_type, value, available_count=0)
@@ -2815,12 +2821,13 @@ def scan_vocab_rule_types():
                 add(source_type, value, count)
         except Exception as exc:
             print(f"[vocab-rules] scan skipped table=vocabulary_pool field={source_type}; reason={exc}")
-    ensure_slang_candidates_store()
-    try:
-        for value, count in query_distinct_counts("slang_candidates", "category"):
-            add("category", value, count)
-    except Exception as exc:
-        print(f"[vocab-rules] scan skipped table=slang_candidates field=category; reason={exc}")
+    if not local_generation_safe_mode_enabled():
+        ensure_slang_candidates_store()
+        try:
+            for value, count in query_distinct_counts("slang_candidates", "category"):
+                add("category", value, count)
+        except Exception as exc:
+            print(f"[vocab-rules] scan skipped table=slang_candidates field=category; reason={exc}")
     return discovered
 
 def period_bounds(period, material_date=None):
@@ -2873,10 +2880,22 @@ def vocab_rule_used_count(rule_key, period, material_date=None):
 
 def build_vocab_rules_payload(create_missing=False, material_date=None):
     discovered = scan_vocab_rule_types()
+    def rule_visible_in_safe_mode(rule):
+        if not local_generation_safe_mode_enabled():
+            return True
+        source_type = rule.get("source_type") or rule.get("group_key")
+        value = clean_rule_match_value(rule.get("match_value"))
+        if source_type == "jlpt_level":
+            return value in LOCAL_SAFE_MODE_JLPT_LEVELS
+        if source_type == "category":
+            return value in LOCAL_SAFE_MODE_CATEGORIES
+        return False
+
     stored = {
         row["rule_key"]: row
         for row in load_vocab_rule_rows()
-        if row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES
+        if (row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
+        and rule_visible_in_safe_mode(row)
     }
     if create_missing:
         missing = [rule for key, rule in discovered.items() if key not in stored]
@@ -2885,13 +2904,17 @@ def build_vocab_rules_payload(create_missing=False, material_date=None):
             stored = {
                 row["rule_key"]: row
                 for row in load_vocab_rule_rows()
-                if row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES
+                if (row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
+                and rule_visible_in_safe_mode(row)
             }
     all_keys = {
         key
         for key in (set(discovered) | set(stored))
-        if (discovered.get(key) or stored.get(key) or {}).get("source_type") in VOCAB_RULE_VISIBLE_TYPES
-        or (discovered.get(key) or stored.get(key) or {}).get("group_key") in VOCAB_RULE_VISIBLE_TYPES
+        if (
+            ((discovered.get(key) or stored.get(key) or {}).get("source_type") in VOCAB_RULE_VISIBLE_TYPES
+            or (discovered.get(key) or stored.get(key) or {}).get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
+            and rule_visible_in_safe_mode(discovered.get(key) or stored.get(key) or {})
+        )
     }
     grouped = {key: {"group_key": key, "group_name": VOCAB_RULE_GROUPS.get(key, key), "rules": []} for key in VOCAB_RULE_GROUPS}
     for key in sorted(all_keys):
@@ -4649,6 +4672,58 @@ LOW_QUALITY_MEANING_HINTS_ZH = ("方案", "能力", "策略", "驗證性", "更�
 SYNTHETIC_VOCAB_CATEGORIES = {"business", "advanced", "generated_compound", "unknown"}
 SYNTHETIC_VOCAB_SOURCES = {"seed_advanced", "auto_generated", "synthetic", "seed_advanced_synthetic"}
 CORE_SAFE_VOCAB_SOURCES = {"seed_basic", "jlpt_seed", "manual", "starter_pack"}
+LOCAL_SAFE_MODE_JLPT_LEVELS = {"N5", "N4"}
+LOCAL_SAFE_MODE_CATEGORIES = {"general", "common", "daily"}
+LOCAL_SAFE_MODE_SOURCES = {"core", "basic", "manual", "seed_basic", "jlpt_core"}
+LOCAL_SAFE_MODE_DISABLED_CATEGORIES = {
+    "business",
+    "advanced",
+    "internet_slang",
+    "slang",
+    "otaku_culture",
+    "generated_compound",
+    "unknown",
+    "named_entity",
+    "sensitive",
+    "typo_or_noise",
+    "sns",
+}
+LOCAL_SAFE_MODE_DISABLED_SOURCES = {
+    "auto_generated",
+    "synthetic",
+    "seed_advanced",
+    "sns_capture",
+    "grammar_analysis",
+    "telegram",
+    "generated",
+    "import_generated",
+    "seed_advanced_synthetic",
+}
+
+
+def local_generation_safe_mode_enabled():
+    value = os.environ.get("LOCAL_GENERATION_SAFE_MODE", LOCAL_GENERATION_SAFE_MODE_DEFAULT)
+    return str(value).strip().lower() not in {"0", "false", "off", "no"}
+
+
+def safe_mode_level_order(target_level):
+    return ["N4", "N5"] if target_level == "N4" else ["N5", "N4"]
+
+
+def is_safe_mode_seed_vocab_item(item):
+    level = first_text(item, ["jlpt_level"]).upper()
+    category = first_text(item, ["category"]).lower() or "general"
+    source = first_text(item, ["source"]).lower() or "seed_basic"
+    quality = first_text(item, ["quality"]).lower() or "core"
+    return (
+        level in LOCAL_SAFE_MODE_JLPT_LEVELS
+        and category in LOCAL_SAFE_MODE_CATEGORIES
+        and source in LOCAL_SAFE_MODE_SOURCES
+        and quality not in {"experimental", "rejected", "low_quality"}
+        and bool(first_text(item, ["surface", "word", "base_form"]))
+        and bool(first_text(item, ["reading_hiragana", "reading"]))
+        and bool(first_text(item, ["meaning_zh", "meaning"]))
+    )
 
 
 def vocab_quality(row):
@@ -4914,6 +4989,7 @@ def fetch_vocabulary_pool_candidates(
     categories=None,
     limit=300,
     safe_jlpt_pool=False,
+    safe_mode=False,
     exclude_low_quality=True,
     exclude_normalized_keys=None,
 ):
@@ -4925,7 +5001,7 @@ def fetch_vocabulary_pool_candidates(
         "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1",
         "COALESCE(NULLIF(meaning_zh, ''), '') <> ''",
         "COALESCE(NULLIF(reading_hiragana, ''), '') <> ''",
-        "LOWER(COALESCE(quality, 'normal')) NOT IN ('rejected', 'experimental')",
+        "LOWER(COALESCE(quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
         "COALESCE(category, 'general') NOT IN ('named_entity', 'sensitive', 'typo_or_noise')",
     ]
     params = []
@@ -4953,6 +5029,22 @@ def fetch_vocabulary_pool_candidates(
             f"OR LOWER(COALESCE(source, '')) NOT IN ({sql_placeholders(len(blocked_sources))})"
             ")"
         )
+        params.extend(blocked_sources)
+    if safe_mode:
+        safe_levels = sorted(LOCAL_SAFE_MODE_JLPT_LEVELS)
+        safe_categories = sorted(LOCAL_SAFE_MODE_CATEGORIES)
+        safe_sources = sorted(LOCAL_SAFE_MODE_SOURCES)
+        blocked_categories = sorted(LOCAL_SAFE_MODE_DISABLED_CATEGORIES)
+        blocked_sources = sorted(LOCAL_SAFE_MODE_DISABLED_SOURCES)
+        where.append(f"COALESCE(NULLIF(jlpt_level, ''), '{EMPTY_RULE_VALUE}') IN ({sql_placeholders(len(safe_levels))})")
+        params.extend(safe_levels)
+        where.append(f"LOWER(COALESCE(NULLIF(category, ''), 'general')) IN ({sql_placeholders(len(safe_categories))})")
+        params.extend(safe_categories)
+        where.append(f"LOWER(COALESCE(NULLIF(source, ''), 'seed_basic')) IN ({sql_placeholders(len(safe_sources))})")
+        params.extend(safe_sources)
+        where.append(f"LOWER(COALESCE(NULLIF(category, ''), 'general')) NOT IN ({sql_placeholders(len(blocked_categories))})")
+        params.extend(blocked_categories)
+        where.append(f"LOWER(COALESCE(NULLIF(source, ''), 'seed_basic')) NOT IN ({sql_placeholders(len(blocked_sources))})")
         params.extend(blocked_sources)
     if exclude_low_quality:
         if LOW_QUALITY_EXACT_WORDS_JA:
@@ -5006,6 +5098,7 @@ def get_safe_jlpt_candidates(target_level, limit, cooldown_days=None, exclude_no
         jlpt_levels=[target_level],
         limit=limit,
         safe_jlpt_pool=True,
+        safe_mode=local_generation_safe_mode_enabled(),
         exclude_low_quality=True,
         exclude_normalized_keys=exclude_normalized_keys or set(),
     )
@@ -5059,7 +5152,13 @@ def category_rule_available(rule, selected_rule_counts):
 def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
     started = time.perf_counter()
     stats = {
-        "selection_strategy": "safe_jlpt_prefilter_first",
+        "selection_strategy": "safe_jlpt_basic_only" if local_generation_safe_mode_enabled() else "safe_jlpt_prefilter_first",
+        "local_generation_safe_mode": local_generation_safe_mode_enabled(),
+        "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS),
+        "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES),
+        "disabled_sources": sorted(LOCAL_SAFE_MODE_DISABLED_SOURCES),
+        "selected_from_db_count": 0,
+        "selected_from_seed_fallback_count": 0,
         "selected_by_jlpt_count": 0,
         "selected_target_jlpt_count": 0,
         "selected_adjacent_jlpt_count": 0,
@@ -5084,8 +5183,9 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
     if limit <= 0:
         return ([], stats) if return_stats else []
 
+    safe_mode = local_generation_safe_mode_enabled()
     target = settings.get("target_level", "")
-    rule_context = load_vocab_rule_context(material_date=material_date)
+    rule_context = {"rules": {}} if safe_mode else load_vocab_rule_context(material_date=material_date)
     rules = rule_context.get("rules", {})
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
@@ -5135,13 +5235,16 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
                 continue
             if source_stage == "jlpt" and is_target_jlpt_pool(item, target):
                 stats["target_jlpt_quota_skipped"] = True
-            can_select, reason, matches = can_select_vocab_by_rules(
-                item,
-                rule_context,
-                selected_rule_counts,
-                target_level=target,
-                ignore_empty_jlpt_rule=(source_stage == "category"),
-            )
+            if safe_mode:
+                can_select, reason, matches = True, "", []
+            else:
+                can_select, reason, matches = can_select_vocab_by_rules(
+                    item,
+                    rule_context,
+                    selected_rule_counts,
+                    target_level=target,
+                    ignore_empty_jlpt_rule=(source_stage == "category"),
+                )
             if not can_select:
                 stats["rejected_by_rule_count"] += 1
                 if "quota" in reason:
@@ -5168,7 +5271,7 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
             else:
                 stats["selected_by_category_count"] += 1
 
-    level_order = JLPT_ADJACENCY.get(target, [target] if target else [])
+    level_order = safe_mode_level_order(target) if safe_mode else JLPT_ADJACENCY.get(target, [target] if target else [])
     per_level_limit = max(limit * 6, 80)
     for cooldown_days in (14, 7, 3):
         if len(selected) >= limit:
@@ -5183,7 +5286,7 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
             stats["safe_jlpt_candidates"] += len(rows)
             select_from_rows(rows, "jlpt", cooldown_days)
 
-    if len(selected) < limit:
+    if len(selected) < limit and not safe_mode:
         allowed_categories = []
         for rule in rules.values():
             if rule.get("source_type") != "category":
@@ -5225,22 +5328,32 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
         quota = int(rule.get("quota_count", 0) or 0)
         used = int(rule.get("used_count", 0) or 0)
         stats["rule_remaining_after_generation"][rule_key] = max(0, quota - used - count) if quota > 0 else None
+    stats["selected_from_db_count"] = len(selected)
     stats["generation_elapsed_ms"] = round((time.perf_counter() - started) * 1000)
-    print(
-        f"[vocab-selector] target_level={target} word_count={limit} "
-        f"safe_jlpt_candidates={stats['safe_jlpt_candidates']} "
-        f"selected_target_jlpt={stats['selected_target_jlpt_count']} "
-        f"selected_adjacent_jlpt={stats['selected_adjacent_jlpt_count']} "
-        f"selected_by_category={stats['selected_by_category_count']} "
-        f"seed_fallback_count=0 rejected_recent_duplicate={stats['rejected_recent_duplicate_count']} "
-        f"rejected_low_quality_count={stats['rejected_low_quality_count']} "
-        f"rejected_by_category_quota={stats['rejected_by_category_quota']} "
-        f"target_jlpt_quota_skipped={stats['target_jlpt_quota_skipped']} "
-        f"cooldown_days_used={stats['cooldown_days_used']} elapsed_ms={stats['generation_elapsed_ms']}"
-    )
-    if low_quality_examples:
+    if safe_mode:
+        print(
+            f"[vocab-selector] safe_mode=true target_level={target} word_count={limit} "
+            f"db_safe_candidates={stats['safe_jlpt_candidates']} selected_from_db={stats['selected_from_db_count']} "
+            f"selected_target_jlpt={stats['selected_target_jlpt_count']} selected_adjacent_jlpt={stats['selected_adjacent_jlpt_count']} "
+            f"excluded_low_quality_pattern_count={stats['rejected_low_quality_count']} "
+            f"excluded_empty_jlpt_count={stats['skipped_empty_jlpt_count']} elapsed_ms={stats['generation_elapsed_ms']}"
+        )
+    else:
+        print(
+            f"[vocab-selector] target_level={target} word_count={limit} "
+            f"safe_jlpt_candidates={stats['safe_jlpt_candidates']} "
+            f"selected_target_jlpt={stats['selected_target_jlpt_count']} "
+            f"selected_adjacent_jlpt={stats['selected_adjacent_jlpt_count']} "
+            f"selected_by_category={stats['selected_by_category_count']} "
+            f"seed_fallback_count=0 rejected_recent_duplicate={stats['rejected_recent_duplicate_count']} "
+            f"rejected_low_quality_count={stats['rejected_low_quality_count']} "
+            f"rejected_by_category_quota={stats['rejected_by_category_quota']} "
+            f"target_jlpt_quota_skipped={stats['target_jlpt_quota_skipped']} "
+            f"cooldown_days_used={stats['cooldown_days_used']} elapsed_ms={stats['generation_elapsed_ms']}"
+        )
+    if low_quality_examples and not safe_mode:
         print(f"[vocab-selector] rejected_low_quality_examples={low_quality_examples}")
-    if quota_examples:
+    if quota_examples and not safe_mode:
         print(f"[vocab-rules] rejected_quota_examples={quota_examples}")
     return (selected, stats) if return_stats else selected
 
@@ -6091,6 +6204,8 @@ def merge_vocab_selector_stats(target, source):
     target["prefiltered_unsupported_category_count"] = target.get("prefiltered_unsupported_category_count", 0) + source.get("prefiltered_unsupported_category_count", 0)
     target["skipped_empty_jlpt_count"] = target.get("skipped_empty_jlpt_count", 0) + source.get("skipped_empty_jlpt_count", 0)
     target["safe_jlpt_candidates"] = target.get("safe_jlpt_candidates", 0) + source.get("safe_jlpt_candidates", 0)
+    target["selected_from_db_count"] = target.get("selected_from_db_count", 0) + source.get("selected_from_db_count", 0)
+    target["selected_from_seed_fallback_count"] = target.get("selected_from_seed_fallback_count", 0) + source.get("selected_from_seed_fallback_count", 0)
     target["generation_elapsed_ms"] = target.get("generation_elapsed_ms", 0) + source.get("generation_elapsed_ms", 0)
     for key in ("category_counts", "candidate_counts", "selected_rule_counts"):
         target.setdefault(key, {})
@@ -6131,7 +6246,9 @@ def load_basic_seed_vocab_items(settings=None):
 
 
 def seed_basic_safe_pool(settings=None):
-    rows = load_basic_seed_vocab_items(settings)
+    rows = [row for row in load_basic_seed_vocab_items(settings) if is_safe_mode_seed_vocab_item(row)]
+    if local_generation_safe_mode_enabled():
+        return rows
     if len(rows) >= 100:
         return rows
     # The checked-in basic seed file normally has 100+ N5-N3 words.  If it is
@@ -6561,13 +6678,20 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
 def build_local_material(settings, force_seed=False, material_date=None):
     material_started = time.perf_counter()
     settings = normalize_settings(settings)
+    safe_mode = local_generation_safe_mode_enabled()
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
     grammar_level = settings.get("grammar_level", "N5") if settings.get("grammar_level") in LEVELS else "N5"
     grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
-        "selection_strategy": "safe_jlpt_prefilter_first",
+        "selection_strategy": "safe_jlpt_basic_only" if safe_mode else "safe_jlpt_prefilter_first",
+        "local_generation_safe_mode": safe_mode,
+        "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS),
+        "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES),
+        "disabled_sources": sorted(LOCAL_SAFE_MODE_DISABLED_SOURCES),
+        "selected_from_db_count": 0,
+        "selected_from_seed_fallback_count": 0,
         "selected_by_jlpt_count": 0,
         "selected_target_jlpt_count": 0,
         "selected_adjacent_jlpt_count": 0,
@@ -6593,9 +6717,9 @@ def build_local_material(settings, force_seed=False, material_date=None):
     duplicate_filtered_count = 0
 
     vocab_mode = settings.get("vocab_mode", "general")
-    max_slang_quota = 0 if vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
+    max_slang_quota = 0 if safe_mode or vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
     slang_quota = 0
-    if vocab_mode == "sns" and vocab_count >= 5:
+    if not safe_mode and vocab_mode == "sns" and vocab_count >= 5:
         slang_quota = min(max(1, int(vocab_count * 0.1)), max_slang_quota)
 
     base_quota = max(0, vocab_count - slang_quota)
@@ -6608,7 +6732,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     duplicate_filtered_count += duplicates
     source_counts["vocabulary"] = len([item for item in vocab if item.get("source") in {"vocabulary_pool", "materials"}])
 
-    slang_vocab = [] if force_seed else material_vocab_from_approved_slang(slang_quota)
+    slang_vocab = [] if (force_seed or safe_mode) else material_vocab_from_approved_slang(slang_quota)
     slang_vocab, duplicates, selected_keys = dedupe_vocab_items(slang_vocab, selected_keys)
     duplicate_filtered_count += duplicates
     mark_slang_used_in_material([{"id": item.get("_slang_id")} for item in slang_vocab if item.get("_slang_id")])
@@ -6622,6 +6746,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         duplicate_filtered_count += duplicates
         vocab.extend(seed_items)
         vocab_seed_fallback_count = len(seed_items)
+        vocab_selector_stats["selected_from_seed_fallback_count"] = vocab_seed_fallback_count
         source_counts["seed"] += len(seed_items)
         seed_used = bool(seed_items)
     vocab = vocab[:vocab_count]
@@ -6638,7 +6763,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     verb_candidate_count = 0
     verbs = []
     selected_verb_keys = []
-    if not force_seed:
+    if not force_seed and not safe_mode:
         verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(settings, verb_count, exclude_keys=selected_keys)
         verb_duplicate_filtered_count += verb_pool_stats.get("duplicate_filtered_count", 0)
         rejected_fake_suru_count += verb_pool_stats.get("rejected_fake_suru_count", 0)
@@ -6681,9 +6806,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "exp": "今日文法由本地題庫抽取，不消耗 Gemini API 額度。請先掌握例句中的助詞、句型功能與常見錯誤。",
         "examples": grammar_examples,
     }
+    generation_warnings = []
+    if safe_mode and len(vocab) < vocab_count:
+        generation_warnings.append("insufficient_safe_vocab_pool")
     metadata = {
         "generation_mode": "local",
-        "selection_strategy": "safe_jlpt_prefilter_first",
+        "selection_strategy": "safe_jlpt_basic_only" if safe_mode else "safe_jlpt_prefilter_first",
+        "local_generation_safe_mode": safe_mode,
+        "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS) if safe_mode else [],
+        "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES) if safe_mode else [],
+        "disabled_sources": sorted(LOCAL_SAFE_MODE_DISABLED_SOURCES) if safe_mode else [],
         "ai_used": False,
         "fallback_used": False,
         "source_summary": source_counts,
@@ -6700,6 +6832,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "selected_target_jlpt_count": vocab_selector_stats.get("selected_target_jlpt_count", 0),
         "selected_adjacent_jlpt_count": vocab_selector_stats.get("selected_adjacent_jlpt_count", 0),
         "selected_by_category_count": vocab_selector_stats.get("selected_by_category_count", 0),
+        "selected_from_db_count": vocab_selector_stats.get("selected_from_db_count", 0),
+        "selected_from_seed_fallback_count": vocab_seed_fallback_count,
         "target_jlpt_quota_skipped": vocab_selector_stats.get("target_jlpt_quota_skipped", False),
         "rejected_low_quality_count": vocab_selector_stats.get("rejected_low_quality_count", 0),
         "rejected_by_rule_count": vocab_selector_stats.get("rejected_by_rule_count", 0),
@@ -6735,6 +6869,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "grammar_keys": [item.get("grammar_key", "") for item in grammar_points if item.get("grammar_key")],
         "grammar_fallback_used": bool(grammar_stats.get("grammar_fallback_used")),
         "grammar_warnings": grammar_stats.get("grammar_warnings", []),
+        "warnings": generation_warnings,
         "seed_used": seed_used,
         "generated_at": utc_now_iso(),
     }
@@ -8347,6 +8482,17 @@ def api_save_vocab_rules():
         for rule in rules
         if str(rule.get("source_type") or rule.get("group_key") or "") not in VOCAB_RULE_VISIBLE_TYPES
     ]
+    if local_generation_safe_mode_enabled():
+        unsupported.extend(
+            str(rule.get("rule_key") or rule.get("match_value") or "")
+            for rule in rules
+            if (
+                (str(rule.get("source_type") or rule.get("group_key") or "") == "jlpt_level"
+                 and clean_rule_match_value(rule.get("match_value")) not in LOCAL_SAFE_MODE_JLPT_LEVELS)
+                or (str(rule.get("source_type") or rule.get("group_key") or "") == "category"
+                    and clean_rule_match_value(rule.get("match_value")) not in LOCAL_SAFE_MODE_CATEGORIES)
+            )
+        )
     if unsupported:
         return jsonify(
             {
