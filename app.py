@@ -980,6 +980,28 @@ def migrate_vocab_rules_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
 
 
+def grammar_usage_items_json(usage_items):
+    if isinstance(usage_items, str):
+        return usage_items
+    return json.dumps(usage_items or [], ensure_ascii=False)
+
+
+def enrich_grammar_seed_row(row, now, usage_items=None):
+    row["meaning_zh"] = row.get("meaning_zh") or row.get("usage_summary_zh", "")
+    row["connection"] = row.get("connection") or row.get("structure_formula", "")
+    row["note_zh"] = row.get("note_zh") or row.get("learning_tip_zh", "")
+    row["learning_tip_zh"] = row.get("learning_tip_zh") or row.get("note_zh", "")
+    row["common_mistake_zh"] = row.get("common_mistake_zh", "")
+    row["fake_name_example"] = row.get("fake_name_example") or row.get("example_hiragana", "")
+    row["usage_items"] = grammar_usage_items_json(row.get("usage_items", usage_items or []))
+    row["is_active"] = row.get("is_active", True)
+    row["used_count"] = row.get("used_count", 0)
+    row["last_used_at"] = row.get("last_used_at")
+    row["created_at"] = row.get("created_at") or now
+    row["updated_at"] = row.get("updated_at") or now
+    return row
+
+
 def n5_grammar_seed_rows():
     now = utc_now_iso()
     rows = [
@@ -1224,13 +1246,517 @@ def n5_grammar_seed_rows():
             "priority": 72,
         },
     ]
+    usage_items_map = {
+        "particle_wa_topic": [
+            {
+                "usage_title": "表主題",
+                "meaning_zh": "提示接下來要說明的主題。",
+                "connection": "名詞 + は",
+                "example_japanese": "これは本です。",
+                "example_hiragana": "これはほんです。",
+                "example_zh": "這是書。",
+                "note_zh": "は 的重點是把話題提出來，後面才是要說明的內容。",
+            },
+            {
+                "usage_title": "表對比",
+                "meaning_zh": "用來對比兩個事物或狀態。",
+                "connection": "名詞 + は",
+                "example_japanese": "ラーメンは好きですが、すしはまあまあです。",
+                "example_hiragana": "らーめんはすきですが、すしはまあまあです。",
+                "example_zh": "拉麵我喜歡，但壽司還好。",
+                "note_zh": "對比時，は 的語氣比單純描述更明顯。",
+            },
+        ],
+        "particle_mo_also": [
+            {
+                "usage_title": "表也、都",
+                "meaning_zh": "表示前面的項目也符合後面的內容。",
+                "connection": "名詞 + も",
+                "example_japanese": "この荷物もお願いします。",
+                "example_hiragana": "このにもつもおねがいします。",
+                "example_zh": "這個行李也麻煩了。",
+                "note_zh": "も 會把該項目一起納入同一個狀態。",
+            },
+            {
+                "usage_title": "疑問詞 + も + 否定",
+                "meaning_zh": "表示全面否定，例如哪裡都不、什麼都不。",
+                "connection": "疑問詞 + も + 否定",
+                "example_japanese": "明日はどこも行きません。",
+                "example_hiragana": "あしたはどこもいきません。",
+                "example_zh": "明天哪裡都不去。",
+                "note_zh": "搭配否定時，不要翻成單純的「也」。",
+            },
+            {
+                "usage_title": "數量詞 + も",
+                "meaning_zh": "表示次數或數量很多。",
+                "connection": "數量詞 + も",
+                "example_japanese": "何回もダイエットをしたことがあります。",
+                "example_hiragana": "なんかいもだいえっとをしたことがあります。",
+                "example_zh": "我減肥過很多次。",
+                "note_zh": "這裡的も帶有「多到值得一提」的感覺。",
+            },
+        ],
+        "particle_no_possession": [
+            {
+                "usage_title": "表所有、屬性、所屬",
+                "meaning_zh": "連接兩個名詞，前面的名詞修飾後面的名詞。",
+                "connection": "名詞 + の + 名詞",
+                "example_japanese": "日本語の本です。",
+                "example_hiragana": "にほんごのほんです。",
+                "example_zh": "這是日文書。",
+                "note_zh": "の 不一定都要硬翻成「的」，要看中文是否自然。",
+            },
+            {
+                "usage_title": "代替前面提到的名詞",
+                "meaning_zh": "把已知名詞省略，用の代替。",
+                "connection": "修飾語 + の",
+                "example_japanese": "もう少し大きいのはありませんか。",
+                "example_hiragana": "もうすこしおおきいのはありませんか。",
+                "example_zh": "有沒有再大一點的？",
+                "note_zh": "大きいの 的 の 代表「東西」或「那個」。",
+            },
+        ],
+        "particle_wo_object": [
+            {
+                "usage_title": "表動作受詞",
+                "meaning_zh": "標示動作直接作用的對象。",
+                "connection": "名詞 + を + 動詞",
+                "example_japanese": "ジュースを飲みます。",
+                "example_hiragana": "じゅーすをのみます。",
+                "example_zh": "喝果汁。",
+                "note_zh": "中文常省略受詞標記，但日文需要 を。",
+            },
+            {
+                "usage_title": "表移動經過的場所",
+                "meaning_zh": "表示在某個空間中移動或經過。",
+                "connection": "場所 + を + 移動動詞",
+                "example_japanese": "公園を散歩します。",
+                "example_hiragana": "こうえんをさんぽします。",
+                "example_zh": "在公園散步。",
+                "note_zh": "此時を不是受詞，而是移動範圍。",
+            },
+            {
+                "usage_title": "表起點 / 出發點",
+                "meaning_zh": "表示離開某處。",
+                "connection": "場所 + を + 出る / 離れる",
+                "example_japanese": "毎朝8時にうちを出ます。",
+                "example_hiragana": "まいあさはちじにうちをでます。",
+                "example_zh": "每天早上八點出門。",
+                "note_zh": "離開的地方可用 を 標示。",
+            },
+        ],
+        "particle_de_place_method": [
+            {
+                "usage_title": "表手段、工具、方法",
+                "meaning_zh": "表示使用某種工具或方法做事。",
+                "connection": "工具 / 手段 + で + 動作",
+                "example_japanese": "日本語でレポートを書きます。",
+                "example_hiragana": "にほんごでれぽーとをかきます。",
+                "example_zh": "用日文寫報告。",
+                "note_zh": "で 可以理解為「用～」。",
+            },
+            {
+                "usage_title": "表交通方式",
+                "meaning_zh": "表示搭乘或使用的交通工具。",
+                "connection": "交通工具 + で + 移動動詞",
+                "example_japanese": "タクシーで家へ帰ります。",
+                "example_hiragana": "たくしーでいえへかえります。",
+                "example_zh": "搭計程車回家。",
+                "note_zh": "步行時常說歩いて，不用で。",
+            },
+            {
+                "usage_title": "表動作發生場所",
+                "meaning_zh": "表示動作在哪裡進行。",
+                "connection": "場所 + で + 動作",
+                "example_japanese": "駅で新聞を買います。",
+                "example_hiragana": "えきでしんぶんをかいます。",
+                "example_zh": "在車站買報紙。",
+                "note_zh": "存在場所多用に，動作場所多用で。",
+            },
+        ],
+        "particle_ni_place_time_target": [
+            {
+                "usage_title": "表存在場所",
+                "meaning_zh": "表示某人或某物存在的位置。",
+                "connection": "場所 + に + あります / います",
+                "example_japanese": "部屋に猫がいます。",
+                "example_hiragana": "へやにねこがいます。",
+                "example_zh": "房間裡有貓。",
+                "note_zh": "描述存在時，位置通常用に。",
+            },
+            {
+                "usage_title": "表時間點",
+                "meaning_zh": "表示事情發生的具體時間點。",
+                "connection": "時間 + に",
+                "example_japanese": "7月に京都でお祭りがあります。",
+                "example_hiragana": "しちがつにきょうとでおまつりがあります。",
+                "example_zh": "七月在京都有祭典。",
+                "note_zh": "明日、今日、毎日這類時間詞通常不加に。",
+            },
+            {
+                "usage_title": "表對象",
+                "meaning_zh": "表示動作指向的人或對象。",
+                "connection": "對象 + に + 動作",
+                "example_japanese": "先生に質問します。",
+                "example_hiragana": "せんせいにしつもんします。",
+                "example_zh": "向老師提問。",
+                "note_zh": "に 可理解為動作投向的方向或對象。",
+            },
+        ],
+        "particle_to_with_quote": [
+            {
+                "usage_title": "表一起做事的對象",
+                "meaning_zh": "表示和誰一起做某件事。",
+                "connection": "人 + と + 動作",
+                "example_japanese": "私は家族と日本へ来ました。",
+                "example_hiragana": "わたしはかぞくとにほんへきました。",
+                "example_zh": "我和家人來日本。",
+                "note_zh": "和某人一起行動時常用 と。",
+            },
+            {
+                "usage_title": "表完全列舉",
+                "meaning_zh": "列出全部項目。",
+                "connection": "名詞 + と + 名詞",
+                "example_japanese": "本屋は花屋とスーパーの間にあります。",
+                "example_hiragana": "ほんやははなやとすーぱーのあいだにあります。",
+                "example_zh": "書店在花店和超市之間。",
+                "note_zh": "と 比 や 更像完整列舉。",
+            },
+            {
+                "usage_title": "表引用內容",
+                "meaning_zh": "接在想法或說話內容後面。",
+                "connection": "句子 + と + 思う / 言う",
+                "example_japanese": "明日雨が降ると思います。",
+                "example_hiragana": "あしたあめがふるとおもいます。",
+                "example_zh": "我覺得明天會下雨。",
+                "note_zh": "と 前面是被引用的內容。",
+            },
+        ],
+        "particle_kara_start_reason": [
+            {
+                "usage_title": "表時間 / 地點起點",
+                "meaning_zh": "表示從某個時間或地點開始。",
+                "connection": "時間 / 地點 + から",
+                "example_japanese": "日本語の授業は1時半からです。",
+                "example_hiragana": "にほんごのじゅぎょうはいちじはんからです。",
+                "example_zh": "日文課從一點半開始。",
+                "note_zh": "から 是範圍的起點。",
+            },
+            {
+                "usage_title": "表原因",
+                "meaning_zh": "表示原因，常翻成因為。",
+                "connection": "句子 + から",
+                "example_japanese": "寒いですから、窓を閉めます。",
+                "example_hiragana": "さむいですから、まどをしめます。",
+                "example_zh": "因為很冷，所以關窗。",
+                "note_zh": "から 的原因語氣較直接。",
+            },
+        ],
+    }
     for row in rows:
-        row["is_active"] = True
-        row["used_count"] = 0
-        row["last_used_at"] = None
-        row["created_at"] = now
-        row["updated_at"] = now
+        enrich_grammar_seed_row(row, now, usage_items_map.get(row["grammar_key"], []))
     return rows
+
+
+def n3_grammar_seed_rows():
+    now = utc_now_iso()
+    rows = [
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_seide_seika",
+            "title": "せいで・せいか",
+            "display_name": "せいで・せいか：因為……",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "因為……，多用於負面原因。",
+            "connection": "名詞 + の + せいで\n普通形 + せいで\n普通形 + せいか",
+            "usage_summary_zh": "表示某件事是造成不好結果的原因。",
+            "usage_detail_zh": "「せいで」通常帶有責怪、遺憾或負面結果的語氣；「せいか」較委婉，表示原因可能是……。",
+            "structure_formula": "名詞 + の + せいで\n普通形 + せいで\n普通形 + せいか",
+            "example_japanese": "風邪のせいで、学校を休みました。",
+            "example_hiragana": "かぜのせいで、がっこうをやすみました。",
+            "example_zh": "因為感冒，所以請假沒去上學。",
+            "fake_name_example": "かぜのせいで、がっこうをやすみました。",
+            "note_zh": "若原因不是負面，通常不使用「せいで」，可改用「おかげで」或「ので」。",
+            "common_mistake_zh": "不要把所有「因為」都翻成せいで，正面結果時不適合。",
+            "priority": 90,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_tai_mono_da",
+            "title": "たいものだ・てほしいものだ",
+            "display_name": "たいものだ・てほしいものだ：真想 / 真希望",
+            "grammar_type": "expression",
+            "meaning_zh": "真想…… / 真希望……",
+            "connection": "動詞たい形 + ものだ\n動詞て形 + ほしい + ものだ",
+            "usage_summary_zh": "表示說話者強烈的願望或期待。",
+            "usage_detail_zh": "語氣比單純的「たい」更感慨，常用於表達真心願望、感嘆或希望對方理解。",
+            "structure_formula": "動詞たい形 + ものだ\n動詞て形 + ほしい + ものだ",
+            "example_japanese": "一度日本へ行ってみたいものだ。",
+            "example_hiragana": "いちどにほんへいってみたいものだ。",
+            "example_zh": "真想去一次日本啊。",
+            "fake_name_example": "いちどにほんへいってみたいものだ。",
+            "note_zh": "多帶有感慨，不是單純陳述計畫。",
+            "common_mistake_zh": "不要把它和普通的「行きたいです」完全等同，ものだ 會增加感嘆語氣。",
+            "priority": 88,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_dake_dewa",
+            "title": "だけでは",
+            "display_name": "だけでは：光是……不夠",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "光是……的話不夠。",
+            "connection": "名詞 + だけでは\n動詞普通形 + だけでは",
+            "usage_summary_zh": "表示單靠某件事無法達到期待結果。",
+            "usage_detail_zh": "常用於提醒條件不足，後面多接否定或不充分的結果。",
+            "structure_formula": "名詞 + だけでは\n動詞普通形 + だけでは",
+            "example_japanese": "勉強するだけでは上手になりません。",
+            "example_hiragana": "べんきょうするだけではじょうずになりません。",
+            "example_zh": "光是念書不會進步。",
+            "fake_name_example": "べんきょうするだけではじょうずになりません。",
+            "note_zh": "重點是「只有這樣還不夠」，通常需要補充其他條件。",
+            "common_mistake_zh": "不要把だけでは只翻成「只有」，要把不足感也翻出來。",
+            "priority": 86,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_dake_de_naku",
+            "title": "だけでなく",
+            "display_name": "だけでなく：不但……而且……",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "不但……而且……",
+            "connection": "名詞 + だけでなく\n普通形 + だけでなく",
+            "usage_summary_zh": "表示不只前項，後項也成立。",
+            "usage_detail_zh": "常與「も」搭配，形成「不但 A，連 B 也……」的語感。",
+            "structure_formula": "名詞 + だけでなく\n普通形 + だけでなく",
+            "example_japanese": "彼は日本語だけでなく、中国語も話せます。",
+            "example_hiragana": "かれはにほんごだけでなく、ちゅうごくごもはなせます。",
+            "example_zh": "他不但會日文，也會中文。",
+            "fake_name_example": "かれはにほんごだけでなく、ちゅうごくごもはなせます。",
+            "note_zh": "後面常出現も，表示追加的項目也成立。",
+            "common_mistake_zh": "不要漏掉後項的も，否則追加語氣會變弱。",
+            "priority": 84,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_koto_ni_naru",
+            "title": "ことになる",
+            "display_name": "ことになる：決定 / 結果變成",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "決定…… / 結果變成……",
+            "connection": "動詞辞書形 + ことになる\n動詞ない形 + ことになる",
+            "usage_summary_zh": "表示某事被決定，或事情自然發展成某種結果。",
+            "usage_detail_zh": "比「ことにする」更偏向外在決定或自然結果，不強調自己的主觀決定。",
+            "structure_formula": "動詞辞書形 + ことになる\n動詞ない形 + ことになる",
+            "example_japanese": "来月転勤することになりました。",
+            "example_hiragana": "らいげつてんきんすることになりました。",
+            "example_zh": "決定下個月要調職。",
+            "fake_name_example": "らいげつてんきんすることになりました。",
+            "note_zh": "常用於公司、學校、規則等外部因素決定的事情。",
+            "common_mistake_zh": "自己的決定通常用「ことにする」，不是「ことになる」。",
+            "priority": 82,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_koto_ni_suru",
+            "title": "ことにする",
+            "display_name": "ことにする：決定要……",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "決定要……",
+            "connection": "動詞辞書形 + ことにする\n動詞ない形 + ことにする",
+            "usage_summary_zh": "表示說話者自己決定做或不做某事。",
+            "usage_detail_zh": "重點在主觀決定，常用於告訴別人自己已做出選擇。",
+            "structure_formula": "動詞辞書形 + ことにする\n動詞ない形 + ことにする",
+            "example_japanese": "来年日本へ行くことにしました。",
+            "example_hiragana": "らいねんにほんへいくことにしました。",
+            "example_zh": "我決定明年去日本。",
+            "fake_name_example": "らいねんにほんへいくことにしました。",
+            "note_zh": "若是外部決定，請用「ことになる」。",
+            "common_mistake_zh": "不要把「ことにする」和「ことになる」混用。",
+            "priority": 80,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_sae_ba",
+            "title": "さえ〜ば",
+            "display_name": "さえ〜ば：只要……就……",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "只要……就……",
+            "connection": "動詞ば形\nい形容詞ければ\nな形容詞なら\n名詞 + さえ + ば",
+            "usage_summary_zh": "表示只需要滿足某個最低條件，就能達成結果。",
+            "usage_detail_zh": "帶有「其他都不重要，這個條件最關鍵」的語感。",
+            "structure_formula": "動詞ば形\nい形容詞ければ\nな形容詞なら\n名詞 + さえ + ば",
+            "example_japanese": "お金があれば、幸せになれる。",
+            "example_hiragana": "おかねがあれば、しあわせになれる。",
+            "example_zh": "只要有錢，就能幸福。",
+            "fake_name_example": "おかねがあれば、しあわせになれる。",
+            "note_zh": "さえ凸顯最低條件，ば表示條件成立。",
+            "common_mistake_zh": "不要只看ば形，要注意さえ強調「只要」。",
+            "priority": 78,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_janai_ka_no",
+            "title": "じゃないか・じゃないの",
+            "display_name": "じゃないか・じゃないの：不是嗎？",
+            "grammar_type": "expression",
+            "meaning_zh": "不是嗎？用於確認、指責或驚訝。",
+            "connection": "普通形 + じゃないか / じゃないの",
+            "usage_summary_zh": "用來確認對方是否同意，也可帶有驚訝或責備。",
+            "usage_detail_zh": "語氣會依上下文改變，可以是溫和確認，也可以是較強烈的反問。",
+            "structure_formula": "普通形 + じゃないか / じゃないの",
+            "example_japanese": "彼は優しいじゃないか。",
+            "example_hiragana": "かれはやさしいじゃないか。",
+            "example_zh": "他不是很溫柔嗎？",
+            "fake_name_example": "かれはやさしいじゃないか。",
+            "note_zh": "口語中常用，語氣需看說話情境。",
+            "common_mistake_zh": "不要只當成否定句，它常常是反問或確認。",
+            "priority": 76,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_zutsu",
+            "title": "ずつ",
+            "display_name": "ずつ：每…… / 一點一點地",
+            "grammar_type": "expression",
+            "meaning_zh": "每…… / 一點一點地……",
+            "connection": "數量詞 + ずつ",
+            "usage_summary_zh": "表示平均分配，或每次固定一點地進行。",
+            "usage_detail_zh": "可用於說明每人、每天、每次的固定數量，也可表漸進累積。",
+            "structure_formula": "數量詞 + ずつ",
+            "example_japanese": "毎日少しずつ勉強しています。",
+            "example_hiragana": "まいにちすこしずつべんきょうしています。",
+            "example_zh": "每天一點一點地學習。",
+            "fake_name_example": "まいにちすこしずつべんきょうしています。",
+            "note_zh": "ずつ前面通常接數量或程度。",
+            "common_mistake_zh": "不要把ずつ誤用成單純的「少し」，它有分配或累積感。",
+            "priority": 74,
+        },
+        {
+            "jlpt_level": "N3",
+            "grammar_key": "n3_kara_to_itte",
+            "title": "からといって",
+            "display_name": "からといって：雖說……但不代表……",
+            "grammar_type": "conjunction",
+            "meaning_zh": "雖說……但不代表……",
+            "connection": "普通形 + からといって",
+            "usage_summary_zh": "表示不能只因為前項，就直接推出後項。",
+            "usage_detail_zh": "常用來反駁過度推論，後面常接「とは限らない」「わけではない」。",
+            "structure_formula": "普通形 + からといって",
+            "example_japanese": "安いからといって、品質が悪いとは限りません。",
+            "example_hiragana": "やすいからといって、ひんしつがわるいとはかぎりません。",
+            "example_zh": "雖然便宜，但不代表品質一定差。",
+            "fake_name_example": "やすいからといって、ひんしつがわるいとはかぎりません。",
+            "note_zh": "常和否定判斷搭配，避免武斷推論。",
+            "common_mistake_zh": "不要把からといって翻成單純的「因為」。",
+            "priority": 72,
+        },
+    ]
+    for row in rows:
+        enrich_grammar_seed_row(row, now)
+    return rows
+
+
+def default_grammar_seed_rows():
+    return n5_grammar_seed_rows() + n3_grammar_seed_rows()
+
+
+GRAMMAR_SEED_COLUMNS = (
+    "jlpt_level",
+    "grammar_key",
+    "title",
+    "display_name",
+    "grammar_type",
+    "meaning_zh",
+    "connection",
+    "usage_summary_zh",
+    "usage_detail_zh",
+    "structure_formula",
+    "example_japanese",
+    "example_hiragana",
+    "example_zh",
+    "common_mistake_zh",
+    "learning_tip_zh",
+    "note_zh",
+    "fake_name_example",
+    "usage_items",
+    "is_active",
+    "priority",
+    "used_count",
+    "last_used_at",
+    "created_at",
+    "updated_at",
+)
+
+
+GRAMMAR_SEED_FILL_IF_EMPTY_COLUMNS = (
+    "meaning_zh",
+    "connection",
+    "usage_summary_zh",
+    "usage_detail_zh",
+    "structure_formula",
+    "example_japanese",
+    "example_hiragana",
+    "example_zh",
+    "common_mistake_zh",
+    "learning_tip_zh",
+    "note_zh",
+    "fake_name_example",
+    "usage_items",
+)
+
+
+def seed_grammar_points_sqlite(conn):
+    rows = default_grammar_seed_rows()
+    columns = ", ".join(GRAMMAR_SEED_COLUMNS)
+    values = ", ".join([f":{column}" for column in GRAMMAR_SEED_COLUMNS])
+    conn.executemany(
+        f"""
+        INSERT OR IGNORE INTO grammar_points ({columns})
+        VALUES ({values})
+        """,
+        rows,
+    )
+    fill_sql = ",\n            ".join(
+        [
+            f"{column} = CASE WHEN COALESCE({column}, '') = '' THEN :{column} ELSE {column} END"
+            for column in GRAMMAR_SEED_FILL_IF_EMPTY_COLUMNS
+        ]
+    )
+    conn.executemany(
+        f"""
+        UPDATE grammar_points
+        SET {fill_sql},
+            updated_at = CASE WHEN updated_at IS NULL OR updated_at = '' THEN :updated_at ELSE updated_at END
+        WHERE grammar_key = :grammar_key
+        """,
+        rows,
+    )
+
+
+def seed_grammar_points_postgres(cur):
+    rows = default_grammar_seed_rows()
+    columns = ", ".join(GRAMMAR_SEED_COLUMNS)
+    values = ", ".join([f"%({column})s" for column in GRAMMAR_SEED_COLUMNS])
+    fill_sql = ",\n                        ".join(
+        [
+            f"{column} = CASE WHEN COALESCE(grammar_points.{column}, '') = '' THEN EXCLUDED.{column} ELSE grammar_points.{column} END"
+            for column in GRAMMAR_SEED_FILL_IF_EMPTY_COLUMNS
+        ]
+    )
+    cur.executemany(
+        f"""
+        INSERT INTO grammar_points ({columns})
+        VALUES ({values})
+        ON CONFLICT (grammar_key) DO UPDATE SET
+                        {fill_sql},
+                        updated_at = CASE
+                            WHEN grammar_points.updated_at IS NULL THEN EXCLUDED.updated_at
+                            ELSE grammar_points.updated_at
+                        END
+        """,
+        rows,
+    )
 
 
 def migrate_grammar_points_sqlite(conn):
@@ -1243,6 +1769,8 @@ def migrate_grammar_points_sqlite(conn):
             title TEXT NOT NULL,
             display_name TEXT NOT NULL,
             grammar_type TEXT,
+            meaning_zh TEXT DEFAULT '',
+            connection TEXT DEFAULT '',
             usage_summary_zh TEXT NOT NULL,
             usage_detail_zh TEXT,
             structure_formula TEXT,
@@ -1251,6 +1779,9 @@ def migrate_grammar_points_sqlite(conn):
             example_zh TEXT NOT NULL,
             common_mistake_zh TEXT,
             learning_tip_zh TEXT,
+            note_zh TEXT,
+            fake_name_example TEXT,
+            usage_items TEXT,
             is_active INTEGER DEFAULT 1,
             priority INTEGER DEFAULT 50,
             used_count INTEGER DEFAULT 0,
@@ -1267,6 +1798,8 @@ def migrate_grammar_points_sqlite(conn):
         "title": "ALTER TABLE grammar_points ADD COLUMN title TEXT DEFAULT ''",
         "display_name": "ALTER TABLE grammar_points ADD COLUMN display_name TEXT DEFAULT ''",
         "grammar_type": "ALTER TABLE grammar_points ADD COLUMN grammar_type TEXT",
+        "meaning_zh": "ALTER TABLE grammar_points ADD COLUMN meaning_zh TEXT DEFAULT ''",
+        "connection": "ALTER TABLE grammar_points ADD COLUMN connection TEXT DEFAULT ''",
         "usage_summary_zh": "ALTER TABLE grammar_points ADD COLUMN usage_summary_zh TEXT DEFAULT ''",
         "usage_detail_zh": "ALTER TABLE grammar_points ADD COLUMN usage_detail_zh TEXT",
         "structure_formula": "ALTER TABLE grammar_points ADD COLUMN structure_formula TEXT",
@@ -1275,6 +1808,9 @@ def migrate_grammar_points_sqlite(conn):
         "example_zh": "ALTER TABLE grammar_points ADD COLUMN example_zh TEXT DEFAULT ''",
         "common_mistake_zh": "ALTER TABLE grammar_points ADD COLUMN common_mistake_zh TEXT",
         "learning_tip_zh": "ALTER TABLE grammar_points ADD COLUMN learning_tip_zh TEXT",
+        "note_zh": "ALTER TABLE grammar_points ADD COLUMN note_zh TEXT",
+        "fake_name_example": "ALTER TABLE grammar_points ADD COLUMN fake_name_example TEXT",
+        "usage_items": "ALTER TABLE grammar_points ADD COLUMN usage_items TEXT",
         "is_active": "ALTER TABLE grammar_points ADD COLUMN is_active INTEGER DEFAULT 1",
         "priority": "ALTER TABLE grammar_points ADD COLUMN priority INTEGER DEFAULT 50",
         "used_count": "ALTER TABLE grammar_points ADD COLUMN used_count INTEGER DEFAULT 0",
@@ -1304,28 +1840,7 @@ def migrate_grammar_points_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
-    count = conn.execute("SELECT COUNT(*) FROM grammar_points").fetchone()[0]
-    if count == 0:
-        rows = n5_grammar_seed_rows()
-        conn.executemany(
-            """
-            INSERT OR IGNORE INTO grammar_points (
-                jlpt_level, grammar_key, title, display_name, grammar_type,
-                usage_summary_zh, usage_detail_zh, structure_formula,
-                example_japanese, example_hiragana, example_zh,
-                common_mistake_zh, learning_tip_zh, is_active, priority,
-                used_count, last_used_at, created_at, updated_at
-            )
-            VALUES (
-                :jlpt_level, :grammar_key, :title, :display_name, :grammar_type,
-                :usage_summary_zh, :usage_detail_zh, :structure_formula,
-                :example_japanese, :example_hiragana, :example_zh,
-                :common_mistake_zh, :learning_tip_zh, :is_active, :priority,
-                :used_count, :last_used_at, :created_at, :updated_at
-            )
-            """,
-            rows,
-        )
+    seed_grammar_points_sqlite(conn)
 
 
 def migrate_mistake_logs(conn):
@@ -2655,6 +3170,8 @@ def migrate_grammar_points_postgres():
                     title TEXT NOT NULL,
                     display_name TEXT NOT NULL,
                     grammar_type TEXT,
+                    meaning_zh TEXT DEFAULT '',
+                    connection TEXT DEFAULT '',
                     usage_summary_zh TEXT NOT NULL,
                     usage_detail_zh TEXT,
                     structure_formula TEXT,
@@ -2663,6 +3180,9 @@ def migrate_grammar_points_postgres():
                     example_zh TEXT NOT NULL,
                     common_mistake_zh TEXT,
                     learning_tip_zh TEXT,
+                    note_zh TEXT,
+                    fake_name_example TEXT,
+                    usage_items TEXT,
                     is_active BOOLEAN DEFAULT TRUE,
                     priority INTEGER DEFAULT 50,
                     used_count INTEGER DEFAULT 0,
@@ -2678,6 +3198,8 @@ def migrate_grammar_points_postgres():
                 "title": "TEXT DEFAULT ''",
                 "display_name": "TEXT DEFAULT ''",
                 "grammar_type": "TEXT",
+                "meaning_zh": "TEXT DEFAULT ''",
+                "connection": "TEXT DEFAULT ''",
                 "usage_summary_zh": "TEXT DEFAULT ''",
                 "usage_detail_zh": "TEXT",
                 "structure_formula": "TEXT",
@@ -2686,6 +3208,9 @@ def migrate_grammar_points_postgres():
                 "example_zh": "TEXT DEFAULT ''",
                 "common_mistake_zh": "TEXT",
                 "learning_tip_zh": "TEXT",
+                "note_zh": "TEXT",
+                "fake_name_example": "TEXT",
+                "usage_items": "TEXT",
                 "is_active": "BOOLEAN DEFAULT TRUE",
                 "priority": "INTEGER DEFAULT 50",
                 "used_count": "INTEGER DEFAULT 0",
@@ -2714,30 +3239,7 @@ def migrate_grammar_points_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
-            cur.execute("SELECT COUNT(*) FROM grammar_points")
-            count = cur.fetchone()[0]
-            if count == 0:
-                rows = n5_grammar_seed_rows()
-                cur.executemany(
-                    """
-                    INSERT INTO grammar_points (
-                        jlpt_level, grammar_key, title, display_name, grammar_type,
-                        usage_summary_zh, usage_detail_zh, structure_formula,
-                        example_japanese, example_hiragana, example_zh,
-                        common_mistake_zh, learning_tip_zh, is_active, priority,
-                        used_count, last_used_at, created_at, updated_at
-                    )
-                    VALUES (
-                        %(jlpt_level)s, %(grammar_key)s, %(title)s, %(display_name)s, %(grammar_type)s,
-                        %(usage_summary_zh)s, %(usage_detail_zh)s, %(structure_formula)s,
-                        %(example_japanese)s, %(example_hiragana)s, %(example_zh)s,
-                        %(common_mistake_zh)s, %(learning_tip_zh)s, %(is_active)s, %(priority)s,
-                        %(used_count)s, %(last_used_at)s, %(created_at)s, %(updated_at)s
-                    )
-                    ON CONFLICT (grammar_key) DO NOTHING
-                    """,
-                    rows,
-                )
+            seed_grammar_points_postgres(cur)
         conn.commit()
 
 
@@ -4969,7 +5471,25 @@ def default_grammar_count(grammar_level):
     return DEFAULT_GRAMMAR_COUNT_BY_LEVEL.get(grammar_level, 3)
 
 
+def parse_grammar_usage_items(value):
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [item for item in parsed if isinstance(item, dict)]
+
+
 def grammar_item_from_row(row):
+    meaning_zh = row.get("meaning_zh", "") or row.get("usage_summary_zh", "")
+    connection = row.get("connection", "") or row.get("structure_formula", "")
+    note_zh = row.get("note_zh", "") or row.get("learning_tip_zh", "")
+    fake_name_example = row.get("fake_name_example", "") or row.get("example_hiragana", "")
     return {
         "id": row.get("id"),
         "jlpt_level": row.get("jlpt_level", ""),
@@ -4977,6 +5497,8 @@ def grammar_item_from_row(row):
         "title": row.get("title", ""),
         "display_name": row.get("display_name", "") or row.get("title", ""),
         "grammar_type": row.get("grammar_type", ""),
+        "meaning_zh": meaning_zh,
+        "connection": connection,
         "usage_summary_zh": row.get("usage_summary_zh", ""),
         "usage_detail_zh": row.get("usage_detail_zh", ""),
         "structure_formula": row.get("structure_formula", ""),
@@ -4985,6 +5507,9 @@ def grammar_item_from_row(row):
         "example_zh": row.get("example_zh", ""),
         "common_mistake_zh": row.get("common_mistake_zh", ""),
         "learning_tip_zh": row.get("learning_tip_zh", ""),
+        "note_zh": note_zh,
+        "fake_name_example": fake_name_example,
+        "usage_items": parse_grammar_usage_items(row.get("usage_items")),
     }
 
 
