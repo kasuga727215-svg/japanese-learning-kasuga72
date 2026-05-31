@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, has_request_context, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 from services.grammar_debugger import debug_grammar
 
@@ -108,9 +108,12 @@ CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
 LOCAL_GENERATION_SAFE_MODE_DEFAULT = os.environ.get("LOCAL_GENERATION_SAFE_MODE", "true").strip().lower()
+RUN_MIGRATIONS_ON_REQUEST = os.environ.get("RUN_MIGRATIONS_ON_REQUEST", "false").strip().lower() == "true"
+DB_CONNECT_TIMEOUT_SECONDS = read_int_env("DB_CONNECT_TIMEOUT_SECONDS", 5, 1, 20)
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
 _ARCHIVE_DATES_CACHE = {"expires_at": None, "payload": None}
 _BASIC_SEED_VOCAB_CACHE = None
+_VOCAB_POOL_DB_UNAVAILABLE_UNTIL = 0.0
 _SCHEMA_LOCK = threading.Lock()
 _SETTINGS_SCHEMA_READY = False
 _MATERIALS_SCHEMA_READY = False
@@ -2530,6 +2533,8 @@ def approved_slang_for_material(limit):
         return []
     ensure_slang_candidates_store()
     if DATABASE_URL:
+        if not vocab_pool_db_query_allowed():
+            return []
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -2975,26 +2980,33 @@ def period_bounds(period, material_date=None):
 
 def vocab_rule_used_count(rule_key, period, material_date=None):
     start, end = period_bounds(period, material_date)
-    ensure_vocab_rules_store()
-    if DATABASE_URL:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM vocab_selection_logs
-                    WHERE rule_key = %s AND material_date BETWEEN %s AND %s
-                    """,
-                    (rule_key, start, end),
-                )
-                return int(cur.fetchone()[0] or 0)
-    row = sqlite_one(
-        """
-        SELECT COUNT(*) AS count FROM vocab_selection_logs
-        WHERE rule_key = ? AND material_date BETWEEN ? AND ?
-        """,
-        (rule_key, start, end),
-    )
-    return int(row["count"] if row else 0)
+    try:
+        if DATABASE_URL and not vocab_pool_db_query_allowed():
+            return 0
+        ensure_vocab_rules_store()
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*) FROM vocab_selection_logs
+                        WHERE rule_key = %s AND material_date BETWEEN %s AND %s
+                        """,
+                        (rule_key, start, end),
+                    )
+                    return int(cur.fetchone()[0] or 0)
+        row = sqlite_one(
+            """
+            SELECT COUNT(*) AS count FROM vocab_selection_logs
+            WHERE rule_key = ? AND material_date BETWEEN ? AND ?
+            """,
+            (rule_key, start, end),
+        )
+        return int(row["count"] if row else 0)
+    except Exception as exc:
+        print(f"[local-generate] vocab rule period check failed rule_key={rule_key}; reason={exc}")
+        mark_vocab_pool_db_unavailable(exc)
+        return 0
 
 
 def is_rule_period_available(rule_key, period, material_date=None):
@@ -3005,7 +3017,12 @@ def is_rule_period_available(rule_key, period, material_date=None):
 
 
 def load_six_main_vocab_rules():
-    rows = {row["rule_key"]: row for row in load_vocab_rule_rows()}
+    try:
+        rows = {row["rule_key"]: row for row in load_vocab_rule_rows()}
+    except Exception as exc:
+        print(f"[local-generate] vocab rules unavailable; using six defaults; reason={exc}")
+        mark_vocab_pool_db_unavailable(exc)
+        rows = {}
     merged = []
     for rule_key in SIX_MAIN_VOCAB_RULE_ORDER:
         rule = six_main_default_vocab_rule(rule_key)
@@ -3093,10 +3110,28 @@ def save_settings_file(settings):
     return current
 
 
+def migrations_allowed_now():
+    if has_request_context() and request.path.startswith("/api/") and not RUN_MIGRATIONS_ON_REQUEST:
+        return False
+    return True
+
+
 def get_db_connection():
     import psycopg
 
-    return psycopg.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL, connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
+
+
+def vocab_pool_db_query_allowed():
+    return not (DATABASE_URL and time.time() < _VOCAB_POOL_DB_UNAVAILABLE_UNTIL)
+
+
+def mark_vocab_pool_db_unavailable(reason):
+    global _VOCAB_POOL_DB_UNAVAILABLE_UNTIL
+    if not DATABASE_URL:
+        return
+    _VOCAB_POOL_DB_UNAVAILABLE_UNTIL = time.time() + 30
+    print(f"[local-generate] db_pool_fetch_failed cooldown=30s reason={reason}")
 
 
 def migrate_slang_candidates_postgres():
@@ -3429,6 +3464,8 @@ def migrate_grammar_points_postgres():
 
 
 def ensure_slang_candidates_store():
+    if not migrations_allowed_now():
+        return
     if DATABASE_URL:
         migrate_slang_candidates_postgres()
     else:
@@ -3436,6 +3473,8 @@ def ensure_slang_candidates_store():
 
 
 def ensure_vocabulary_pool_store():
+    if not migrations_allowed_now():
+        return
     if DATABASE_URL:
         migrate_vocabulary_pool_postgres()
     else:
@@ -3443,6 +3482,8 @@ def ensure_vocabulary_pool_store():
 
 
 def ensure_vocab_rules_store():
+    if not migrations_allowed_now():
+        return
     if DATABASE_URL:
         migrate_vocab_rules_postgres()
     else:
@@ -3450,6 +3491,8 @@ def ensure_vocab_rules_store():
 
 
 def ensure_grammar_points_store():
+    if not migrations_allowed_now():
+        return
     if DATABASE_URL:
         migrate_grammar_points_postgres()
     else:
@@ -3586,6 +3629,8 @@ def ensure_database():
     global _MATERIALS_SCHEMA_READY
     if _MATERIALS_SCHEMA_READY:
         return
+    if not migrations_allowed_now():
+        return
     with _SCHEMA_LOCK:
         if _MATERIALS_SCHEMA_READY:
             return
@@ -3655,6 +3700,8 @@ def read_database():
                 rows = cur.fetchall()
         return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
 
+    if not os.path.exists(DATABASE_FILE):
+        return pd.DataFrame(columns=COLUMNS)
     df = pd.read_csv(DATABASE_FILE, dtype=str, keep_default_na=False, encoding="utf-8-sig")
     return ensure_material_version_columns_df(df)
 
@@ -4259,30 +4306,37 @@ def get_recent_used_normalized_keys(days=14, material_date=None, include_all_ver
         end_date = taipei_now().date()
     start_date = end_date - timedelta(days=day_count - 1)
     start, end = start_date.isoformat(), end_date.isoformat()
-    ensure_vocab_rules_store()
-    if DATABASE_URL:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT DISTINCT normalized_key
-                    FROM vocab_selection_logs
-                    WHERE material_date BETWEEN %s AND %s
-                      AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
-                    """,
-                    (start, end),
-                )
-                return {normalize_vocab_key(row[0]) for row in cur.fetchall() if row and row[0]}
-    rowset = sqlite_dicts(
-        """
-        SELECT DISTINCT normalized_key
-        FROM vocab_selection_logs
-        WHERE material_date BETWEEN ? AND ?
-          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
-        """,
-        (start, end),
-    )
-    return {normalize_vocab_key(row.get("normalized_key")) for row in rowset if row.get("normalized_key")}
+    try:
+        if DATABASE_URL and not vocab_pool_db_query_allowed():
+            return set()
+        ensure_vocab_rules_store()
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT normalized_key
+                        FROM vocab_selection_logs
+                        WHERE material_date BETWEEN %s AND %s
+                          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                        """,
+                        (start, end),
+                    )
+                    return {normalize_vocab_key(row[0]) for row in cur.fetchall() if row and row[0]}
+        rowset = sqlite_dicts(
+            """
+            SELECT DISTINCT normalized_key
+            FROM vocab_selection_logs
+            WHERE material_date BETWEEN ? AND ?
+              AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+            """,
+            (start, end),
+        )
+        return {normalize_vocab_key(row.get("normalized_key")) for row in rowset if row.get("normalized_key")}
+    except Exception as exc:
+        print(f"[local-generate] recent duplicate lookup failed; days={days}; reason={exc}")
+        mark_vocab_pool_db_unavailable(exc)
+        return set()
 
 
 def jlpt_level_rank(level):
@@ -4578,8 +4632,9 @@ def parse_loose_date(value):
 
 
 def fetch_vocabulary_pool_rows():
-    ensure_vocabulary_pool_store()
     if DATABASE_URL:
+        if not vocab_pool_db_query_allowed():
+            return []
         try:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -4595,13 +4650,14 @@ def fetch_vocabulary_pool_rows():
                                  last_used_at ASC NULLS FIRST,
                                  priority DESC,
                                  id DESC
-                        LIMIT 12000
+                        LIMIT 1200
                         """
                     )
                     columns = [desc[0] for desc in cur.description]
                     return [dict(zip(columns, row)) for row in cur.fetchall()]
         except Exception as e:
-            print(f"[material-generator] vocabulary_pool unavailable; db=postgres; error={e}")
+            print(f"[local-generate] db_pool_fetch_failed db=postgres; reason={e}")
+            mark_vocab_pool_db_unavailable(e)
             return []
     try:
         ensure_settings_store()
@@ -4619,12 +4675,12 @@ def fetch_vocabulary_pool_rows():
                          COALESCE(last_used_at, '') ASC,
                          priority DESC,
                          id DESC
-                LIMIT 12000
+                LIMIT 1200
                 """
             ).fetchall()
             return [dict(row) for row in rows]
     except sqlite3.Error as e:
-        print(f"[material-generator] vocabulary_pool unavailable; db=sqlite; error={e}")
+        print(f"[local-generate] db_pool_fetch_failed db=sqlite; reason={e}")
         return []
 
 
@@ -5112,7 +5168,6 @@ def fetch_vocabulary_pool_candidates(
     exclude_low_quality=True,
     exclude_normalized_keys=None,
 ):
-    ensure_vocabulary_pool_store()
     jlpt_levels = [level for level in (jlpt_levels or []) if level and level != EMPTY_RULE_VALUE]
     categories = [category for category in (categories or []) if category and category != EMPTY_RULE_VALUE]
     limit = max(1, min(int(limit or 300), 1000))
@@ -5196,6 +5251,8 @@ def fetch_vocabulary_pool_candidates(
     params.append(limit)
     try:
         if DATABASE_URL:
+            if not vocab_pool_db_query_allowed():
+                return []
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
@@ -5208,7 +5265,8 @@ def fetch_vocabulary_pool_candidates(
             return [dict(row) for row in rows]
     except Exception as e:
         db_type = "postgres" if DATABASE_URL else "sqlite"
-        print(f"[material-generator] vocabulary_pool candidates unavailable; db={db_type}; error={e}")
+        print(f"[local-generate] db_pool_fetch_failed db={db_type}; reason={e}")
+        mark_vocab_pool_db_unavailable(e)
         return []
 
 
@@ -5269,7 +5327,11 @@ def category_rule_available(rule, selected_rule_counts):
 
 
 def approved_slang_vocab_items_for_rule(limit):
-    items = material_vocab_from_approved_slang(limit)
+    try:
+        items = material_vocab_from_approved_slang(limit)
+    except Exception as exc:
+        print(f"[local-generate] approved_slang_fetch_failed reason={exc}")
+        items = []
     for item in items:
         item["rule_key"] = "category:SNS"
         item["_matched_rule_keys"] = ["category:SNS"]
@@ -5280,7 +5342,10 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     started = time.perf_counter()
     material_date = canonical_material_date(material_date or get_today_taipei_date())
     stats = {
-        "selection_strategy": "six_main_rules_period_first",
+        "selection_strategy": "six_main_rules_period_first_with_fallback",
+        "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
+        "db_pool_used": False,
+        "seed_fallback_used": False,
         "selected_from_db_count": 0,
         "selected_from_seed_fallback_count": 0,
         "selected_by_jlpt_count": 0,
@@ -5373,6 +5438,8 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
                 exclude_normalized_keys=exclude_for_sql,
             )
             stats["safe_jlpt_candidates"] += len(rows)
+            if rows:
+                stats["db_pool_used"] = True
             return [build_vocab_item_from_pool_row(row) for row in rows]
         if rule_key == "category:SNS":
             vocab_rows = fetch_vocabulary_pool_candidates(
@@ -5383,6 +5450,8 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
                 exclude_low_quality=True,
                 exclude_normalized_keys=exclude_for_sql,
             )
+            if vocab_rows:
+                stats["db_pool_used"] = True
             vocab_items = [build_vocab_item_from_pool_row(row) for row in vocab_rows]
             slang_items = approved_slang_vocab_items_for_rule(query_limit)
             return vocab_items + slang_items
@@ -7026,6 +7095,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "generation_elapsed_ms": 0,
     }
     seed_used = False
+    generation_warnings = []
     duplicate_filtered_count = 0
 
     vocab_mode = settings.get("vocab_mode", "general")
@@ -7059,6 +7129,10 @@ def build_local_material(settings, force_seed=False, material_date=None):
         vocab.extend(seed_items)
         vocab_seed_fallback_count = len(seed_items)
         vocab_selector_stats["selected_from_seed_fallback_count"] = vocab_seed_fallback_count
+        if seed_items:
+            vocab_selector_stats["seed_fallback_used"] = True
+            if not vocab_selector_stats.get("db_pool_used"):
+                generation_warnings.append("vocabulary_pool_unavailable_used_seed_fallback")
         vocab_selector_stats.setdefault("rule_selection", {"available_rules": [], "blocked_by_period": [], "selected_counts": {}})
         vocab_selector_stats["rule_selection"].setdefault("selected_counts", {})
         for item in seed_items:
@@ -7128,12 +7202,14 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "exp": "今日文法由本地題庫抽取，不消耗 Gemini API 額度。請先掌握例句中的助詞、句型功能與常見錯誤。",
         "examples": grammar_examples,
     }
-    generation_warnings = []
     if safe_mode and len(vocab) < vocab_count:
         generation_warnings.append("insufficient_safe_vocab_pool")
     metadata = {
         "generation_mode": "local",
-        "selection_strategy": "six_main_rules_period_first",
+        "selection_strategy": "six_main_rules_period_first_with_fallback",
+        "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
+        "db_pool_used": bool(vocab_selector_stats.get("db_pool_used", False)),
+        "seed_fallback_used": bool(vocab_seed_fallback_count),
         "local_generation_safe_mode": safe_mode,
         "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS) if safe_mode else [],
         "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES) if safe_mode else [],
@@ -8980,6 +9056,7 @@ def api_materials():
 @app.post("/api/generate")
 def api_generate():
     mode = "local"
+    data = {}
     try:
         data = request.get_json(silent=True) or {}
         mode = request.args.get("mode") or data.get("mode") or "local"
@@ -8993,6 +9070,67 @@ def api_generate():
             )
         )
     except Exception as e:
+        if mode == "local":
+            print(f"[local-generate] primary local generation failed; trying seed fallback; reason={e}")
+            print(traceback.format_exc())
+            try:
+                settings = save_settings_file(data) if data else load_settings()
+                fallback_material = build_local_material(
+                    settings,
+                    force_seed=True,
+                    material_date=get_today_taipei_date(),
+                )
+                fallback_material.setdefault("metadata", {})
+                fallback_material["metadata"].update(
+                    {
+                        "generation_mode": "local_fallback",
+                        "fallback_used": True,
+                        "ai_used": False,
+                    }
+                )
+                warnings = fallback_material["metadata"].setdefault("warnings", [])
+                if "local_generation_primary_failed_used_seed_fallback" not in warnings:
+                    warnings.append("local_generation_primary_failed_used_seed_fallback")
+                save_info = save_material_for_date(
+                    get_today_taipei_date(),
+                    fallback_material,
+                    settings,
+                    generation_source="manual_local",
+                    generation_mode="local_fallback",
+                )
+                invalidate_dashboard_cache("local generation seed fallback")
+                print(
+                    "[local-generate] seed_fallback_used=true "
+                    f"material_key={save_info.get('material_key')} reason={e}"
+                )
+                return jsonify(
+                    {
+                        "ok": True,
+                        "message": "\u5df2\u4f7f\u7528\u5b89\u5168\u57fa\u790e\u8a5e\u5eab\u5efa\u7acb\u6559\u6750\u3002",
+                        "fallback_used": True,
+                        "material_date": save_info.get("material_date"),
+                        "material_key": save_info.get("material_key"),
+                        "version_no": save_info.get("version_no"),
+                        "generation_source": save_info.get("generation_source"),
+                        "generation_mode": "local_fallback",
+                        "ai_used": False,
+                    }
+                )
+            except Exception as fallback_exc:
+                print(f"[local-generate] seed fallback failed; reason={fallback_exc}")
+                print(traceback.format_exc())
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "local_generation_failed",
+                        "message": "\u672c\u5730\u6559\u6750\u751f\u6210\u5931\u6557\uff0c\u7cfb\u7d71\u5df2\u4fdd\u7559\u65e2\u6709\u6559\u6750\u8207\u8a2d\u5b9a\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002",
+                        "debug": {
+                            "stage": "api_generate_seed_fallback",
+                            "mode": mode,
+                            "reason": str(fallback_exc),
+                        },
+                    }
+                ), 200
         payload = {
             "ok": False,
             "error": "local_generation_failed",
