@@ -276,7 +276,7 @@
       <h4 class="mb-2" style="color:var(--primary);">單字出現設置</h4>
       <p class="text-muted mb-3">可設定各類單字在本地教材中的出現週期與次數，避免某類詞彙過度出現。</p>
       <div class="rules-toolbar">
-        <input id="vocab-rule-search" class="form-control" placeholder="搜尋類型、來源、詞性..." oninput="renderVocabRules()">
+        <input id="vocab-rule-search" class="form-control" placeholder="搜尋 JLPT 等級或單字分類..." oninput="renderVocabRules()">
         <button class="neon-btn" onclick="saveAllVocabRules()" id="rules-save-all-btn">儲存設定</button>
         <button class="neon-btn" onclick="syncVocabRules()" id="rules-sync-btn">同步目前詞庫類型</button>
         <button class="neon-btn accent-btn" onclick="resetVocabRules()" id="rules-reset-btn">還原預設值</button>
@@ -544,12 +544,15 @@
   function renderRuleCard(rule) {
     const key = escapeHtml(rule.rule_key);
     const maxValue = rule.max_per_material ?? "";
+    const strictControl = rule.source_type === "category"
+      ? `<label><div class="rule-small-label">嚴格限制</div><input class="form-check-input rule-strict" type="checkbox" ${rule.strict_mode ? "checked" : ""}></label>`
+      : "";
     return `
       <div class="rule-card" data-rule-key="${key}" data-source-type="${escapeHtml(rule.source_type)}" data-match-value="${escapeHtml(rule.match_value)}" data-display-name="${escapeHtml(rule.display_name)}">
         <div class="d-flex justify-content-between gap-2 flex-wrap">
           <div>
             <div class="rule-title">${escapeHtml(rule.display_name || rule.match_value)} ${rule.is_new_detected_type ? "<span class='rule-chip'>新偵測</span>" : ""}</div>
-            <div class="rule-meta">來源：${escapeHtml(rule.source_type)} = ${escapeHtml(rule.match_value)}｜目前 ${Number(rule.available_count || 0)} 筆｜已用 ${Number(rule.used_count || 0)} 次${rule.remaining_count === null || rule.remaining_count === undefined ? "" : `｜剩餘 ${Number(rule.remaining_count || 0)} 次`}</div>
+            <div class="rule-meta">條件：${escapeHtml(rule.source_type)} = ${escapeHtml(rule.match_value)}｜目前 ${Number(rule.available_count || 0)} 筆｜已用 ${Number(rule.used_count || 0)} 次${rule.remaining_count === null || rule.remaining_count === undefined ? "" : `｜剩餘 ${Number(rule.remaining_count || 0)} 次`}</div>
           </div>
         </div>
         <div class="rule-controls">
@@ -560,7 +563,7 @@
           <label><div class="rule-small-label">次數</div><input class="form-control rule-quota" type="number" min="0" value="${Number(rule.quota_count || 0)}"></label>
           <label><div class="rule-small-label">單份上限</div><input class="form-control rule-max" type="number" min="0" value="${escapeHtml(maxValue)}" placeholder="不限制"></label>
           <label><div class="rule-small-label">優先度</div><input class="form-control rule-priority" type="number" min="0" max="100" value="${Number(rule.priority || 50)}"></label>
-          <label><div class="rule-small-label">嚴格限制</div><input class="form-check-input rule-strict" type="checkbox" ${rule.strict_mode ? "checked" : ""}></label>
+          ${strictControl}
         </div>
         <div class="rule-actions">
           <button class="neon-btn" onclick="saveVocabRuleFromButton(this)">儲存此類型</button>
@@ -581,7 +584,7 @@
       quota_count: Number(card.querySelector(".rule-quota").value || 0),
       max_per_material: card.querySelector(".rule-max").value === "" ? null : Number(card.querySelector(".rule-max").value || 0),
       priority: Number(card.querySelector(".rule-priority").value || 50),
-      strict_mode: card.querySelector(".rule-strict").checked
+      strict_mode: card.querySelector(".rule-strict") ? card.querySelector(".rule-strict").checked : false
     };
   }
 
