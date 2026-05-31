@@ -2823,8 +2823,14 @@ def scan_vocab_rule_types():
         print(f"[vocab-rules] scan skipped table=slang_candidates field=category; reason={exc}")
     return discovered
 
-def period_bounds(period):
-    today = taipei_now().date()
+def period_bounds(period, material_date=None):
+    if material_date:
+        try:
+            today = datetime.strptime(canonical_material_date(material_date), "%Y-%m-%d").date()
+        except Exception:
+            today = taipei_now().date()
+    else:
+        today = taipei_now().date()
     period = normalize_rule_period(period)
     if period == "weekly":
         start = today - timedelta(days=today.weekday())
@@ -2841,8 +2847,8 @@ def period_bounds(period):
     return start.isoformat(), end.isoformat()
 
 
-def vocab_rule_used_count(rule_key, period):
-    start, end = period_bounds(period)
+def vocab_rule_used_count(rule_key, period, material_date=None):
+    start, end = period_bounds(period, material_date)
     ensure_vocab_rules_store()
     if DATABASE_URL:
         with get_db_connection() as conn:
@@ -2865,7 +2871,7 @@ def vocab_rule_used_count(rule_key, period):
     return int(row["count"] if row else 0)
 
 
-def build_vocab_rules_payload(create_missing=False):
+def build_vocab_rules_payload(create_missing=False, material_date=None):
     discovered = scan_vocab_rule_types()
     stored = {
         row["rule_key"]: row
@@ -2893,7 +2899,7 @@ def build_vocab_rules_payload(create_missing=False):
         rule = {**base, **stored.get(key, {})}
         rule["available_count"] = int((discovered.get(key) or {}).get("available_count", rule.get("available_count", 0)) or 0)
         rule["is_new_detected_type"] = key not in stored
-        used = vocab_rule_used_count(rule["rule_key"], rule.get("period", "daily"))
+        used = vocab_rule_used_count(rule["rule_key"], rule.get("period", "daily"), material_date)
         quota = int(rule.get("quota_count", 0) or 0)
         rule["used_count"] = used
         rule["remaining_count"] = max(0, quota - used) if quota > 0 else None
@@ -2910,9 +2916,9 @@ def build_vocab_rules_payload(create_missing=False):
     return {"groups": groups}
 
 
-def load_vocab_rule_context():
+def load_vocab_rule_context(material_date=None):
     try:
-        payload = build_vocab_rules_payload(create_missing=False)
+        payload = build_vocab_rules_payload(create_missing=False, material_date=material_date)
         rules = {}
         for group in payload.get("groups", []):
             for rule in group.get("rules", []):
@@ -4100,6 +4106,45 @@ def item_normalized_key(item):
     return ""
 
 
+def get_recent_used_normalized_keys(days=14, material_date=None, include_all_versions=True):
+    try:
+        day_count = max(0, int(days or 0))
+    except (TypeError, ValueError):
+        day_count = 14
+    if day_count <= 0:
+        return set()
+    try:
+        end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
+    except Exception:
+        end_date = taipei_now().date()
+    start_date = end_date - timedelta(days=day_count - 1)
+    start, end = start_date.isoformat(), end_date.isoformat()
+    ensure_vocab_rules_store()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT normalized_key
+                    FROM vocab_selection_logs
+                    WHERE material_date BETWEEN %s AND %s
+                      AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                    """,
+                    (start, end),
+                )
+                return {normalize_vocab_key(row[0]) for row in cur.fetchall() if row and row[0]}
+    rowset = sqlite_dicts(
+        """
+        SELECT DISTINCT normalized_key
+        FROM vocab_selection_logs
+        WHERE material_date BETWEEN ? AND ?
+          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+        """,
+        (start, end),
+    )
+    return {normalize_vocab_key(row.get("normalized_key")) for row in rowset if row.get("normalized_key")}
+
+
 def jlpt_level_rank(level):
     try:
         return int(str(level or "").upper().replace("N", ""))
@@ -4605,7 +4650,7 @@ def can_select_vocab_by_rules(item, rule_context, selected_rule_counts):
         source_type = rule.get("source_type") or rule.get("group_key")
         if not enabled and strict:
             return False, f"disabled_strict:{rule_key}", matches
-        hard_quota = source_type == "jlpt_level" or strict
+        hard_quota = source_type in {"jlpt_level", "category"} or strict
         if enabled and hard_quota and quota > 0 and used + selected_count >= quota:
             return False, f"period_quota_reached:{rule_key}", matches
         if enabled and strict and quota == 0:
@@ -4621,16 +4666,22 @@ def vocab_rule_priority(item, rule_context):
     return max(enabled_priorities) if enabled_priorities else 50
 
 
-def record_vocab_selection_logs(items, selected_for="word"):
+def record_vocab_selection_logs(items, selected_for="word", material_date=None, material_key=None, material_version_no=None):
     rows = []
-    material_date = today_iso_date()
+    material_date = canonical_material_date(material_date or get_today_taipei_date())
     now = utc_now_iso()
     for item in items:
-        rule_keys = item.get("_matched_rule_keys") or []
+        rule_keys = list(item.get("_matched_rule_keys") or [])
+        if not rule_keys:
+            values = item_rule_values(item)
+            for source_type in ("jlpt_level", "category"):
+                value = values.get(source_type)
+                if value:
+                    rule_keys.append(make_vocab_rule_key(source_type, value))
         if not rule_keys:
             continue
         values = item_rule_values(item)
-        for rule_key in rule_keys:
+        for rule_key in sorted(set(rule_keys)):
             source_type, match_value = rule_key.split(":", 1) if ":" in rule_key else ("custom", rule_key)
             rows.append(
                 {
@@ -4649,6 +4700,8 @@ def record_vocab_selection_logs(items, selected_for="word"):
                     "quality": clean_rule_match_value(first_text(item, ["quality"])),
                     "part_of_speech": clean_rule_match_value(first_text(item, ["part_of_speech", "pos"])),
                     "selected_for": selected_for,
+                    "material_key": material_key or "",
+                    "material_version_no": material_version_no,
                     "created_at": now,
                 }
             )
@@ -4663,9 +4716,9 @@ def record_vocab_selection_logs(items, selected_for="word"):
                     INSERT INTO vocab_selection_logs (
                         material_date, vocabulary_id, surface, base_form, normalized_key, rule_key,
                         group_key, source_type, match_value, category, jlpt_level, source,
-                        quality, part_of_speech, selected_for, created_at
+                        quality, part_of_speech, selected_for, material_key, material_version_no, created_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     [
                         (
@@ -4684,6 +4737,8 @@ def record_vocab_selection_logs(items, selected_for="word"):
                             row["quality"],
                             row["part_of_speech"],
                             row["selected_for"],
+                            row["material_key"],
+                            row["material_version_no"],
                             row["created_at"],
                         )
                         for row in rows
@@ -4697,11 +4752,11 @@ def record_vocab_selection_logs(items, selected_for="word"):
             INSERT INTO vocab_selection_logs (
                 material_date, vocabulary_id, surface, base_form, normalized_key, rule_key,
                 group_key, source_type, match_value, category, jlpt_level, source,
-                quality, part_of_speech, selected_for, created_at
+                quality, part_of_speech, selected_for, material_key, material_version_no, created_at
             )
             VALUES (:material_date, :vocabulary_id, :surface, :base_form, :normalized_key, :rule_key,
                 :group_key, :source_type, :match_value, :category, :jlpt_level, :source,
-                :quality, :part_of_speech, :selected_for, :created_at)
+                :quality, :part_of_speech, :selected_for, :material_key, :material_version_no, :created_at)
             """,
             rows,
         )
@@ -4805,7 +4860,7 @@ def category_rule_available(rule, selected_rule_counts):
     return True
 
 
-def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, return_stats=False):
+def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
     started = time.perf_counter()
     stats = {
         "selection_strategy": "jlpt_first_category_second",
@@ -4818,22 +4873,33 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
         "candidate_counts": {},
         "selected_rule_counts": {},
         "rule_remaining_after_generation": {},
+        "rejected_recent_duplicate_count": 0,
+        "rejected_by_category_quota": {},
+        "cooldown_days_used": 14,
         "generation_elapsed_ms": 0,
     }
     if limit <= 0:
         return ([], stats) if return_stats else []
 
     target = settings.get("target_level", "")
-    rule_context = load_vocab_rule_context()
+    rule_context = load_vocab_rule_context(material_date=material_date)
     rules = rule_context.get("rules", {})
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     selected_rule_counts = {}
     rejected_log_count = 0
     quota_log_count = 0
-    today = taipei_now().date()
+    recent_keys_by_days = {
+        14: get_recent_used_normalized_keys(14, material_date=material_date),
+        7: get_recent_used_normalized_keys(7, material_date=material_date),
+        3: get_recent_used_normalized_keys(3, material_date=material_date),
+    }
+    try:
+        today = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
+    except Exception:
+        today = taipei_now().date()
 
-    def select_from_rows(rows, source_stage):
+    def select_from_rows(rows, source_stage, cooldown_days):
         nonlocal rejected_log_count, quota_log_count
         for row in rows:
             if len(selected) >= limit:
@@ -4854,23 +4920,30 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
                 continue
             key = item_normalized_key(item)
             if not key or key in selected_keys:
+                if key:
+                    stats["rejected_recent_duplicate_count"] += 1
                 continue
-            try:
-                cooldown_days = max(0, int(row.get("cooldown_days", 14) or 14))
-            except (TypeError, ValueError):
-                cooldown_days = 14
+            if cooldown_days > 0 and key in recent_keys_by_days.get(cooldown_days, set()):
+                stats["rejected_recent_duplicate_count"] += 1
+                continue
             last_used = parse_loose_date(first_text(row, ["last_used_at", "last_seen_at"]))
-            if last_used and (today - last_used).days < cooldown_days:
+            if cooldown_days > 0 and last_used and (today - last_used).days < cooldown_days:
+                stats["rejected_recent_duplicate_count"] += 1
                 continue
             can_select, reason, matches = can_select_vocab_by_rules(item, rule_context, selected_rule_counts)
             if not can_select:
                 stats["rejected_by_rule_count"] += 1
                 if "quota" in reason:
                     stats["rejected_by_quota_count"] += 1
+                if "category:" in reason:
+                    category_rule = reason.split(":", 1)[1]
+                    stats["rejected_by_category_quota"][category_rule] = stats["rejected_by_category_quota"].get(category_rule, 0) + 1
                 if quota_log_count < 20:
                     quota_log_count += 1
                     print(f"[vocab-rules] rejected surface={item.get('word')} reason={reason}")
                 continue
+            if cooldown_days != 14:
+                stats["cooldown_days_used"] = min(stats.get("cooldown_days_used", 14), cooldown_days)
             selected_keys.add(key)
             item["_matched_rule_keys"] = [rule["rule_key"] for rule in matches]
             selected.append(item)
@@ -4883,11 +4956,14 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
 
     level_order = JLPT_ADJACENCY.get(target, [target] if target else [])
     per_level_limit = max(limit * 20, 120)
-    for level in level_order:
+    for cooldown_days in (14, 7, 3):
         if len(selected) >= limit:
             break
-        rows = fetch_vocabulary_pool_candidates(jlpt_levels=[level], limit=per_level_limit)
-        select_from_rows(rows, "jlpt")
+        for level in level_order:
+            if len(selected) >= limit:
+                break
+            rows = fetch_vocabulary_pool_candidates(jlpt_levels=[level], limit=per_level_limit)
+            select_from_rows(rows, "jlpt", cooldown_days)
 
     if len(selected) < limit:
         allowed_categories = []
@@ -4901,8 +4977,11 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
                 allowed_categories.append(value)
         allowed_categories = sorted(set(allowed_categories), key=lambda value: -int((rules.get(make_vocab_rule_key("category", value)) or {}).get("priority", 0) or 0))
         if allowed_categories:
-            rows = fetch_vocabulary_pool_candidates(categories=allowed_categories, limit=max((limit - len(selected)) * 30, 160))
-            select_from_rows(rows, "category")
+            for cooldown_days in (14, 7, 3):
+                if len(selected) >= limit:
+                    break
+                rows = fetch_vocabulary_pool_candidates(categories=allowed_categories, limit=max((limit - len(selected)) * 30, 160))
+                select_from_rows(rows, "category", cooldown_days)
 
     if stats["rejected_low_quality_count"] > rejected_log_count:
         print(f"[vocab-selector] rejected_low_quality_count={stats['rejected_low_quality_count']}")
@@ -4910,7 +4989,6 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
         print(f"[vocab-rules] rejected_by_quota_count={stats['rejected_by_quota_count']}")
 
     selected = selected[:limit]
-    record_vocab_selection_logs(selected, selected_for="word")
     mark_vocabulary_pool_used(selected)
     for item in selected:
         group = vocab_category_group(item)
@@ -4929,7 +5007,9 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
     print(
         "[vocab-selector] selected_by_jlpt count="
         f"{stats['selected_by_jlpt_count']} selected_by_category count={stats['selected_by_category_count']} "
-        f"elapsed_ms={stats['generation_elapsed_ms']}"
+        f"seed_fallback_count=0 rejected_recent_duplicate={stats['rejected_recent_duplicate_count']} "
+        f"rejected_by_category_quota={stats['rejected_by_category_quota']} "
+        f"cooldown_days_used={stats['cooldown_days_used']} elapsed_ms={stats['generation_elapsed_ms']}"
     )
     return (selected, stats) if return_stats else selected
 
@@ -5719,38 +5799,49 @@ LOCAL_SEED_VERBS = [
 ]
 
 
-def material_seed_vocab(settings, limit):
+def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
     if limit <= 0:
         return []
     seed = load_basic_seed_vocab_items(settings) + list(sample_material(settings).get("vocab", [])) + LOCAL_SEED_VOCAB
-    items = []
-    seen = set()
-    for item in seed:
+    selected = []
+    seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    recent_keys_by_days = {
+        14: get_recent_used_normalized_keys(14, material_date=material_date),
+        7: get_recent_used_normalized_keys(7, material_date=material_date),
+        3: get_recent_used_normalized_keys(3, material_date=material_date),
+    }
+
+    def normalized_seed_item(item):
         word = first_text(item, ["word", "surface", "base_form"]).strip()
-        if not word or word in seen:
-            continue
-        seen.add(word)
-        items.append(
-            {
-                "word": word,
-                "reading": first_text(item, ["reading", "reading_hiragana"]),
-                "meaning": first_text(item, ["meaning", "meaning_zh"]),
-                "part_of_speech": first_text(item, ["part_of_speech", "pos"]),
-                "jlpt_level": first_text(item, ["jlpt_level"]) or settings.get("target_level", ""),
-                "category": first_text(item, ["category"]) or "general",
-                "quality": first_text(item, ["quality"]) or "core",
-                "normalized_key": normalize_vocab_key(item.get("normalized_key") or item.get("base_form") or word),
-                "example_sentence": item.get("example_sentence", ""),
-                "example_translation_zh": item.get("example_translation_zh", ""),
-                "source": first_text(item, ["source"]) or "seed",
-            }
-        )
-        if len(items) >= limit:
-            return items
-    base_items = list(items)
-    while len(items) < limit and base_items:
-        items.append(dict(base_items[len(items) % len(base_items)]))
-    return items[:limit]
+        if not word:
+            return None
+        return {
+            "word": word,
+            "reading": first_text(item, ["reading", "reading_hiragana"]),
+            "meaning": first_text(item, ["meaning", "meaning_zh"]),
+            "part_of_speech": first_text(item, ["part_of_speech", "pos"]),
+            "jlpt_level": first_text(item, ["jlpt_level"]) or settings.get("target_level", ""),
+            "category": first_text(item, ["category"]) or "general",
+            "quality": first_text(item, ["quality"]) or "core",
+            "normalized_key": normalize_vocab_key(item.get("normalized_key") or item.get("base_form") or word),
+            "example_sentence": item.get("example_sentence", ""),
+            "example_translation_zh": item.get("example_translation_zh", ""),
+            "source": first_text(item, ["source"]) or "seed_basic",
+        }
+
+    seed_items = [item for item in (normalized_seed_item(raw) for raw in seed) if item]
+    for cooldown_days in (14, 7, 3, 0):
+        for item in seed_items:
+            if len(selected) >= limit:
+                return selected
+            key = item_normalized_key(item)
+            if not key or key in seen:
+                continue
+            if cooldown_days > 0 and key in recent_keys_by_days.get(cooldown_days, set()):
+                continue
+            seen.add(key)
+            selected.append(dict(item))
+    return selected[:limit]
 
 
 def merge_vocab_selector_stats(target, source):
@@ -5759,6 +5850,7 @@ def merge_vocab_selector_stats(target, source):
     target["rejected_low_quality_count"] = target.get("rejected_low_quality_count", 0) + source.get("rejected_low_quality_count", 0)
     target["rejected_by_rule_count"] = target.get("rejected_by_rule_count", 0) + source.get("rejected_by_rule_count", 0)
     target["rejected_by_quota_count"] = target.get("rejected_by_quota_count", 0) + source.get("rejected_by_quota_count", 0)
+    target["rejected_recent_duplicate_count"] = target.get("rejected_recent_duplicate_count", 0) + source.get("rejected_recent_duplicate_count", 0)
     target["selected_by_jlpt_count"] = target.get("selected_by_jlpt_count", 0) + source.get("selected_by_jlpt_count", 0)
     target["selected_by_category_count"] = target.get("selected_by_category_count", 0) + source.get("selected_by_category_count", 0)
     target["generation_elapsed_ms"] = target.get("generation_elapsed_ms", 0) + source.get("generation_elapsed_ms", 0)
@@ -5768,6 +5860,10 @@ def merge_vocab_selector_stats(target, source):
             target[key][name] = target[key].get(name, 0) + count
     target.setdefault("rule_remaining_after_generation", {})
     target["rule_remaining_after_generation"].update(source.get("rule_remaining_after_generation") or {})
+    target.setdefault("rejected_by_category_quota", {})
+    for name, count in (source.get("rejected_by_category_quota") or {}).items():
+        target["rejected_by_category_quota"][name] = target["rejected_by_category_quota"].get(name, 0) + count
+    target["cooldown_days_used"] = min(target.get("cooldown_days_used", 14), source.get("cooldown_days_used", 14))
     return target
 
 
@@ -6233,6 +6329,9 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "candidate_counts": {},
         "selected_rule_counts": {},
         "rule_remaining_after_generation": {},
+        "rejected_recent_duplicate_count": 0,
+        "rejected_by_category_quota": {},
+        "cooldown_days_used": 14,
         "generation_elapsed_ms": 0,
     }
     seed_used = False
@@ -6248,7 +6347,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     if force_seed:
         vocab = []
     else:
-        vocab, pool_stats = material_vocab_from_vocabulary_pool(settings, base_quota, return_stats=True)
+        vocab, pool_stats = material_vocab_from_vocabulary_pool(settings, base_quota, return_stats=True, material_date=material_date or get_today_taipei_date())
         merge_vocab_selector_stats(vocab_selector_stats, pool_stats)
     vocab, duplicates, selected_keys = dedupe_vocab_items(vocab)
     duplicate_filtered_count += duplicates
@@ -6262,7 +6361,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     vocab.extend(slang_vocab)
 
     if len(vocab) < vocab_count:
-        seed_items = material_seed_vocab(settings, vocab_count - len(vocab))
+        seed_items = material_seed_vocab(settings, vocab_count - len(vocab), exclude_keys=selected_keys, material_date=material_date or get_today_taipei_date())
         seed_items, duplicates, selected_keys = dedupe_vocab_items(seed_items, selected_keys)
         duplicate_filtered_count += duplicates
         vocab.extend(seed_items)
@@ -6345,12 +6444,17 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "rejected_low_quality_count": vocab_selector_stats.get("rejected_low_quality_count", 0),
         "rejected_by_rule_count": vocab_selector_stats.get("rejected_by_rule_count", 0),
         "rejected_by_quota_count": vocab_selector_stats.get("rejected_by_quota_count", 0),
+        "rejected_by_category_quota": vocab_selector_stats.get("rejected_by_category_quota", {}),
         "general_count": category_counts.get("general", 0),
         "business_count": category_counts.get("business", 0),
         "advanced_count": category_counts.get("advanced", 0),
         "sns_count": category_counts.get("sns", 0),
         "selected_normalized_keys": selected_normalized_keys,
         "duplicate_filtered_count": duplicate_filtered_count,
+        "duplicate_filter": {
+            "cooldown_days": vocab_selector_stats.get("cooldown_days_used", 14),
+            "rejected_recent_duplicate_count": vocab_selector_stats.get("rejected_recent_duplicate_count", 0),
+        },
         "selected_verb_keys": selected_verb_keys,
         "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
         "verb_source_summary": verb_source_summary,
@@ -6576,6 +6680,17 @@ def save_material_for_date(material_date, material, settings, generation_source=
                 cur.execute("UPDATE materials SET is_latest = FALSE WHERE material_date = %s", (date_iso,))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
+        try:
+            record_vocab_selection_logs(
+                vocab_list,
+                selected_for="word",
+                material_date=date_iso,
+                material_key=material_key,
+                material_version_no=version_no,
+            )
+        except Exception as exc:
+            print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
+            print(traceback.format_exc())
         invalidate_archive_dates_cache("daily material saved")
         return {
             "date": date,
@@ -6591,6 +6706,17 @@ def save_material_for_date(material_date, material, settings, generation_source=
     df.loc[df["material_date"] == date_iso, "is_latest"] = "false"
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
+    try:
+        record_vocab_selection_logs(
+            vocab_list,
+            selected_for="word",
+            material_date=date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+    except Exception as exc:
+        print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
+        print(traceback.format_exc())
     invalidate_archive_dates_cache("daily material saved")
     return {
         "date": date,
