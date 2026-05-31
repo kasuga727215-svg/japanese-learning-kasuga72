@@ -435,6 +435,10 @@
     return `${now.getFullYear()}/${now.getMonth() + 1}/${now.getDate()}`;
   }
 
+  function isMaterialKey(value) {
+    return /^\d{4}-\d{2}-\d{2}-\d+$/.test(String(value || ""));
+  }
+
   function recentSevenDaysFallback() {
     const days = [];
     const now = new Date();
@@ -535,8 +539,10 @@
 
   window.onload = async () => {
     const bootStarted = performance.now();
+    const params = new URLSearchParams(window.location.search);
+    const initialMaterialKey = params.get("material_key");
     const archivePromise = loadArchiveList().catch(() => {});
-    const materialPromise = loadDaily().catch(() => {
+    const materialPromise = (initialMaterialKey ? loadMaterialByDate(initialMaterialKey) : loadDaily()).catch(() => {
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
       document.getElementById("content-loader").style.display = "block";
     });
@@ -757,7 +763,7 @@
       const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify({...currentSettings(), mode: generationMode}) });
       msg.className = "mt-3 success-text";
       msg.innerText = result.message;
-      await loadMaterialByDate(result.date);
+      await loadMaterialByDate(result.material_key || result.date || result.material_date);
       invalidateArchiveDatesCache();
       await loadArchiveList(true);
       await loadDashboard();
@@ -789,10 +795,27 @@
     }
   }
 
-  function renderArchiveList(dates) {
+  function renderArchiveList(payload) {
     const select = document.getElementById("dateSelect");
     select.innerHTML = '<option value="">選擇歷史日期</option>';
-    dates.forEach(date => select.add(new Option(date, date)));
+    const groups = Array.isArray(payload) ? payload : (payload?.dates || []);
+    groups.forEach(item => {
+      if (typeof item === "string") {
+        select.add(new Option(item, item));
+        return;
+      }
+      const versions = item.versions || [];
+      if (!versions.length) {
+        select.add(new Option(item.display_date || item.material_date, item.latest_material_key || item.material_date));
+        return;
+      }
+      versions.forEach(version => {
+        const label = version.display_label || `${item.display_date || item.material_date} -- ${version.version_no || ""}`;
+        const option = new Option(label, version.material_key || item.material_date);
+        option.dataset.materialKey = version.material_key || "";
+        select.add(option);
+      });
+    });
   }
 
   async function loadArchiveList(force = false) {
@@ -805,11 +828,11 @@
     const started = performance.now();
     select.innerHTML = '<option value="">歷史日期載入中...</option>';
     try {
-      const dates = await api("/api/archive-dates");
-      archiveDatesCache = { dates, expiresAt: Date.now() + ARCHIVE_DATES_CACHE_MS };
-      renderArchiveList(dates);
+      const payload = await api("/api/archive-dates");
+      archiveDatesCache = { dates: payload, expiresAt: Date.now() + ARCHIVE_DATES_CACHE_MS };
+      renderArchiveList(payload);
       perfLog("archive_dates", started);
-      return dates;
+      return payload;
     } catch (error) {
       select.innerHTML = '<option value="">暫時無法載入</option>';
       perfLog("archive_dates_failed", started);
@@ -839,7 +862,7 @@
     const stats = getTodayQuizStats();
     document.getElementById("dash-material").innerText = hasMaterial ? "已生成" : "尚未生成";
     document.getElementById("dash-material-note").innerText = hasMaterial
-      ? `${material.date || data.today || todayDisplay()}｜${material.target_level || data.target_level || ""}｜${material.word_count ?? data.vocab_count ?? 0} 個單字、${material.verb_count ?? data.verb_count ?? 0} 個動詞`
+      ? `${material.date || data.today || todayDisplay()}${material.version_no ? ` -- ${material.version_no}` : ""}｜${material.target_level || data.target_level || ""}｜${material.word_count ?? data.vocab_count ?? 0} 個單字、${material.verb_count ?? data.verb_count ?? 0} 個動詞${material.version_count ? `｜今日 ${material.version_count} 份版本` : ""}`
       : (data.dashboard_warning || "請到控制中心建立今日教材");
     const quizCompleted = stats.completed || quiz.completed || 0;
     const quizTotal = stats.total || quiz.total || data.quiz_total || 10;
@@ -867,18 +890,29 @@
     perfLog("material", started);
   }
 
-  async function loadMaterialByDate(date) {
+  async function loadMaterialByDate(dateOrKey) {
     showTab(null, "tab-daily");
     document.getElementById("content-loader").innerHTML = "正在讀取剛生成的學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
-    renderMaterial(await api(`/api/materials?date=${encodeURIComponent(date)}`));
+    const query = isMaterialKey(dateOrKey)
+      ? `material_key=${encodeURIComponent(dateOrKey)}`
+      : `date=${encodeURIComponent(dateOrKey)}`;
+    const data = await api(`/api/materials?${query}`);
+    if (data?.material_key && window.history?.replaceState) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("material_key", data.material_key);
+      window.history.replaceState({}, "", url.toString());
+    }
+    renderMaterial(data);
   }
 
   async function loadSpecificDate() {
-    const date = document.getElementById("dateSelect").value;
-    if (!date) return;
-    renderMaterial(await api(`/api/materials?date=${encodeURIComponent(date)}`));
+    const select = document.getElementById("dateSelect");
+    const value = select.value;
+    if (!value) return;
+    const materialKey = select.selectedOptions[0]?.dataset?.materialKey || "";
+    await loadMaterialByDate(materialKey || value);
   }
 
   function renderGrammarPoints(points) {

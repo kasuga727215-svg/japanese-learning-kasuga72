@@ -402,7 +402,12 @@ COLUMNS = [
     "grammar_exp",
     "grammar_examples",
     "material_json",
+    "material_key",
+    "material_date",
+    "version_no",
+    "generation_source",
     "generation_mode",
+    "is_latest",
     "ai_used",
     "source_summary",
     "created_at",
@@ -479,6 +484,14 @@ def material_date_display(value):
 def material_date_iso(value):
     parsed = parse_material_date(value)
     return parsed.isoformat() if parsed else ""
+
+
+def canonical_material_date(value=None):
+    return material_date_iso(value) or today_iso_date()
+
+
+def build_material_key(material_date, version_no):
+    return f"{canonical_material_date(material_date)}-{int(version_no or 1)}"
 
 
 def material_date_variants(value):
@@ -966,16 +979,24 @@ def migrate_vocab_rules_sqlite(conn):
             source TEXT,
             quality TEXT,
             part_of_speech TEXT,
+            material_key TEXT,
+            material_version_no INTEGER,
             selected_for TEXT,
             created_at TEXT
         )
         """
     )
+    vocab_log_columns = {row[1] for row in conn.execute("PRAGMA table_info(vocab_selection_logs)").fetchall()}
+    if "material_key" not in vocab_log_columns:
+        conn.execute("ALTER TABLE vocab_selection_logs ADD COLUMN material_key TEXT")
+    if "material_version_no" not in vocab_log_columns:
+        conn.execute("ALTER TABLE vocab_selection_logs ADD COLUMN material_version_no INTEGER")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_rule_key ON vocab_appearance_rules(rule_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_group_key ON vocab_appearance_rules(group_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_date ON vocab_selection_logs(material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_rule_date ON vocab_selection_logs(rule_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
 
@@ -1830,16 +1851,24 @@ def migrate_grammar_points_sqlite(conn):
             grammar_key TEXT,
             jlpt_level TEXT,
             grammar_type TEXT,
+            material_key TEXT,
+            material_version_no INTEGER,
             created_at TEXT
         )
         """
     )
+    grammar_log_columns = {row[1] for row in conn.execute("PRAGMA table_info(grammar_selection_logs)").fetchall()}
+    if "material_key" not in grammar_log_columns:
+        conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN material_key TEXT")
+    if "material_version_no" not in grammar_log_columns:
+        conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN material_version_no INTEGER")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_material_key ON grammar_selection_logs(material_key)")
     seed_grammar_points_sqlite(conn)
 
 
@@ -3141,16 +3170,21 @@ def migrate_vocab_rules_postgres():
                     source TEXT,
                     quality TEXT,
                     part_of_speech TEXT,
+                    material_key TEXT,
+                    material_version_no INTEGER,
                     selected_for TEXT,
                     created_at TIMESTAMPTZ
                 )
                 """
             )
+            cur.execute("ALTER TABLE vocab_selection_logs ADD COLUMN IF NOT EXISTS material_key TEXT")
+            cur.execute("ALTER TABLE vocab_selection_logs ADD COLUMN IF NOT EXISTS material_version_no INTEGER")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_rule_key ON vocab_appearance_rules(rule_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_group_key ON vocab_appearance_rules(group_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_date ON vocab_selection_logs(material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_rule_date ON vocab_selection_logs(rule_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
         conn.commit()
@@ -3229,16 +3263,21 @@ def migrate_grammar_points_postgres():
                     grammar_key TEXT,
                     jlpt_level TEXT,
                     grammar_type TEXT,
+                    material_key TEXT,
+                    material_version_no INTEGER,
                     created_at TIMESTAMPTZ
                 )
                 """
             )
+            cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS material_key TEXT")
+            cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS material_version_no INTEGER")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_material_key ON grammar_selection_logs(material_key)")
             seed_grammar_points_postgres(cur)
         conn.commit()
 
@@ -3269,6 +3308,132 @@ def ensure_grammar_points_store():
         migrate_grammar_points_postgres()
     else:
         ensure_settings_store()
+
+
+def material_version_columns():
+    return {
+        "material_key": "TEXT DEFAULT ''",
+        "material_date": "DATE",
+        "version_no": "INTEGER DEFAULT 1",
+        "generation_source": "TEXT DEFAULT ''",
+        "is_latest": "BOOLEAN DEFAULT TRUE",
+        "updated_at": "TIMESTAMPTZ",
+    }
+
+
+def migrate_material_versions_postgres(cur):
+    for column, column_type in material_version_columns().items():
+        cur.execute(f"ALTER TABLE materials ADD COLUMN IF NOT EXISTS {column} {column_type}")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_material_date ON materials(material_date)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_material_key ON materials(material_key)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_date_latest ON materials(material_date, is_latest)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_date_version ON materials(material_date, version_no)")
+    cur.execute(
+        """
+        SELECT id, date, material_date, version_no, material_key, material_json, created_at
+        FROM materials
+        ORDER BY COALESCE(created_at, NOW()), id
+        """
+    )
+    rows = cur.fetchall()
+    version_state = {}
+    current_version = {}
+    for row in rows:
+        row_id, date_value, material_date_value, version_value, key_value, material_json_value, _created_at = row
+        date_iso = canonical_material_date(material_date_value or date_value)
+        has_existing_version = str(version_value or "").strip().isdigit()
+        has_existing_key = bool(str(key_value or "").strip())
+        if has_existing_version and has_existing_key and material_date_value:
+            version_no = int(version_value)
+            version_state[date_iso] = max(version_state.get(date_iso, 0), version_no)
+            current_version[date_iso] = max(current_version.get(date_iso, 0), version_no)
+            continue
+        if str(material_json_value or "").strip() or date_iso not in current_version:
+            version_no = version_state.get(date_iso, 0) + 1
+            version_state[date_iso] = version_no
+            current_version[date_iso] = version_no
+        else:
+            version_no = current_version[date_iso]
+        material_key = build_material_key(date_iso, version_no)
+        cur.execute(
+            """
+            UPDATE materials
+            SET material_date = %s,
+                version_no = %s,
+                material_key = %s,
+                generation_source = COALESCE(NULLIF(generation_source, ''), 'migration'),
+                generation_mode = COALESCE(NULLIF(generation_mode, ''), 'local'),
+                updated_at = COALESCE(NULLIF(updated_at::text, ''), %s)
+            WHERE id = %s
+            """,
+            (date_iso, version_no, material_key, utc_now_iso(), row_id),
+        )
+    cur.execute("UPDATE materials SET is_latest = FALSE WHERE material_date IS NOT NULL")
+    cur.execute(
+        """
+        WITH latest AS (
+            SELECT material_date, MAX(version_no) AS max_version
+            FROM materials
+            WHERE material_date IS NOT NULL
+            GROUP BY material_date
+        )
+        UPDATE materials AS m
+        SET is_latest = TRUE
+        FROM latest
+        WHERE m.material_date = latest.material_date
+          AND m.version_no = latest.max_version
+        """
+    )
+
+
+def ensure_material_version_columns_df(df):
+    df = df.copy()
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+    version_state = {}
+    current_version = {}
+    for index, row in df.iterrows():
+        date_iso = canonical_material_date(row.get("material_date") or row.get("date"))
+        existing_version = str(row.get("version_no", "") or "").strip()
+        existing_key = str(row.get("material_key", "") or "").strip()
+        if existing_version.isdigit() and existing_key and str(row.get("material_date", "") or "").strip():
+            version_no = int(existing_version)
+            version_state[date_iso] = max(version_state.get(date_iso, 0), version_no)
+            current_version[date_iso] = max(current_version.get(date_iso, 0), version_no)
+            continue
+        if str(row.get("material_json", "") or "").strip() or date_iso not in current_version:
+            version_no = version_state.get(date_iso, 0) + 1
+            version_state[date_iso] = version_no
+            current_version[date_iso] = version_no
+        else:
+            version_no = current_version[date_iso]
+        df.at[index, "material_date"] = date_iso
+        df.at[index, "version_no"] = str(version_no)
+        df.at[index, "material_key"] = build_material_key(date_iso, version_no)
+        if not str(row.get("generation_source", "") or "").strip():
+            df.at[index, "generation_source"] = "migration"
+        if not str(row.get("generation_mode", "") or "").strip():
+            df.at[index, "generation_mode"] = "local"
+    if not df.empty:
+        df["is_latest"] = "false"
+        latest = {}
+        for _, row in df.iterrows():
+            date_iso = canonical_material_date(row.get("material_date") or row.get("date"))
+            try:
+                version_no = int(row.get("version_no") or 1)
+            except (TypeError, ValueError):
+                version_no = 1
+            latest[date_iso] = max(latest.get(date_iso, 0), version_no)
+        for index, row in df.iterrows():
+            date_iso = canonical_material_date(row.get("material_date") or row.get("date"))
+            try:
+                version_no = int(row.get("version_no") or 1)
+            except (TypeError, ValueError):
+                version_no = 1
+            if latest.get(date_iso) == version_no:
+                df.at[index, "is_latest"] = "true"
+    return df[COLUMNS]
 
 
 def ensure_database():
@@ -3311,11 +3476,15 @@ def _ensure_database_uncached():
                     )
                     """
                 )
+                typed_material_columns = material_version_columns()
+                for col, column_type in typed_material_columns.items():
+                    cur.execute(f"ALTER TABLE materials ADD COLUMN IF NOT EXISTS {col} {column_type}")
                 for col in COLUMNS:
-                    if col not in ("date",):
+                    if col not in ("date", *typed_material_columns.keys()):
                         cur.execute(f"ALTER TABLE materials ADD COLUMN IF NOT EXISTS {col} TEXT DEFAULT ''")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_date ON materials(date)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_materials_created_at ON materials(created_at)")
+                migrate_material_versions_postgres(cur)
             conn.commit()
         migrate_slang_candidates_postgres()
         migrate_vocabulary_pool_postgres()
@@ -3325,6 +3494,10 @@ def _ensure_database_uncached():
 
     if not os.path.exists(DATABASE_FILE):
         pd.DataFrame(columns=COLUMNS).to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig")
+    else:
+        df = pd.read_csv(DATABASE_FILE, dtype=str, keep_default_na=False, encoding="utf-8-sig")
+        migrated = ensure_material_version_columns_df(df)
+        migrated.to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
 
 
 def read_database():
@@ -3337,14 +3510,80 @@ def read_database():
         return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
 
     df = pd.read_csv(DATABASE_FILE, dtype=str, keep_default_na=False, encoding="utf-8-sig")
-    for col in COLUMNS:
-        if col not in df.columns:
-            df[col] = ""
-    return df[COLUMNS]
+    return ensure_material_version_columns_df(df)
+
+
+def material_version_sort_value(row):
+    try:
+        version_no = int(row.get("version_no") or 0)
+    except (TypeError, ValueError):
+        version_no = 0
+    return version_no
+
+
+def read_material_rows_by_key(material_key):
+    ensure_database()
+    key = str(material_key or "").strip()
+    if not key:
+        return pd.DataFrame(columns=COLUMNS)
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT {', '.join(COLUMNS)} FROM materials WHERE material_key = %s ORDER BY id",
+                    (key,),
+                )
+                rows = cur.fetchall()
+        return pd.DataFrame(rows, columns=COLUMNS).astype(str) if rows else pd.DataFrame(columns=COLUMNS)
+    df = read_database()
+    return df[df["material_key"] == key]
+
+
+def latest_material_key_for_date(target_date, generation_source=None):
+    ensure_database()
+    date_iso = canonical_material_date(target_date)
+    variants = material_date_variants(date_iso)
+    source = str(generation_source or "").strip()
+    if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(variants))
+        source_sql = " AND generation_source = %s" if source else ""
+        params = [date_iso, *variants]
+        if source:
+            params.append(source)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT material_key
+                    FROM materials
+                    WHERE (material_date = %s OR date IN ({placeholders}))
+                      AND COALESCE(material_key, '') <> ''
+                      {source_sql}
+                    ORDER BY is_latest DESC, version_no DESC, created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    tuple(params),
+                )
+                row = cur.fetchone()
+        return row[0] if row else ""
+    df = read_database()
+    rows = df[(df["material_date"].isin([date_iso])) | (df["date"].isin(variants))]
+    if source:
+        rows = rows[rows["generation_source"].astype(str) == source]
+    if rows.empty:
+        return ""
+    rows = rows.copy()
+    rows["_version_sort"] = rows.apply(material_version_sort_value, axis=1)
+    rows["_latest_sort"] = rows["is_latest"].astype(str).str.lower().isin(["true", "1", "t", "yes"]).astype(int)
+    rows = rows.sort_values(["_latest_sort", "_version_sort", "created_at"], ascending=[False, False, False])
+    return str(rows.iloc[0].get("material_key", "") or "")
 
 
 def read_material_rows_by_date(target_date):
     ensure_database()
+    material_key = latest_material_key_for_date(target_date)
+    if material_key:
+        return read_material_rows_by_key(material_key)
     variants = material_date_variants(target_date)
     if DATABASE_URL:
         placeholders = ", ".join(["%s"] * len(variants))
@@ -5893,15 +6132,129 @@ def build_local_material(settings, force_seed=False, material_date=None):
     }
 
 
-def save_material_for_date(material_date, material, settings):
+def get_next_material_version(material_date):
     ensure_database()
-    date = material_date_display(material_date)
+    date_iso = canonical_material_date(material_date)
+    variants = material_date_variants(date_iso)
+    if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(variants))
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT COALESCE(MAX(version_no), 0)
+                    FROM materials
+                    WHERE material_date = %s OR date IN ({placeholders})
+                    """,
+                    (date_iso, *variants),
+                )
+                current = cur.fetchone()[0] or 0
+        return int(current) + 1
+    df = read_database()
+    rows = df[(df["material_date"].isin([date_iso])) | (df["date"].isin(variants))]
+    if rows.empty:
+        return 1
+    versions = []
+    for _, row in rows.iterrows():
+        try:
+            versions.append(int(row.get("version_no") or 0))
+        except (TypeError, ValueError):
+            continue
+    return (max(versions) if versions else 0) + 1
+
+
+def material_versions_for_date(material_date):
+    date_iso = canonical_material_date(material_date)
+    variants = material_date_variants(date_iso)
+    versions = []
+    if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(variants))
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT material_key, material_date, date, version_no, generation_source,
+                           generation_mode, is_latest, created_at
+                    FROM materials
+                    WHERE (material_date = %s OR date IN ({placeholders}))
+                      AND COALESCE(material_key, '') <> ''
+                      AND COALESCE(material_json, '') <> ''
+                    ORDER BY version_no ASC, created_at ASC, id ASC
+                    """,
+                    (date_iso, *variants),
+                )
+                rows = cur.fetchall()
+        for row in rows:
+            key, mat_date, date_value, version_no, source, mode, is_latest, created_at = row
+            display_date = material_date_display(mat_date or date_value)
+            versions.append(
+                {
+                    "material_key": key,
+                    "material_date": canonical_material_date(mat_date or date_value),
+                    "version_no": int(version_no or 1),
+                    "display_label": f"{display_date.split('/', 1)[-1] if display_date.count('/') == 2 else display_date} -- {int(version_no or 1)}",
+                    "generation_source": source or "",
+                    "generation_mode": mode or "",
+                    "is_latest": bool(is_latest),
+                    "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at or ""),
+                }
+            )
+        return versions
+    df = read_database()
+    rows = df[
+        ((df["material_date"].isin([date_iso])) | (df["date"].isin(variants)))
+        & (df["material_key"].astype(str) != "")
+        & (df["material_json"].astype(str) != "")
+    ]
+    for _, row in rows.iterrows():
+        try:
+            version_no = int(row.get("version_no") or 1)
+        except (TypeError, ValueError):
+            version_no = 1
+        display_date = material_date_display(row.get("material_date") or row.get("date"))
+        versions.append(
+            {
+                "material_key": row.get("material_key", ""),
+                "material_date": canonical_material_date(row.get("material_date") or row.get("date")),
+                "version_no": version_no,
+                "display_label": f"{display_date.split('/', 1)[-1] if display_date.count('/') == 2 else display_date} -- {version_no}",
+                "generation_source": row.get("generation_source", ""),
+                "generation_mode": row.get("generation_mode", ""),
+                "is_latest": str(row.get("is_latest", "")).lower() in {"true", "1", "t", "yes"},
+                "created_at": row.get("created_at", ""),
+            }
+        )
+    return sorted(versions, key=lambda item: item.get("version_no", 0))
+
+
+def save_material_for_date(material_date, material, settings, generation_source="manual_local", generation_mode="local"):
+    ensure_database()
+    date_iso = canonical_material_date(material_date)
+    date = material_date_display(date_iso)
+    version_no = get_next_material_version(date_iso)
+    material_key = build_material_key(date_iso, version_no)
     vocab_list = material.get("vocab") or []
     verb_list = material.get("verbs") or []
     grammar = material.get("grammar") or {}
     metadata = material.get("metadata") or {}
     now = utc_now_iso()
-    max_rows = max(len(vocab_list), len(verb_list), 1)
+    metadata.update(
+        {
+            "material_key": material_key,
+            "material_date": date_iso,
+            "version_no": version_no,
+            "generation_source": generation_source,
+            "generation_mode": metadata.get("generation_mode") or generation_mode,
+        }
+    )
+    material["metadata"] = metadata
+    material["material_key"] = material_key
+    material["material_date"] = date_iso
+    material["version_no"] = version_no
+    material["generation_source"] = generation_source
+    material["generation_mode"] = metadata.get("generation_mode") or generation_mode
+    material["date"] = date
+    max_rows = 1
 
     new_rows = []
     for i in range(max_rows):
@@ -5934,7 +6287,12 @@ def save_material_for_date(material_date, material, settings):
                 "grammar_exp": grammar.get("exp", "") if i == 0 else "",
                 "grammar_examples": json.dumps(grammar.get("examples", []), ensure_ascii=False) if i == 0 else "",
                 "material_json": json.dumps(material, ensure_ascii=False) if i == 0 else "",
+                "material_key": material_key,
+                "material_date": date_iso,
+                "version_no": version_no,
+                "generation_source": generation_source,
                 "generation_mode": metadata.get("generation_mode", "") if i == 0 else "",
+                "is_latest": "true",
                 "ai_used": str(bool(metadata.get("ai_used", False))).lower() if i == 0 else "",
                 "source_summary": json.dumps(metadata.get("source_summary", {}), ensure_ascii=False) if i == 0 else "",
                 "created_at": now,
@@ -5946,32 +6304,43 @@ def save_material_for_date(material_date, material, settings):
         placeholders = ", ".join(["%s"] * len(COLUMNS))
         columns_sql = ", ".join(COLUMNS)
         rows = [tuple(clean_db_payload(row)[col] for col in COLUMNS) for row in new_rows]
-        date_variants = material_date_variants(date)
-        delete_placeholders = ", ".join(["%s"] * len(date_variants))
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                print(f"[history-protection] safe upsert material date={date}")
-                cur.execute(f"DELETE FROM materials WHERE date IN ({delete_placeholders})", tuple(date_variants))
+                print(f"[history-protection] append material version date={date_iso} material_key={material_key}")
+                cur.execute("UPDATE materials SET is_latest = FALSE WHERE material_date = %s", (date_iso,))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
         invalidate_archive_dates_cache("daily material saved")
-        return date
+        return {
+            "date": date,
+            "material_date": date_iso,
+            "material_key": material_key,
+            "version_no": version_no,
+            "generation_source": generation_source,
+            "generation_mode": metadata.get("generation_mode", generation_mode),
+        }
 
     df = read_database()
-    print(f"[history-protection] safe upsert material date={date}")
-    df = df[~df["date"].isin(material_date_variants(date))]
+    print(f"[history-protection] append material version date={date_iso} material_key={material_key}")
+    df.loc[df["material_date"] == date_iso, "is_latest"] = "false"
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
     invalidate_archive_dates_cache("daily material saved")
-    return date
+    return {
+        "date": date,
+        "material_date": date_iso,
+        "material_key": material_key,
+        "version_no": version_no,
+        "generation_source": generation_source,
+        "generation_mode": metadata.get("generation_mode", generation_mode),
+    }
 
 
 def save_material_for_today(material, settings):
     return save_material_for_date(get_today_taipei_date(), material, settings)
 
 
-def material_by_date(target_date):
-    rows = read_material_rows_by_date(target_date)
+def material_from_rows(rows, target_date=None):
     if rows.empty:
         return None
 
@@ -6008,7 +6377,8 @@ def material_by_date(target_date):
                 }
             )
 
-    first = rows.iloc[0]
+    json_rows = rows[rows["material_json"].astype(str).str.strip() != ""] if "material_json" in rows.columns else rows
+    first = json_rows.iloc[0] if not json_rows.empty else rows.iloc[0]
     try:
         examples = json.loads(first["grammar_examples"]) if first["grammar_examples"] else []
     except json.JSONDecodeError:
@@ -6026,10 +6396,45 @@ def material_by_date(target_date):
             "ai_used": first.get("ai_used", ""),
             "source_summary": first.get("source_summary", ""),
         }
+    if isinstance(material_payload, dict) and material_payload:
+        payload_vocab = material_payload.get("vocab") or material_payload.get("vocabulary") or []
+        if payload_vocab:
+            vocabulary = [
+                {
+                    "word": item.get("word") or item.get("surface") or item.get("term") or "",
+                    "reading": item.get("reading") or item.get("reading_hiragana") or "",
+                    "meaning": item.get("meaning") or item.get("meaning_zh") or "尚未建立中文意思",
+                    "part_of_speech": item.get("part_of_speech", ""),
+                    "source": item.get("source", ""),
+                    "jlpt_level": item.get("jlpt_level", ""),
+                    "category": item.get("category", ""),
+                    "normalized_key": item.get("normalized_key", ""),
+                    "example_sentence": item.get("example_sentence", ""),
+                    "example_translation_zh": item.get("example_translation_zh", ""),
+                }
+                for item in payload_vocab
+            ]
+        payload_verbs = material_payload.get("verbs") or []
+        if payload_verbs:
+            verbs = payload_verbs
 
+    date_iso = canonical_material_date(first.get("material_date") or first.get("date") or target_date)
+    try:
+        version_no = int(first.get("version_no") or metadata.get("version_no") or 1)
+    except (TypeError, ValueError):
+        version_no = 1
+    material_key = first.get("material_key") or metadata.get("material_key") or build_material_key(date_iso, version_no)
+    available_versions = material_versions_for_date(date_iso)
     return {
         "date": material_date_display(first.get("date", target_date)),
-        "date_iso": material_date_iso(first.get("date", target_date)),
+        "date_iso": date_iso,
+        "material_date": date_iso,
+        "material_key": material_key,
+        "version_no": version_no,
+        "is_latest": str(first.get("is_latest", "")).lower() in {"true", "1", "t", "yes"},
+        "generation_source": first.get("generation_source", "") or metadata.get("generation_source", ""),
+        "generation_mode": first.get("generation_mode", "") or metadata.get("generation_mode", ""),
+        "available_versions": available_versions,
         "targetLevel": first.get("target_level", ""),
         "vocabulary": vocabulary,
         "verbs": verbs,
@@ -6040,6 +6445,14 @@ def material_by_date(target_date):
     }
 
 
+def material_by_date(target_date):
+    return material_from_rows(read_material_rows_by_date(target_date), target_date)
+
+
+def material_by_key(material_key):
+    return material_from_rows(read_material_rows_by_key(material_key), None)
+
+
 def get_material_by_date(material_date):
     return material_by_date(material_date)
 
@@ -6047,7 +6460,12 @@ def get_material_by_date(material_date):
 def build_telegram_notification(material, date, app_url=None):
     if not material:
         raise RuntimeError("教材尚未寫入資料庫，無法推送 Telegram。")
-    link = html.escape(app_url or APP_URL)
+    material_key = material.get("material_key", "")
+    base_link = app_url or APP_URL
+    if material_key:
+        separator = "&" if "?" in base_link else "?"
+        base_link = f"{base_link}{separator}material_key={urllib.parse.quote(str(material_key))}"
+    link = html.escape(base_link)
     words = "、".join(html.escape(v.get("word", "")) for v in material.get("vocabulary", []) if v.get("word"))
     grammar_points = material.get("grammar_points") or []
     if grammar_points:
@@ -6059,10 +6477,14 @@ def build_telegram_notification(material, date, app_url=None):
     else:
         grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
     level = html.escape(material.get("targetLevel", ""))
+    version_no = material.get("version_no")
+    source = material.get("generation_source", "")
+    date_label = html.escape(f"{date} -- {version_no}" if version_no else str(date))
     return (
         f"<b>日語學習自動化系統</b>\n"
-        f"日期：{html.escape(date)}\n"
+        f"日期：{date_label}\n"
         f"等級：{level}\n\n"
+        f"來源：{html.escape(source or 'local')}\n\n"
         f"<b>今日單字：</b>{words or '暫無'}\n"
         f"<b>今日文法：</b>\n{grammar_title}\n\n"
         f'<a href="{link}">點擊開啟學習頁面</a>'
@@ -6106,7 +6528,15 @@ def material_success_message(date, settings, material, telegram_status):
     return f"{base} {telegram_status}"
 
 
-def generate_daily_material(use_sample=False, posted_settings=None, app_url=None, mode="local", material_date=None, notify_telegram=True):
+def generate_daily_material(
+    use_sample=False,
+    posted_settings=None,
+    app_url=None,
+    mode="local",
+    material_date=None,
+    notify_telegram=True,
+    generation_source="manual_local",
+):
     settings = save_settings_file(posted_settings) if posted_settings else load_settings()
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
@@ -6141,26 +6571,37 @@ def generate_daily_material(use_sample=False, posted_settings=None, app_url=None
     if mode == "local" and raw_material.get("metadata", {}).get("ai_used"):
         print("[material-generator] ERROR local mode attempted to call Gemini")
 
-    date = save_material_for_date(material_date or get_today_taipei_date(), raw_material, settings)
+    save_info = save_material_for_date(
+        material_date or get_today_taipei_date(),
+        raw_material,
+        settings,
+        generation_source=generation_source,
+        generation_mode=raw_material.get("metadata", {}).get("generation_mode", mode),
+    )
+    date = save_info["date"]
     print(f"[material-generator] local material generated; ai_used={str(raw_material.get('metadata', {}).get('ai_used', False)).lower()}")
-    print(f"[material-generator] material saved date={date}")
-    material = get_material_by_date(date)
+    print(f"[material-generator] material saved date={date} material_key={save_info['material_key']}")
+    material = material_by_key(save_info["material_key"])
     if not material:
-        raise RuntimeError(f"教材寫入後重新讀取失敗：{date}")
+        raise RuntimeError(f"教材寫入後重新讀取失敗：{save_info['material_key']}")
 
     telegram_status = "未發送"
-    try:
-        send_telegram_message(build_telegram_notification(material, date, app_url))
-        telegram_status = "Telegram 通知已發送"
-    except Exception as e:
-        telegram_status = f"Telegram 通知發送失敗：{e}"
+    if notify_telegram:
+        try:
+            send_telegram_message(build_telegram_notification(material, date, app_url))
+            telegram_status = "Telegram 通知已發送"
+        except Exception as e:
+            telegram_status = f"Telegram 通知發送失敗：{e}"
 
     invalidate_dashboard_cache("daily material generated")
     return {
         "ok": True,
-        "message": material_success_message(date, settings, raw_material, telegram_status),
+        "message": f"{material_success_message(date, settings, raw_material, telegram_status)} 新版本：{save_info['material_key']}。",
         "date": date,
-        "material_date": date,
+        "material_date": save_info["material_date"],
+        "material_key": save_info["material_key"],
+        "version_no": save_info["version_no"],
+        "generation_source": save_info["generation_source"],
         "telegram": telegram_status,
         "generation_mode": raw_material.get("metadata", {}).get("generation_mode", mode),
         "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
@@ -6173,16 +6614,17 @@ def run_daily_schedule(app_url=None, mode="local"):
     date = get_today_taipei_date()
     print(f"[daily-schedule] start date={date}")
     try:
-        material = get_material_by_date(date)
-        print(f"[daily-schedule] material exists={str(bool(material)).lower()}")
+        scheduled_key = latest_material_key_for_date(date, generation_source="scheduled")
+        material = material_by_key(scheduled_key) if scheduled_key else None
+        print(f"[daily-schedule] material exists={str(bool(material)).lower()} generation_source=scheduled")
         if not material:
             print(f"[daily-schedule] generating local material date={date}")
-            result = generate_daily_material(app_url=app_url, mode=mode, material_date=date)
-            print(f"[daily-schedule] save material success date={date}")
-            print(f"[daily-schedule] reload material from db success date={date}")
+            result = generate_daily_material(app_url=app_url, mode=mode, material_date=date, generation_source="scheduled")
+            print(f"[daily-schedule] save material success date={date} material_key={result.get('material_key')}")
+            print(f"[daily-schedule] reload material from db success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] telegram push success date={date}")
             return result
-        print(f"[daily-schedule] reload material from db success date={date}")
+        print(f"[daily-schedule] reload material from db success date={date} material_key={material.get('material_key')}")
         send_telegram_message(build_telegram_notification(material, date, app_url))
         print(f"[daily-schedule] telegram push success date={date}")
         invalidate_dashboard_cache("daily schedule material ready")
@@ -6190,7 +6632,10 @@ def run_daily_schedule(app_url=None, mode="local"):
             "ok": True,
             "message": f"{date} 的學習材料已確認落地，Telegram 已推送。",
             "date": date,
-            "material_date": date,
+            "material_date": material.get("material_date") or canonical_material_date(date),
+            "material_key": material.get("material_key"),
+            "version_no": material.get("version_no"),
+            "generation_source": material.get("generation_source", "scheduled"),
             "generation_mode": material.get("metadata", {}).get("generation_mode", "local"),
             "ai_used": bool(material.get("metadata", {}).get("ai_used", False)),
             "telegram": "Telegram 通知已發送",
@@ -7314,21 +7759,23 @@ def api_archive_dates():
 
     limit = max(1, min(int(request.args.get("limit", "90") or 90), 365))
     ensure_database()
+    version_rows = []
     if DATABASE_URL:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT date
+                    SELECT material_key, material_date, date, version_no, generation_source,
+                           generation_mode, is_latest, created_at
                     FROM materials
-                    WHERE COALESCE(date, '') <> ''
-                    GROUP BY date
-                    ORDER BY MAX(id) DESC
+                    WHERE COALESCE(material_json, '') <> ''
+                      AND (material_date IS NOT NULL OR COALESCE(date, '') <> '')
+                    ORDER BY COALESCE(material_date, CURRENT_DATE) DESC, version_no DESC, id DESC
                     LIMIT %s
                     """,
-                    (limit,),
+                    (limit * 10,),
                 )
-                dates = [row[0] for row in cur.fetchall() if row and row[0]]
+                version_rows = cur.fetchall()
     else:
         try:
             df = pd.read_csv(
@@ -7336,33 +7783,77 @@ def api_archive_dates():
                 dtype=str,
                 keep_default_na=False,
                 encoding="utf-8-sig",
-                usecols=["date"],
             )
-            dates = [d for d in df["date"].drop_duplicates().tolist() if d]
+            df = ensure_material_version_columns_df(df)
+            rows = df[(df["material_json"].astype(str) != "") & ((df["material_date"].astype(str) != "") | (df["date"].astype(str) != ""))]
+            version_rows = [
+                (
+                    row.get("material_key", ""),
+                    row.get("material_date", ""),
+                    row.get("date", ""),
+                    row.get("version_no", 1),
+                    row.get("generation_source", ""),
+                    row.get("generation_mode", ""),
+                    row.get("is_latest", ""),
+                    row.get("created_at", ""),
+                )
+                for _, row in rows.iterrows()
+            ]
         except (FileNotFoundError, ValueError):
-            dates = []
-    normalized_dates = []
-    seen_dates = set()
-    for value in dates:
-        normalized = material_date_display(value)
-        parsed = parse_material_date(normalized)
-        sort_key = parsed or datetime.min.date()
-        if normalized not in seen_dates:
-            seen_dates.add(normalized)
-            normalized_dates.append((normalized, sort_key))
-    dates = [item[0] for item in sorted(normalized_dates, key=lambda item: item[1], reverse=True)[:limit]]
+            version_rows = []
+    grouped = {}
+    for row in version_rows:
+        key, mat_date, date_value, version_no, source, mode, is_latest, created_at = row
+        date_iso = canonical_material_date(mat_date or date_value)
+        display = material_date_display(date_iso)
+        try:
+            version_no = int(version_no or 1)
+        except (TypeError, ValueError):
+            version_no = 1
+        item = {
+            "material_key": key or build_material_key(date_iso, version_no),
+            "version_no": version_no,
+            "display_label": f"{display.split('/', 1)[-1] if display.count('/') == 2 else display} -- {version_no}",
+            "generation_source": source or "",
+            "generation_mode": mode or "",
+            "is_latest": str(is_latest).lower() in {"true", "1", "t", "yes"},
+            "created_at": created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at or ""),
+        }
+        grouped.setdefault(
+            date_iso,
+            {
+                "material_date": date_iso,
+                "display_date": f"{parse_material_date(date_iso).month:02d}/{parse_material_date(date_iso).day:02d}" if parse_material_date(date_iso) else display,
+                "latest_material_key": item["material_key"],
+                "latest_version_no": version_no,
+                "version_count": 0,
+                "versions": [],
+            },
+        )
+        grouped[date_iso]["versions"].append(item)
+        if item["is_latest"] or version_no >= grouped[date_iso]["latest_version_no"]:
+            grouped[date_iso]["latest_material_key"] = item["material_key"]
+            grouped[date_iso]["latest_version_no"] = version_no
+    dates_payload = []
+    for date_iso, entry in grouped.items():
+        entry["versions"] = sorted(entry["versions"], key=lambda item: item["version_no"])
+        entry["version_count"] = len(entry["versions"])
+        dates_payload.append(entry)
+    dates_payload = sorted(dates_payload, key=lambda item: item["material_date"], reverse=True)[:limit]
+    payload = {"ok": True, "dates": dates_payload}
 
-    _ARCHIVE_DATES_CACHE["payload"] = dates
+    _ARCHIVE_DATES_CACHE["payload"] = payload
     _ARCHIVE_DATES_CACHE["expires_at"] = now_ts + ARCHIVE_DATES_CACHE_TTL_SECONDS
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     print(f"[perf] api_archive_dates ms={elapsed_ms} cached=false")
-    return jsonify(dates)
+    return jsonify(payload)
 
 
 @app.get("/api/materials")
 def api_materials():
     started = time.perf_counter()
-    payload = material_by_date(request.args.get("date", today_string()))
+    material_key = request.args.get("material_key", "").strip()
+    payload = material_by_key(material_key) if material_key else material_by_date(request.args.get("date", today_string()))
     elapsed_ms = round((time.perf_counter() - started) * 1000)
     print(f"[perf] load_daily_material ms={elapsed_ms}")
     return jsonify(payload)
@@ -7379,6 +7870,7 @@ def api_generate():
                 posted_settings=data,
                 app_url=request.host_url.rstrip("/"),
                 mode=mode,
+                generation_source="manual_local",
             )
         )
     except Exception as e:
@@ -8043,8 +8535,12 @@ def add_material_activity_sources(active_map):
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        f"SELECT DISTINCT date FROM materials WHERE date IN ({placeholders})",
-                        tuple(candidate_dates),
+                        f"""
+                        SELECT DISTINCT COALESCE(material_date::text, date)
+                        FROM materials
+                        WHERE material_date::text IN ({placeholders}) OR date IN ({placeholders})
+                        """,
+                        tuple(candidate_dates + candidate_dates),
                     )
                     rows = cur.fetchall()
             for (date_value,) in rows:
@@ -8129,6 +8625,11 @@ def dashboard_default_payload(reason=""):
         "today_material": {
             "status": "not_generated",
             "date": today,
+            "material_date": today_iso_date(),
+            "material_key": "",
+            "version_no": 0,
+            "version_count": 0,
+            "generation_source": "",
             "target_level": settings["target_level"],
             "word_count": 0,
             "verb_count": 0,
@@ -8176,6 +8677,11 @@ def build_dashboard_payload():
         payload["today_material"] = {
             "status": "generated" if today_material else "not_generated",
             "date": today,
+            "material_date": today_material.get("material_date") if today_material else today_iso,
+            "material_key": today_material.get("material_key") if today_material else "",
+            "version_no": today_material.get("version_no") if today_material else 0,
+            "version_count": len(today_material.get("available_versions", [])) if today_material else 0,
+            "generation_source": today_material.get("generation_source") if today_material else "",
             "target_level": today_material.get("targetLevel") if today_material else settings["target_level"],
             "word_count": payload["vocab_count"],
             "verb_count": payload["verb_count"],
