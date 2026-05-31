@@ -448,7 +448,7 @@
       <h4 class="mb-2" style="color:var(--primary);">單字出現設置</h4>
       <p class="text-muted mb-3">可設定各類單字在本地教材中的出現週期與次數，避免某類詞彙過度出現。</p>
       <div class="rules-toolbar">
-        <input id="vocab-rule-search" class="form-control" placeholder="搜尋 JLPT 等級或單字分類..." oninput="renderVocabRules()">
+        <input id="vocab-rule-search" class="form-control" placeholder="搜尋 JLPT 等級或 SNS 詞類..." oninput="renderVocabRules()">
         <button class="neon-btn" onclick="saveAllVocabRules()" id="rules-save-all-btn">儲存設定</button>
         <button class="neon-btn" onclick="syncVocabRules()" id="rules-sync-btn">同步目前詞庫類型</button>
         <button class="neon-btn accent-btn" onclick="resetVocabRules()" id="rules-reset-btn">還原預設值</button>
@@ -772,6 +772,78 @@
       max_per_material: card.querySelector(".rule-max").value === "" ? null : Number(card.querySelector(".rule-max").value || 0),
       priority: Number(card.querySelector(".rule-priority").value || 50),
       strict_mode: card.querySelector(".rule-strict") ? card.querySelector(".rule-strict").checked : false
+    };
+  }
+
+  function periodLabel(value) {
+    return { daily: "每日", weekly: "每週", monthly: "每月" }[value] || value;
+  }
+
+  function renderVocabRules() {
+    const container = document.getElementById("vocab-rules-container");
+    if (!container) return;
+    const keyword = (document.getElementById("vocab-rule-search")?.value || "").trim().toLowerCase();
+    const groups = vocabRulesPayload.groups || [];
+    if (!groups.length) {
+      container.innerHTML = "<div class='text-muted'>目前尚未建立單字出現設定。</div>";
+      return;
+    }
+    container.innerHTML = groups.map(group => {
+      const rules = (group.rules || []).filter(rule => {
+        if (!keyword) return true;
+        return [rule.display_name, rule.rule_key].some(value => String(value || "").toLowerCase().includes(keyword));
+      });
+      if (!rules.length) return "";
+      return `
+        <details class="rule-group" open>
+          <summary>${escapeHtml(group.group_name || group.group_key)} <span class="rule-chip">${rules.length} 類</span></summary>
+          <div class="rule-grid">
+            ${rules.map(renderRuleCard).join("")}
+          </div>
+        </details>
+      `;
+    }).join("") || "<div class='text-muted'>沒有符合搜尋條件的類型。</div>";
+  }
+
+  function renderRuleCard(rule) {
+    const key = escapeHtml(rule.rule_key);
+    const maxValue = rule.max_per_material ?? "";
+    return `
+      <div class="rule-card" data-rule-key="${key}" data-source-type="${escapeHtml(rule.source_type)}" data-match-value="${escapeHtml(rule.match_value)}" data-display-name="${escapeHtml(rule.display_name)}">
+        <div class="d-flex justify-content-between gap-2 flex-wrap">
+          <div>
+            <div class="rule-title">類型：${escapeHtml(rule.display_name || rule.match_value)}</div>
+          </div>
+        </div>
+        <div class="rule-controls">
+          <label><div class="rule-small-label">啟用</div><input class="form-check-input rule-enabled" type="checkbox" ${rule.enabled ? "checked" : ""}></label>
+          <label><div class="rule-small-label">出現週期</div><select class="form-select rule-period">
+            ${["daily","weekly","monthly"].map(v => `<option value="${v}" ${rule.period === v ? "selected" : ""}>${periodLabel(v)}</option>`).join("")}
+          </select></label>
+          <label><div class="rule-small-label">單份教材筆數上限</div><input class="form-control rule-max" type="number" min="0" value="${escapeHtml(maxValue)}" placeholder="0"></label>
+          <label><div class="rule-small-label">優先度</div><input class="form-control rule-priority" type="number" min="0" max="100" value="${Number(rule.priority || 50)}"></label>
+        </div>
+        <div class="rule-actions">
+          <button class="neon-btn" onclick="saveVocabRuleFromButton(this)">儲存此類型</button>
+        </div>
+      </div>
+    `;
+  }
+
+  function collectRuleFromCard(card) {
+    const maxPerMaterial = card.querySelector(".rule-max").value === "" ? 0 : Number(card.querySelector(".rule-max").value || 0);
+    return {
+      rule_key: card.dataset.ruleKey,
+      display_name: card.dataset.displayName,
+      group_key: card.dataset.sourceType,
+      source_type: card.dataset.sourceType,
+      match_value: card.dataset.matchValue,
+      enabled: card.querySelector(".rule-enabled").checked,
+      period: card.querySelector(".rule-period").value,
+      quota_count: maxPerMaterial,
+      max_per_material: maxPerMaterial,
+      priority: Number(card.querySelector(".rule-priority").value || 50),
+      strict_mode: false
     };
   }
 

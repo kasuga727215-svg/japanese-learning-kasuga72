@@ -444,6 +444,114 @@ JLPT_ADJACENCY = {
     "N2": ["N2", "N3", "N1"],
     "N1": ["N1", "N2", "N3"],
 }
+SNS_RULE_CATEGORIES = {"slang", "internet_slang", "otaku_culture", "approved_slang"}
+SIX_MAIN_VOCAB_RULE_ORDER = ["jlpt:N5", "jlpt:N4", "jlpt:N3", "jlpt:N2", "jlpt:N1", "category:SNS"]
+SIX_MAIN_VOCAB_RULE_DEFAULTS = {
+    "jlpt:N5": {
+        "rule_key": "jlpt:N5",
+        "display_name": "N5",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "jlpt_level",
+        "match_value": "N5",
+        "enabled": True,
+        "period": "daily",
+        "quota_count": 20,
+        "priority": 90,
+        "max_per_material": 20,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+    "jlpt:N4": {
+        "rule_key": "jlpt:N4",
+        "display_name": "N4",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "jlpt_level",
+        "match_value": "N4",
+        "enabled": True,
+        "period": "daily",
+        "quota_count": 5,
+        "priority": 80,
+        "max_per_material": 5,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+    "jlpt:N3": {
+        "rule_key": "jlpt:N3",
+        "display_name": "N3",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "jlpt_level",
+        "match_value": "N3",
+        "enabled": True,
+        "period": "weekly",
+        "quota_count": 3,
+        "priority": 70,
+        "max_per_material": 3,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+    "jlpt:N2": {
+        "rule_key": "jlpt:N2",
+        "display_name": "N2",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "jlpt_level",
+        "match_value": "N2",
+        "enabled": True,
+        "period": "monthly",
+        "quota_count": 1,
+        "priority": 50,
+        "max_per_material": 1,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+    "jlpt:N1": {
+        "rule_key": "jlpt:N1",
+        "display_name": "N1",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "jlpt_level",
+        "match_value": "N1",
+        "enabled": True,
+        "period": "monthly",
+        "quota_count": 1,
+        "priority": 40,
+        "max_per_material": 1,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+    "category:SNS": {
+        "rule_key": "category:SNS",
+        "display_name": "SNS 詞類",
+        "group_key": "main_vocab_rules",
+        "group_name": "單字出現設定",
+        "source_type": "category",
+        "match_value": "SNS",
+        "enabled": True,
+        "period": "weekly",
+        "quota_count": 1,
+        "priority": 20,
+        "max_per_material": 1,
+        "min_per_material": 0,
+        "strict_mode": False,
+        "is_system_default": True,
+    },
+}
+SIX_MAIN_VOCAB_RULE_KEYS = set(SIX_MAIN_VOCAB_RULE_DEFAULTS)
+LEGACY_MAIN_VOCAB_RULE_KEYS = {
+    "jlpt:N5": "jlpt_level:N5",
+    "jlpt:N4": "jlpt_level:N4",
+    "jlpt:N3": "jlpt_level:N3",
+    "jlpt:N2": "jlpt_level:N2",
+    "jlpt:N1": "jlpt_level:N1",
+}
 GRAMMAR_LEVEL_FALLBACKS = {
     "N5": ["N5"],
     "N4": ["N4", "N5"],
@@ -2530,6 +2638,33 @@ def clamp_int(value, default=0, min_value=0, max_value=None):
     return number
 
 
+def six_main_default_vocab_rule(rule_key):
+    base = SIX_MAIN_VOCAB_RULE_DEFAULTS.get(rule_key)
+    return dict(base) if base else None
+
+
+def sanitize_six_main_vocab_rule(rule):
+    rule_key = str(rule.get("rule_key") or "").strip()
+    base = six_main_default_vocab_rule(rule_key)
+    if not base:
+        return None
+    max_default = int(base.get("max_per_material") or 0)
+    max_per_material = clamp_int(rule.get("max_per_material", max_default), max_default, 0)
+    base.update(
+        {
+            "enabled": boolish(rule.get("enabled", base["enabled"])),
+            "period": normalize_rule_period(rule.get("period", base["period"])),
+            "quota_count": max_per_material,
+            "priority": clamp_int(rule.get("priority", base["priority"]), base["priority"], 0, 100),
+            "max_per_material": max_per_material,
+            "min_per_material": 0,
+            "strict_mode": False,
+            "is_system_default": True,
+        }
+    )
+    return base
+
+
 def default_vocab_rule(source_type, match_value, available_count=0, is_system_default=False):
     source_type = source_type if source_type in VOCAB_RULE_SOURCE_TYPES else "category"
     value = clean_rule_match_value(match_value)
@@ -2581,28 +2716,12 @@ def default_vocab_rule(source_type, match_value, available_count=0, is_system_de
 
 
 def default_vocab_rule_seed():
-    seeds = [
-        ("jlpt_level", "N5"),
-        ("jlpt_level", "N4"),
-        ("jlpt_level", "N3"),
-        ("jlpt_level", "N2"),
-        ("jlpt_level", "N1"),
-        ("jlpt_level", EMPTY_RULE_VALUE),
-        ("category", "general"),
-        ("category", "common"),
-        ("category", "daily"),
-        ("category", "business"),
-        ("category", "advanced"),
-        ("category", "internet_slang"),
-        ("category", "otaku_culture"),
-        ("category", "slang"),
-        ("category", "generated_compound"),
-        ("category", "unknown"),
-        ("category", EMPTY_RULE_VALUE),
-    ]
-    return [default_vocab_rule(source_type, value, is_system_default=True) for source_type, value in seeds]
+    return [six_main_default_vocab_rule(rule_key) for rule_key in SIX_MAIN_VOCAB_RULE_ORDER]
 
 def sanitize_vocab_rule_payload(rule):
+    six_rule = sanitize_six_main_vocab_rule(rule)
+    if six_rule:
+        return six_rule
     source_type = str(rule.get("source_type") or rule.get("group_key") or "").strip()
     if source_type not in VOCAB_RULE_SOURCE_TYPES:
         source_type = "category"
@@ -2878,65 +2997,63 @@ def vocab_rule_used_count(rule_key, period, material_date=None):
     return int(row["count"] if row else 0)
 
 
-def build_vocab_rules_payload(create_missing=False, material_date=None):
-    discovered = scan_vocab_rule_types()
-    def rule_visible_in_safe_mode(rule):
-        if not local_generation_safe_mode_enabled():
-            return True
-        source_type = rule.get("source_type") or rule.get("group_key")
-        value = clean_rule_match_value(rule.get("match_value"))
-        if source_type == "jlpt_level":
-            return value in LOCAL_SAFE_MODE_JLPT_LEVELS
-        if source_type == "category":
-            return value in LOCAL_SAFE_MODE_CATEGORIES
-        return False
+def is_rule_period_available(rule_key, period, material_date=None):
+    period = normalize_rule_period(period)
+    if period == "daily":
+        return True
+    return vocab_rule_used_count(rule_key, period, material_date) <= 0
 
-    stored = {
-        row["rule_key"]: row
-        for row in load_vocab_rule_rows()
-        if (row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
-        and rule_visible_in_safe_mode(row)
-    }
+
+def load_six_main_vocab_rules():
+    rows = {row["rule_key"]: row for row in load_vocab_rule_rows()}
+    merged = []
+    for rule_key in SIX_MAIN_VOCAB_RULE_ORDER:
+        rule = six_main_default_vocab_rule(rule_key)
+        stored = rows.get(rule_key) or rows.get(LEGACY_MAIN_VOCAB_RULE_KEYS.get(rule_key, ""))
+        if stored:
+            rule.update(
+                {
+                    "enabled": boolish(stored.get("enabled", rule["enabled"])),
+                    "period": normalize_rule_period(stored.get("period", rule["period"])),
+                    "max_per_material": clamp_int(stored.get("max_per_material", rule["max_per_material"]), rule["max_per_material"], 0),
+                    "priority": clamp_int(stored.get("priority", rule["priority"]), rule["priority"], 0, 100),
+                }
+            )
+            rule["quota_count"] = int(rule.get("max_per_material") or 0)
+        merged.append(rule)
+    return merged
+
+
+def build_vocab_rules_payload(create_missing=False, material_date=None):
+    rules = load_six_main_vocab_rules()
     if create_missing:
-        missing = [rule for key, rule in discovered.items() if key not in stored]
+        existing = {row["rule_key"] for row in load_vocab_rule_rows()}
+        missing = [rule for rule in rules if rule["rule_key"] not in existing]
         if missing:
             insert_or_update_vocab_rules(missing)
-            stored = {
-                row["rule_key"]: row
-                for row in load_vocab_rule_rows()
-                if (row.get("source_type") in VOCAB_RULE_VISIBLE_TYPES or row.get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
-                and rule_visible_in_safe_mode(row)
+            rules = load_six_main_vocab_rules()
+    public_rules = [
+        {
+            "rule_key": rule["rule_key"],
+            "display_name": rule["display_name"],
+            "source_type": rule["source_type"],
+            "match_value": rule["match_value"],
+            "enabled": boolish(rule.get("enabled")),
+            "period": normalize_rule_period(rule.get("period")),
+            "max_per_material": int(rule.get("max_per_material") or 0),
+            "priority": int(rule.get("priority") or 0),
+        }
+        for rule in rules
+    ]
+    return {
+        "groups": [
+            {
+                "group_key": "main_vocab_rules",
+                "group_name": "單字出現設定",
+                "rules": public_rules,
             }
-    all_keys = {
-        key
-        for key in (set(discovered) | set(stored))
-        if (
-            ((discovered.get(key) or stored.get(key) or {}).get("source_type") in VOCAB_RULE_VISIBLE_TYPES
-            or (discovered.get(key) or stored.get(key) or {}).get("group_key") in VOCAB_RULE_VISIBLE_TYPES)
-            and rule_visible_in_safe_mode(discovered.get(key) or stored.get(key) or {})
-        )
+        ]
     }
-    grouped = {key: {"group_key": key, "group_name": VOCAB_RULE_GROUPS.get(key, key), "rules": []} for key in VOCAB_RULE_GROUPS}
-    for key in sorted(all_keys):
-        base = discovered.get(key) or default_vocab_rule((stored.get(key) or {}).get("source_type", "category"), (stored.get(key) or {}).get("match_value", ""))
-        rule = {**base, **stored.get(key, {})}
-        rule["available_count"] = int((discovered.get(key) or {}).get("available_count", rule.get("available_count", 0)) or 0)
-        rule["is_new_detected_type"] = key not in stored
-        used = vocab_rule_used_count(rule["rule_key"], rule.get("period", "daily"), material_date)
-        quota = int(rule.get("quota_count", 0) or 0)
-        rule["used_count"] = used
-        rule["remaining_count"] = max(0, quota - used) if quota > 0 else None
-        group_key = rule.get("group_key") or rule.get("source_type") or "category"
-        grouped.setdefault(group_key, {"group_key": group_key, "group_name": VOCAB_RULE_GROUPS.get(group_key, group_key), "rules": []})
-        grouped[group_key]["rules"].append(rule)
-    groups = []
-    for group_key in ("jlpt_level", "category"):
-        group = grouped.get(group_key)
-        if not group:
-            continue
-        group["rules"].sort(key=lambda rule: (not rule.get("is_new_detected_type"), -int(rule.get("available_count", 0) or 0), str(rule.get("display_name", ""))))
-        groups.append(group)
-    return {"groups": groups}
 
 
 def load_vocab_rule_context(material_date=None):
@@ -4550,7 +4667,7 @@ def mark_vocabulary_pool_used(items):
 GENERAL_VOCAB_CATEGORIES = {"general", "jlpt_core", "daily", "common", "seed", ""}
 BUSINESS_VOCAB_CATEGORIES = {"business"}
 ADVANCED_VOCAB_CATEGORIES = {"advanced"}
-SNS_VOCAB_CATEGORIES = {"sns", "internet_slang", "otaku_culture"}
+SNS_VOCAB_CATEGORIES = {"sns", "slang", "internet_slang", "otaku_culture", "approved_slang"}
 CORE_VOCAB_SOURCES = {"seed_basic", "jlpt_seed", "manual", "starter_pack"}
 SAFE_JLPT_MAIN_CATEGORIES = {"general", "common", "daily", "jlpt_core", "seed", ""}
 UNSAFE_MAIN_POOL_CATEGORIES = {
@@ -4889,6 +5006,8 @@ def record_vocab_selection_logs(items, selected_for="word", material_date=None, 
     now = utc_now_iso()
     for item in items:
         rule_keys = list(item.get("_matched_rule_keys") or [])
+        if item.get("rule_key"):
+            rule_keys.append(str(item.get("rule_key")))
         if not rule_keys:
             values = item_rule_values(item)
             for source_type in ("jlpt_level", "category"):
@@ -5149,7 +5268,188 @@ def category_rule_available(rule, selected_rule_counts):
     return True
 
 
+def approved_slang_vocab_items_for_rule(limit):
+    items = material_vocab_from_approved_slang(limit)
+    for item in items:
+        item["rule_key"] = "category:SNS"
+        item["_matched_rule_keys"] = ["category:SNS"]
+    return items
+
+
+def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
+    started = time.perf_counter()
+    material_date = canonical_material_date(material_date or get_today_taipei_date())
+    stats = {
+        "selection_strategy": "six_main_rules_period_first",
+        "selected_from_db_count": 0,
+        "selected_from_seed_fallback_count": 0,
+        "selected_by_jlpt_count": 0,
+        "selected_target_jlpt_count": 0,
+        "selected_adjacent_jlpt_count": 0,
+        "selected_by_category_count": 0,
+        "target_jlpt_quota_skipped": True,
+        "rejected_low_quality_count": 0,
+        "rejected_by_rule_count": 0,
+        "rejected_by_quota_count": 0,
+        "category_counts": {},
+        "candidate_counts": {},
+        "selected_rule_counts": {},
+        "rule_selection": {"available_rules": [], "blocked_by_period": [], "selected_counts": {}},
+        "rule_remaining_after_generation": {},
+        "rejected_recent_duplicate_count": 0,
+        "rejected_by_category_quota": {},
+        "prefiltered_low_quality_compound_count": 0,
+        "prefiltered_unsupported_category_count": 0,
+        "skipped_empty_jlpt_count": 0,
+        "safe_jlpt_candidates": 0,
+        "cooldown_days_used": 14,
+        "generation_elapsed_ms": 0,
+        "rule_selection": {
+            "available_rules": [],
+            "blocked_by_period": [],
+            "selected_counts": {},
+        },
+    }
+    if limit <= 0:
+        return ([], stats) if return_stats else []
+
+    rules = [rule for rule in load_six_main_vocab_rules() if boolish(rule.get("enabled"))]
+    available_rules = []
+    for rule in rules:
+        rule_key = rule["rule_key"]
+        if is_rule_period_available(rule_key, rule.get("period", "daily"), material_date):
+            available_rules.append(rule)
+            stats["rule_selection"]["available_rules"].append(rule_key)
+        else:
+            stats["rule_selection"]["blocked_by_period"].append(rule_key)
+    available_rules.sort(key=lambda rule: (-int(rule.get("priority", 0) or 0), SIX_MAIN_VOCAB_RULE_ORDER.index(rule["rule_key"])))
+
+    selected = []
+    selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if normalize_vocab_key(key)}
+    recent_keys_by_days = {
+        14: get_recent_used_normalized_keys(14, material_date=material_date),
+        7: get_recent_used_normalized_keys(7, material_date=material_date),
+        3: get_recent_used_normalized_keys(3, material_date=material_date),
+    }
+    sns_slang_ids = []
+
+    def select_item(item, rule_key):
+        key = item_normalized_key(item)
+        if not key or key in selected_keys:
+            return False
+        selected_keys.add(key)
+        item["normalized_key"] = key
+        item["rule_key"] = rule_key
+        item["_matched_rule_keys"] = [rule_key]
+        selected.append(item)
+        stats["selected_rule_counts"][rule_key] = stats["selected_rule_counts"].get(rule_key, 0) + 1
+        stats["rule_selection"]["selected_counts"][rule_key] = stats["rule_selection"]["selected_counts"].get(rule_key, 0) + 1
+        if rule_key.startswith("jlpt:"):
+            stats["selected_by_jlpt_count"] += 1
+            if item.get("jlpt_level") == settings.get("target_level"):
+                stats["selected_target_jlpt_count"] += 1
+            else:
+                stats["selected_adjacent_jlpt_count"] += 1
+        else:
+            stats["selected_by_category_count"] += 1
+            if item.get("_slang_id"):
+                sns_slang_ids.append({"id": item.get("_slang_id")})
+        return True
+
+    def rows_for_rule(rule, needed, cooldown_days):
+        rule_key = rule["rule_key"]
+        exclude_for_sql = set(selected_keys)
+        if cooldown_days > 0:
+            exclude_for_sql.update(recent_keys_by_days.get(cooldown_days, set()))
+        query_limit = max(needed * 8, 60)
+        if rule_key.startswith("jlpt:"):
+            level = rule_key.split(":", 1)[1]
+            rows = fetch_vocabulary_pool_candidates(
+                jlpt_levels=[level],
+                limit=query_limit,
+                safe_jlpt_pool=True,
+                safe_mode=False,
+                exclude_low_quality=True,
+                exclude_normalized_keys=exclude_for_sql,
+            )
+            stats["safe_jlpt_candidates"] += len(rows)
+            return [build_vocab_item_from_pool_row(row) for row in rows]
+        if rule_key == "category:SNS":
+            vocab_rows = fetch_vocabulary_pool_candidates(
+                categories=sorted(SNS_RULE_CATEGORIES),
+                limit=query_limit,
+                safe_jlpt_pool=False,
+                safe_mode=False,
+                exclude_low_quality=True,
+                exclude_normalized_keys=exclude_for_sql,
+            )
+            vocab_items = [build_vocab_item_from_pool_row(row) for row in vocab_rows]
+            slang_items = approved_slang_vocab_items_for_rule(query_limit)
+            return vocab_items + slang_items
+        return []
+
+    for cooldown_days in (14, 7, 3, 0):
+        if len(selected) >= limit:
+            break
+        selected_before_cooldown = len(selected)
+        for rule in available_rules:
+            if len(selected) >= limit:
+                break
+            rule_key = rule["rule_key"]
+            max_per_material = clamp_int(rule.get("max_per_material", 0), 0, 0)
+            already_selected = stats["selected_rule_counts"].get(rule_key, 0)
+            remaining_for_rule = max(0, max_per_material - already_selected)
+            if remaining_for_rule <= 0:
+                continue
+            needed = min(limit - len(selected), remaining_for_rule)
+            for item in rows_for_rule(rule, needed, cooldown_days):
+                if len(selected) >= limit or stats["selected_rule_counts"].get(rule_key, 0) >= max_per_material:
+                    break
+                if not item:
+                    continue
+                key = item_normalized_key(item)
+                if not key or key in selected_keys:
+                    stats["rejected_recent_duplicate_count"] += 1
+                    continue
+                if cooldown_days > 0 and key in recent_keys_by_days.get(cooldown_days, set()):
+                    stats["rejected_recent_duplicate_count"] += 1
+                    continue
+                low_quality, _ = is_low_quality_compound_word(item)
+                if low_quality:
+                    stats["rejected_low_quality_count"] += 1
+                    continue
+                select_item(item, rule_key)
+        if len(selected) > selected_before_cooldown:
+            stats["cooldown_days_used"] = cooldown_days
+
+    selected = selected[:limit]
+    mark_vocabulary_pool_used([item for item in selected if item.get("source") == "vocabulary_pool"])
+    mark_slang_used_in_material(sns_slang_ids)
+    for item in selected:
+        group = vocab_category_group(item)
+        stats["category_counts"][group] = stats["category_counts"].get(group, 0) + 1
+        item.pop("_row", None)
+        item.pop("_slang_id", None)
+        item.pop("_pool_id", None)
+        item.pop("_pool_has_last_seen", None)
+        item.pop("_pool_has_last_used", None)
+        item.pop("_pool_has_used_count", None)
+        item.pop("_raw_source", None)
+        item.pop("_matched_rule_keys", None)
+    stats["selected_from_db_count"] = len(selected)
+    stats["generation_elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+    print(
+        f"[vocab-selector] strategy=six_main_rules target_level={settings.get('target_level')} word_count={limit} "
+        f"available_rules={stats['rule_selection']['available_rules']} "
+        f"blocked_by_period={stats['rule_selection']['blocked_by_period']} "
+        f"selected_counts={stats['rule_selection']['selected_counts']} "
+        f"cooldown_days_used={stats['cooldown_days_used']} elapsed_ms={stats['generation_elapsed_ms']}"
+    )
+    return (selected, stats) if return_stats else selected
+
+
 def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
+    return material_vocab_from_six_main_rules(settings, limit, exclude_keys=exclude_keys, return_stats=return_stats, material_date=material_date)
     started = time.perf_counter()
     stats = {
         "selection_strategy": "safe_jlpt_basic_only" if local_generation_safe_mode_enabled() else "safe_jlpt_prefilter_first",
@@ -6171,6 +6471,7 @@ def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
             "example_sentence": item.get("example_sentence", ""),
             "example_translation_zh": item.get("example_translation_zh", ""),
             "source": first_text(item, ["source"]) or "seed_basic",
+            "rule_key": f"jlpt:{first_text(item, ['jlpt_level']) or settings.get('target_level', 'N5')}",
         }
 
     seed_items = [item for item in (normalized_seed_item(raw) for raw in seed) if item]
@@ -6213,6 +6514,17 @@ def merge_vocab_selector_stats(target, source):
             target[key][name] = target[key].get(name, 0) + count
     target.setdefault("rule_remaining_after_generation", {})
     target["rule_remaining_after_generation"].update(source.get("rule_remaining_after_generation") or {})
+    target.setdefault("rule_selection", {"available_rules": [], "blocked_by_period": [], "selected_counts": {}})
+    source_rule_selection = source.get("rule_selection") or {}
+    target["rule_selection"]["available_rules"] = sorted(
+        set(target["rule_selection"].get("available_rules", [])) | set(source_rule_selection.get("available_rules", []))
+    )
+    target["rule_selection"]["blocked_by_period"] = sorted(
+        set(target["rule_selection"].get("blocked_by_period", [])) | set(source_rule_selection.get("blocked_by_period", []))
+    )
+    target["rule_selection"].setdefault("selected_counts", {})
+    for rule_key, count in (source_rule_selection.get("selected_counts") or {}).items():
+        target["rule_selection"]["selected_counts"][rule_key] = target["rule_selection"]["selected_counts"].get(rule_key, 0) + count
     target.setdefault("rejected_by_category_quota", {})
     for name, count in (source.get("rejected_by_category_quota") or {}).items():
         target["rejected_by_category_quota"][name] = target["rejected_by_category_quota"].get(name, 0) + count
@@ -6678,14 +6990,14 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
 def build_local_material(settings, force_seed=False, material_date=None):
     material_started = time.perf_counter()
     settings = normalize_settings(settings)
-    safe_mode = local_generation_safe_mode_enabled()
+    safe_mode = False
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
     grammar_level = settings.get("grammar_level", "N5") if settings.get("grammar_level") in LEVELS else "N5"
     grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
-        "selection_strategy": "safe_jlpt_basic_only" if safe_mode else "safe_jlpt_prefilter_first",
+        "selection_strategy": "six_main_rules_period_first",
         "local_generation_safe_mode": safe_mode,
         "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS),
         "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES),
@@ -6717,10 +7029,10 @@ def build_local_material(settings, force_seed=False, material_date=None):
     duplicate_filtered_count = 0
 
     vocab_mode = settings.get("vocab_mode", "general")
-    max_slang_quota = 0 if safe_mode or vocab_count < 5 else max(1, min(int(vocab_count * 0.2), vocab_count))
+    # SNS terms are now governed only by the six main appearance rules
+    # (category:SNS).  The older vocab_mode quota path is intentionally
+    # disabled so it cannot bypass weekly/monthly period controls.
     slang_quota = 0
-    if not safe_mode and vocab_mode == "sns" and vocab_count >= 5:
-        slang_quota = min(max(1, int(vocab_count * 0.1)), max_slang_quota)
 
     base_quota = max(0, vocab_count - slang_quota)
     if force_seed:
@@ -6747,6 +7059,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
         vocab.extend(seed_items)
         vocab_seed_fallback_count = len(seed_items)
         vocab_selector_stats["selected_from_seed_fallback_count"] = vocab_seed_fallback_count
+        vocab_selector_stats.setdefault("rule_selection", {"available_rules": [], "blocked_by_period": [], "selected_counts": {}})
+        vocab_selector_stats["rule_selection"].setdefault("selected_counts", {})
+        for item in seed_items:
+            rule_key = item.get("rule_key")
+            if rule_key:
+                vocab_selector_stats["rule_selection"]["selected_counts"][rule_key] = (
+                    vocab_selector_stats["rule_selection"]["selected_counts"].get(rule_key, 0) + 1
+                )
+                vocab_selector_stats.setdefault("selected_rule_counts", {})
+                vocab_selector_stats["selected_rule_counts"][rule_key] = vocab_selector_stats["selected_rule_counts"].get(rule_key, 0) + 1
         source_counts["seed"] += len(seed_items)
         seed_used = bool(seed_items)
     vocab = vocab[:vocab_count]
@@ -6811,7 +7133,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         generation_warnings.append("insufficient_safe_vocab_pool")
     metadata = {
         "generation_mode": "local",
-        "selection_strategy": "safe_jlpt_basic_only" if safe_mode else "safe_jlpt_prefilter_first",
+        "selection_strategy": "six_main_rules_period_first",
         "local_generation_safe_mode": safe_mode,
         "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS) if safe_mode else [],
         "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES) if safe_mode else [],
@@ -6827,6 +7149,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "part_of_speech_counts": dict(part_of_speech_counts),
         "vocab_rule_summary": vocab_selector_stats.get("selected_rule_counts", {}),
         "selected_rule_counts": vocab_selector_stats.get("selected_rule_counts", {}),
+        "rule_selection": vocab_selector_stats.get("rule_selection", {}),
         "rule_remaining_after_generation": vocab_selector_stats.get("rule_remaining_after_generation", {}),
         "selected_by_jlpt_count": vocab_selector_stats.get("selected_by_jlpt_count", 0),
         "selected_target_jlpt_count": vocab_selector_stats.get("selected_target_jlpt_count", 0),
@@ -8478,32 +8801,21 @@ def api_save_vocab_rules():
     if not isinstance(rules, list):
         return jsonify({"ok": False, "error": "invalid_rules_payload", "message": "\u8acb\u63d0\u4f9b\u8981\u5132\u5b58\u7684\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u3002"}), 400
     unsupported = [
-        str(rule.get("source_type") or rule.get("group_key") or "")
+        str(rule.get("rule_key") or "")
         for rule in rules
-        if str(rule.get("source_type") or rule.get("group_key") or "") not in VOCAB_RULE_VISIBLE_TYPES
+        if str(rule.get("rule_key") or "") not in SIX_MAIN_VOCAB_RULE_KEYS
     ]
-    if local_generation_safe_mode_enabled():
-        unsupported.extend(
-            str(rule.get("rule_key") or rule.get("match_value") or "")
-            for rule in rules
-            if (
-                (str(rule.get("source_type") or rule.get("group_key") or "") == "jlpt_level"
-                 and clean_rule_match_value(rule.get("match_value")) not in LOCAL_SAFE_MODE_JLPT_LEVELS)
-                or (str(rule.get("source_type") or rule.get("group_key") or "") == "category"
-                    and clean_rule_match_value(rule.get("match_value")) not in LOCAL_SAFE_MODE_CATEGORIES)
-            )
-        )
     if unsupported:
         return jsonify(
             {
                 "ok": False,
-                "error": "unsupported_rule_type",
-                "message": "\u76ee\u524d\u50c5\u652f\u63f4 JLPT \u7b49\u7d1a\u8207\u55ae\u5b57\u5206\u985e\u8a2d\u5b9a\u3002",
+                "error": "unsupported_rule_key",
+                "message": "\u76ee\u524d\u53ea\u652f\u63f4 N1\u3001N2\u3001N3\u3001N4\u3001N5\u3001SNS \u8a5e\u985e\u3002",
             }
         ), 400
     try:
         result = insert_or_update_vocab_rules(rules)
-        return jsonify({"ok": True, "success": True, "message": "\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u5df2\u5132\u5b58\u3002", **result})
+        return jsonify({"ok": True, "success": True, "message": "\u55ae\u5b57\u51fa\u73fe\u898f\u5247\u5df2\u5132\u5b58\u3002", **result, **build_vocab_rules_payload(create_missing=False)})
     except Exception as exc:
         print(f"[vocab-rules] save failed; reason={exc}")
         print(traceback.format_exc())
