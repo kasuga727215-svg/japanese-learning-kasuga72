@@ -31,6 +31,53 @@
     .success-text { color: var(--primary); font-weight: 700; }
     .table-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .table-scroll table { min-width: 1120px; color: var(--text-color); }
+    .verb-table-wrapper {
+      width: 100%;
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      padding-bottom: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(0,255,204,.75) rgba(255,255,255,.08);
+    }
+    .verb-table-wrapper::-webkit-scrollbar { height: 10px; }
+    .verb-table-wrapper::-webkit-scrollbar-track { background: rgba(255,255,255,.08); border-radius: 999px; }
+    .verb-table-wrapper::-webkit-scrollbar-thumb { background: rgba(0,255,204,.72); border-radius: 999px; box-shadow: 0 0 8px rgba(0,255,204,.35); }
+    .verb-conjugation-table {
+      min-width: 1480px;
+      width: max-content;
+      border-collapse: collapse;
+      color: #eef4ff;
+    }
+    .verb-conjugation-table th,
+    .verb-conjugation-table td {
+      white-space: nowrap;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-wrap: break-word;
+    }
+    .verb-dictionary-cell {
+      min-width: 280px;
+      max-width: 360px;
+      white-space: normal !important;
+      line-height: 1.55;
+    }
+    .verb-surface { color: #35f2e1; font-weight: 800; font-size: 1.02rem; }
+    .verb-reading { color: #b8c4e0; margin-left: 4px; }
+    .verb-meaning { color: #eef4ff; display: block; margin-top: 3px; }
+    .verb-meta-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    .verb-meta-tag {
+      color: #9fe8ff;
+      background: rgba(102,209,255,.12);
+      border: 1px solid rgba(102,209,255,.35);
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: .78rem;
+      font-weight: 800;
+    }
+    .verb-form-cell { color: #eef4ff; font-weight: 700; }
+    .verb-no-form { color: #aeb4c8; font-weight: 700; }
     .table thead th { color: var(--primary); border-bottom-color: var(--primary); }
     #grammar-exp { color: #f2f5ff; line-height: 1.75; font-size: 1.04rem; background: rgba(255,255,255,.045); border: 1px solid rgba(0,255,204,.16); border-radius: 6px; padding: 12px 14px; }
     .example-box, .question-box { background: rgba(255,255,255,.09); border: 1px solid rgba(255,255,255,.08); border-left: 4px solid var(--secondary); padding: 12px; margin-bottom: 10px; border-radius: 4px; }
@@ -274,9 +321,9 @@
       <div class="card p-3"><h5 class="fw-bold mb-3" style="color:var(--primary)">單字</h5><div id="vocab-list" class="row g-2"></div></div>
       <div class="card p-3">
         <h5 class="fw-bold mb-3" style="color:var(--primary)">動詞變化表</h5>
-        <div class="table-scroll">
-          <table class="table text-nowrap">
-            <thead><tr><th>辭書形</th><th>連用形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>使役形</th><th>被動形</th><th>使役被動形</th></tr></thead>
+        <div class="verb-table-wrapper">
+          <table class="table verb-conjugation-table">
+            <thead><tr><th>辭書形</th><th>連用形</th><th>て形</th><th>た形</th><th>ない形</th><th>ば形</th><th>條件形（たら）</th><th>意志形</th><th>可能形</th><th>使役形</th><th>被動形</th><th>使役被動形</th></tr></thead>
             <tbody id="verb-list"></tbody>
           </table>
         </div>
@@ -960,6 +1007,45 @@
     `).join("");
   }
 
+  const NO_VERB_FORM = "無此型態";
+
+  function cleanVerbText(value, fallback = NO_VERB_FORM) {
+    const text = String(value ?? "").trim();
+    if (!text || ["null", "undefined", "none", "-"].includes(text.toLowerCase())) return fallback;
+    return text;
+  }
+
+  function verbFormValue(verb, formKey, aliasKey) {
+    const forms = verb && typeof verb.forms === "object" ? verb.forms : {};
+    return cleanVerbText(forms[formKey] ?? verb?.[aliasKey]);
+  }
+
+  function renderVerbDictionaryCell(verb) {
+    const forms = verb && typeof verb.forms === "object" ? verb.forms : {};
+    const surface = cleanVerbText(verb?.surface || verb?.dictionary_form || forms.dictionary || verb?.base, "");
+    const reading = cleanVerbText(verb?.reading_hiragana || verb?.reading, "");
+    const meaning = cleanVerbText(verb?.meaning_zh || verb?.meaning, "尚無中文說明");
+    const verbType = cleanVerbText(verb?.verb_type || verb?.verb_group_label, "未分類");
+    const jlpt = cleanVerbText(verb?.jlpt_level, "未標記");
+    return `
+      <div class="verb-dictionary-cell">
+        <div><span class="verb-surface">${escapeHtml(surface || NO_VERB_FORM)}</span>${reading ? `<span class="verb-reading">（${escapeHtml(reading)}）</span>` : ""}</div>
+        <span class="verb-meaning">${escapeHtml(meaning)}</span>
+        <div class="verb-meta-row">
+          <span class="verb-meta-tag">${escapeHtml(verbType)}</span>
+          <span class="verb-meta-tag">${escapeHtml(jlpt)}</span>
+          <span class="verb-meta-tag">動詞</span>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderVerbFormCell(value) {
+    const text = cleanVerbText(value);
+    const className = text === NO_VERB_FORM ? "verb-no-form" : "verb-form-cell";
+    return `<td class="${className}">${escapeHtml(text)}</td>`;
+  }
+
   function renderMaterial(data) {
     document.getElementById("content-loader").style.display = "none";
     if (!data) {
@@ -970,7 +1056,9 @@
     }
     currentMaterialData = data;
     document.getElementById("material-content").style.display = "block";
-    document.getElementById("vocab-list").innerHTML = data.vocabulary.map(v => `
+    const vocabulary = Array.isArray(data.vocabulary) ? data.vocabulary : [];
+    const verbs = Array.isArray(data.verbs) ? data.verbs : [];
+    document.getElementById("vocab-list").innerHTML = vocabulary.map(v => `
       <div class="col-12 col-md-6"><div class="vocab-card p-3">
         <div class="vocab-card-content">
           <div>
@@ -988,11 +1076,21 @@
           ${v.example_translation_zh ? `<div class="vocab-translation small"><span class="vocab-label">中文：</span><span class="vocab-translation-text">${escapeHtml(v.example_translation_zh)}</span></div>` : ""}
         </div>
       </div></div>`).join("");
-    document.getElementById("verb-list").innerHTML = data.verbs.map(v => `
-      <tr><td style="color:var(--secondary);font-weight:bold;">${escapeHtml(v.base || "-")}</td>
-      <td>${escapeHtml(v.masuStem || "-")}</td><td>${escapeHtml(v.te || "-")}</td><td>${escapeHtml(v.ta || "-")}</td>
-      <td>${escapeHtml(v.nai || "-")}</td><td>${escapeHtml(v.ba || "-")}</td><td>${escapeHtml(v.causative || "-")}</td>
-      <td>${escapeHtml(v.passive || "-")}</td><td>${escapeHtml(v.causativePassive || "-")}</td></tr>`).join("");
+    document.getElementById("verb-list").innerHTML = verbs.map(v => `
+      <tr>
+        <td>${renderVerbDictionaryCell(v)}</td>
+        ${renderVerbFormCell(verbFormValue(v, "masu_stem", "masuStem"))}
+        ${renderVerbFormCell(verbFormValue(v, "te_form", "te"))}
+        ${renderVerbFormCell(verbFormValue(v, "ta_form", "ta"))}
+        ${renderVerbFormCell(verbFormValue(v, "nai_form", "nai"))}
+        ${renderVerbFormCell(verbFormValue(v, "ba_form", "ba"))}
+        ${renderVerbFormCell(verbFormValue(v, "tara_form", "tara"))}
+        ${renderVerbFormCell(verbFormValue(v, "volitional_form", "volitional"))}
+        ${renderVerbFormCell(verbFormValue(v, "potential_form", "potential"))}
+        ${renderVerbFormCell(verbFormValue(v, "causative_form", "causative"))}
+        ${renderVerbFormCell(verbFormValue(v, "passive_form", "passive"))}
+        ${renderVerbFormCell(verbFormValue(v, "causative_passive_form", "causativePassive"))}
+      </tr>`).join("");
     const grammar = data.grammar || {};
     const grammarPoints = Array.isArray(data.grammar_points) ? data.grammar_points : [];
     const grammarLevel = data.grammarLevel || data.metadata?.grammar_level || "";

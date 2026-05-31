@@ -5002,6 +5002,68 @@ MATERIAL_GODAN_FORMS = {
     "む": ("み", "んで", "んだ", "まない", "めば", "ませる", "まれる"),
     "る": ("り", "って", "った", "らない", "れば", "らせる", "られる"),
 }
+MATERIAL_GODAN_A_ROW = {
+    "う": "わ",
+    "く": "か",
+    "ぐ": "が",
+    "す": "さ",
+    "つ": "た",
+    "ぬ": "な",
+    "ぶ": "ば",
+    "む": "ま",
+    "る": "ら",
+}
+MATERIAL_GODAN_E_ROW = {
+    "う": "え",
+    "く": "け",
+    "ぐ": "げ",
+    "す": "せ",
+    "つ": "て",
+    "ぬ": "ね",
+    "ぶ": "べ",
+    "む": "め",
+    "る": "れ",
+}
+MATERIAL_GODAN_O_ROW = {
+    "う": "お",
+    "く": "こ",
+    "ぐ": "ご",
+    "す": "そ",
+    "つ": "と",
+    "ぬ": "の",
+    "ぶ": "ぼ",
+    "む": "も",
+    "る": "ろ",
+}
+NO_VERB_FORM = "無此型態"
+VERB_FORM_SCHEMA = {
+    "dictionary": ("dictionary", "dictionary_form", "base_form", "surface"),
+    "masu_stem": ("masu_stem", "masuStem", "renyou", "renyou_form"),
+    "te_form": ("te_form", "te", "teForm"),
+    "ta_form": ("ta_form", "ta", "taForm"),
+    "nai_form": ("nai_form", "nai", "naiForm"),
+    "ba_form": ("ba_form", "ba", "baForm"),
+    "tara_form": ("tara_form", "tara", "taraForm"),
+    "volitional_form": ("volitional_form", "volitional", "volitionalForm"),
+    "potential_form": ("potential_form", "potential", "potentialForm"),
+    "causative_form": ("causative_form", "causative", "causativeForm"),
+    "passive_form": ("passive_form", "passive", "passiveForm"),
+    "causative_passive_form": ("causative_passive_form", "causativePassive", "causativePassiveForm"),
+}
+VERB_ALIAS_FIELDS = {
+    "base": "dictionary",
+    "masuStem": "masu_stem",
+    "te": "te_form",
+    "ta": "ta_form",
+    "nai": "nai_form",
+    "ba": "ba_form",
+    "tara": "tara_form",
+    "volitional": "volitional_form",
+    "potential": "potential_form",
+    "causative": "causative_form",
+    "passive": "passive_form",
+    "causativePassive": "causative_passive_form",
+}
 SAFE_SURU_NOUNS = {
     "確認",
     "準備",
@@ -5037,6 +5099,117 @@ SAFE_SURU_VERBS = {f"{noun}する" for noun in SAFE_SURU_NOUNS}
 
 def material_verb_group_label(group):
     return {1: "五段", 2: "一段", 3: "不規則"}.get(int(group or 0), "未判定")
+
+
+def material_verb_type_label(group, base_form=""):
+    try:
+        group_int = int(group or 0)
+    except (TypeError, ValueError):
+        group_int = 0
+    if group_int == 1:
+        return "五段"
+    if group_int == 2:
+        return "一段"
+    if group_int == 3:
+        if str(base_form) in {"来る", "くる"}:
+            return "カ變"
+        if str(base_form).endswith("する") or str(base_form) == "する":
+            return "サ變"
+        return "不規則"
+    return "未分類"
+
+
+def clean_verb_form(value):
+    text = str(value or "").strip()
+    if not text or text.lower() in {"none", "null", "undefined", "-"}:
+        return NO_VERB_FORM
+    return text
+
+
+def pick_form_value(source, keys):
+    if not isinstance(source, dict):
+        return ""
+    for key in keys:
+        if key in source and str(source.get(key) or "").strip():
+            return source.get(key)
+    return ""
+
+
+def make_verb_base_display(surface, reading, meaning, verb_type, jlpt_level):
+    surface = str(surface or "").strip()
+    reading = str(reading or "").strip()
+    meaning = str(meaning or "").strip() or "尚無中文說明"
+    verb_type = str(verb_type or "").strip() or "未分類"
+    jlpt_level = str(jlpt_level or "").strip() or "未標記"
+    label = f"{surface}（{reading}）" if reading else surface
+    return f"{label} - {meaning}｜{verb_type}｜{jlpt_level}｜動詞"
+
+
+def normalize_material_verb_schema(item):
+    if not isinstance(item, dict):
+        item = {}
+    forms_source = item.get("forms") if isinstance(item.get("forms"), dict) else item
+    legacy_base = first_text(item, ["base"])
+    surface = (
+        first_text(item, ["surface", "dictionary_form", "base_form"])
+        or pick_form_value(forms_source, VERB_FORM_SCHEMA["dictionary"])
+        or first_text(item, ["dictionary"])
+    )
+    reading = first_text(item, ["reading_hiragana", "reading", "kana"])
+    meaning = first_text(item, ["meaning_zh", "meaning", "vocab_meaning"])
+    if not surface and legacy_base:
+        surface = re.split(r"（|\s+-\s+|｜", legacy_base, maxsplit=1)[0].strip()
+    if not reading and legacy_base:
+        match = re.search(r"（([^）]+)）", legacy_base)
+        reading = match.group(1).strip() if match else ""
+    if not meaning and " - " in legacy_base:
+        meaning = legacy_base.split(" - ", 1)[1].split("｜", 1)[0].strip()
+    meaning = meaning or "尚無中文說明"
+    raw_group = item.get("verb_group")
+    try:
+        group_for_generation = int(raw_group or 0) or infer_material_verb_group(item, surface)
+    except (TypeError, ValueError):
+        group_for_generation = infer_material_verb_group(item, surface)
+    generated_forms = conjugate_material_verb(surface, group_for_generation) if surface and group_for_generation else {}
+    if isinstance(generated_forms, dict) and generated_forms:
+        merged_forms = dict(generated_forms)
+        merged_forms.update({key: value for key, value in forms_source.items() if str(value or "").strip()})
+        forms_source = merged_forms
+    verb_type = first_text(item, ["verb_type", "verb_group_label"]) or material_verb_type_label(group_for_generation or raw_group, surface)
+    jlpt_level = first_text(item, ["jlpt_level", "target_level", "level"]) or "未標記"
+    part_of_speech = first_text(item, ["part_of_speech", "pos"]) or "動詞"
+    forms = {}
+    for key, aliases in VERB_FORM_SCHEMA.items():
+        forms[key] = clean_verb_form(pick_form_value(forms_source, aliases))
+    if forms["dictionary"] == NO_VERB_FORM and surface:
+        forms["dictionary"] = surface
+    if not surface and forms["dictionary"] != NO_VERB_FORM:
+        surface = forms["dictionary"]
+
+    normalized = dict(item)
+    normalized.update(
+        {
+            "surface": surface,
+            "dictionary_form": surface,
+            "reading_hiragana": reading,
+            "reading": reading,
+            "meaning_zh": meaning,
+            "meaning": meaning,
+            "verb_group": group_for_generation or raw_group,
+            "verb_type": verb_type,
+            "verb_group_label": verb_type,
+            "jlpt_level": jlpt_level,
+            "part_of_speech": "動詞" if not part_of_speech or "動詞" not in part_of_speech else part_of_speech,
+            "forms": forms,
+            "base": make_verb_base_display(surface, reading, meaning, verb_type, jlpt_level),
+        }
+    )
+    for alias, form_key in VERB_ALIAS_FIELDS.items():
+        if alias == "base":
+            continue
+        normalized[alias] = forms.get(form_key, NO_VERB_FORM)
+    normalized.setdefault("normalized_key", normalize_vocab_key(surface))
+    return normalized
 
 
 def row_is_explicit_verb(row):
@@ -5148,75 +5321,149 @@ def infer_material_verb_group(row, base_form):
 def conjugate_material_verb(base_form, group):
     if not base_form:
         return None
+    def with_aliases(values):
+        values = {key: clean_verb_form(value) for key, value in values.items()}
+        return {
+            "dictionary": values.get("dictionary", clean_verb_form(base_form)),
+            "renyou": values.get("masu_stem", NO_VERB_FORM),
+            "masu_stem": values.get("masu_stem", NO_VERB_FORM),
+            "te": values.get("te_form", NO_VERB_FORM),
+            "te_form": values.get("te_form", NO_VERB_FORM),
+            "ta": values.get("ta_form", NO_VERB_FORM),
+            "ta_form": values.get("ta_form", NO_VERB_FORM),
+            "nai": values.get("nai_form", NO_VERB_FORM),
+            "nai_form": values.get("nai_form", NO_VERB_FORM),
+            "ba": values.get("ba_form", NO_VERB_FORM),
+            "ba_form": values.get("ba_form", NO_VERB_FORM),
+            "tara": values.get("tara_form", NO_VERB_FORM),
+            "tara_form": values.get("tara_form", NO_VERB_FORM),
+            "volitional": values.get("volitional_form", NO_VERB_FORM),
+            "volitional_form": values.get("volitional_form", NO_VERB_FORM),
+            "potential": values.get("potential_form", NO_VERB_FORM),
+            "potential_form": values.get("potential_form", NO_VERB_FORM),
+            "causative": values.get("causative_form", NO_VERB_FORM),
+            "causative_form": values.get("causative_form", NO_VERB_FORM),
+            "passive": values.get("passive_form", NO_VERB_FORM),
+            "passive_form": values.get("passive_form", NO_VERB_FORM),
+            "causative_passive": values.get("causative_passive_form", NO_VERB_FORM),
+            "causative_passive_form": values.get("causative_passive_form", NO_VERB_FORM),
+        }
+
     if group == 3:
         if base_form in {"来る", "くる"}:
             if base_form == "くる":
-                return {
-                    "renyou": "き",
-                    "te": "きて",
-                    "ta": "きた",
-                    "nai": "こない",
-                    "ba": "くれば",
-                    "causative": "こさせる",
-                    "passive": "こられる",
-                }
+                return with_aliases(
+                    {
+                        "dictionary": "くる",
+                        "masu_stem": "き",
+                        "te_form": "きて",
+                        "ta_form": "きた",
+                        "nai_form": "こない",
+                        "ba_form": "くれば",
+                        "tara_form": "きたら",
+                        "volitional_form": "こよう",
+                        "potential_form": "こられる",
+                        "causative_form": "こさせる",
+                        "passive_form": "こられる",
+                        "causative_passive_form": "こさせられる",
+                    }
+                )
             prefix = "来"
-            return {
-                "renyou": prefix,
-                "te": f"{prefix}て",
-                "ta": f"{prefix}た",
-                "nai": f"{prefix}ない",
-                "ba": f"{prefix}れば",
-                "causative": f"{prefix}させる",
-                "passive": f"{prefix}られる",
-            }
+            return with_aliases(
+                {
+                    "dictionary": "来る",
+                    "masu_stem": prefix,
+                    "te_form": f"{prefix}て",
+                    "ta_form": f"{prefix}た",
+                    "nai_form": f"{prefix}ない",
+                    "ba_form": f"{prefix}れば",
+                    "tara_form": f"{prefix}たら",
+                    "volitional_form": f"{prefix}よう",
+                    "potential_form": f"{prefix}られる",
+                    "causative_form": f"{prefix}させる",
+                    "passive_form": f"{prefix}られる",
+                    "causative_passive_form": f"{prefix}させられる",
+                }
+            )
         stem = base_form[:-2] if base_form.endswith("する") else ""
-        return {
-            "renyou": f"{stem}し",
-            "te": f"{stem}して",
-            "ta": f"{stem}した",
-            "nai": f"{stem}しない",
-            "ba": f"{stem}すれば",
-            "causative": f"{stem}させる",
-            "passive": f"{stem}される",
-        }
+        potential = "できる" if not stem else f"{stem}できる"
+        return with_aliases(
+            {
+                "dictionary": base_form,
+                "masu_stem": f"{stem}し",
+                "te_form": f"{stem}して",
+                "ta_form": f"{stem}した",
+                "nai_form": f"{stem}しない",
+                "ba_form": f"{stem}すれば",
+                "tara_form": f"{stem}したら",
+                "volitional_form": f"{stem}しよう",
+                "potential_form": potential,
+                "causative_form": f"{stem}させる",
+                "passive_form": f"{stem}される",
+                "causative_passive_form": f"{stem}させられる",
+            }
+        )
     if group == 2:
         stem = base_form[:-1]
-        return {
-            "renyou": stem,
-            "te": f"{stem}て",
-            "ta": f"{stem}た",
-            "nai": f"{stem}ない",
-            "ba": f"{stem}れば",
-            "causative": f"{stem}させる",
-            "passive": f"{stem}られる",
-        }
+        return with_aliases(
+            {
+                "dictionary": base_form,
+                "masu_stem": stem,
+                "te_form": f"{stem}て",
+                "ta_form": f"{stem}た",
+                "nai_form": f"{stem}ない",
+                "ba_form": f"{stem}れば",
+                "tara_form": f"{stem}たら",
+                "volitional_form": f"{stem}よう",
+                "potential_form": f"{stem}られる",
+                "causative_form": f"{stem}させる",
+                "passive_form": f"{stem}られる",
+                "causative_passive_form": f"{stem}させられる",
+            }
+        )
     if group == 1:
         if base_form == "行く":
-            return {
-                "renyou": "行き",
-                "te": "行って",
-                "ta": "行った",
-                "nai": "行かない",
-                "ba": "行けば",
-                "causative": "行かせる",
-                "passive": "行かれる",
-            }
+            return with_aliases(
+                {
+                    "dictionary": "行く",
+                    "masu_stem": "行き",
+                    "te_form": "行って",
+                    "ta_form": "行った",
+                    "nai_form": "行かない",
+                    "ba_form": "行けば",
+                    "tara_form": "行ったら",
+                    "volitional_form": "行こう",
+                    "potential_form": "行ける",
+                    "causative_form": "行かせる",
+                    "passive_form": "行かれる",
+                    "causative_passive_form": "行かせられる",
+                }
+            )
         ending = base_form[-1:]
         forms = MATERIAL_GODAN_FORMS.get(ending)
         if not forms:
             return None
         stem = base_form[:-1]
         renyou, te, ta, nai, ba, causative, passive = forms
-        return {
-            "renyou": f"{stem}{renyou}",
-            "te": f"{stem}{te}",
-            "ta": f"{stem}{ta}",
-            "nai": f"{stem}{nai}",
-            "ba": f"{stem}{ba}",
-            "causative": f"{stem}{causative}",
-            "passive": f"{stem}{passive}",
-        }
+        a_row = MATERIAL_GODAN_A_ROW.get(ending, "")
+        e_row = MATERIAL_GODAN_E_ROW.get(ending, "")
+        o_row = MATERIAL_GODAN_O_ROW.get(ending, "")
+        return with_aliases(
+            {
+                "dictionary": base_form,
+                "masu_stem": f"{stem}{renyou}",
+                "te_form": f"{stem}{te}",
+                "ta_form": f"{stem}{ta}",
+                "nai_form": f"{stem}{nai}",
+                "ba_form": f"{stem}{ba}",
+                "tara_form": f"{stem}{ta}ら",
+                "volitional_form": f"{stem}{o_row}う",
+                "potential_form": f"{stem}{e_row}る",
+                "causative_form": f"{stem}{causative}",
+                "passive_form": f"{stem}{passive}",
+                "causative_passive_form": f"{stem}{a_row}せられる",
+            }
+        )
     return None
 
 
@@ -5243,41 +5490,50 @@ def build_material_verb_from_vocab_row(row):
 
     meaning = first_text(row, ["meaning_zh", "meaning_zh_tw", "meaning", "vocab_meaning"])
     level = first_text(row, ["jlpt_level", "target_level", "level"])
-    group_text = material_verb_group_label(group)
+    group_text = material_verb_type_label(group, base_form)
     normalized_key = normalize_vocab_key(first_text(row, ["normalized_key", "normalized_term", "base_form", "surface", "term", "word"]) or base_form)
-    base_parts = [f"{base_form}（{reading}）" if reading else base_form]
-    if meaning:
-        base_parts.append(meaning)
-    meta_parts = [group_text]
-    if level:
-        meta_parts.append(level)
-    base_display = " - ".join(base_parts)
-    if meta_parts:
-        base_display = f"{base_display}｜{'｜'.join(meta_parts)}"
-    return {
-        "base": base_display,
+    item = {
+        "surface": base_form,
         "dictionary_form": base_form,
-        "reading": reading,
-        "meaning": meaning,
+        "reading_hiragana": reading,
+        "meaning_zh": meaning,
         "verb_group": group,
-        "verb_group_label": group_text,
+        "verb_type": group_text,
         "jlpt_level": level,
-        "part_of_speech": first_text(row, ["part_of_speech", "pos"]) or group_text,
+        "part_of_speech": "動詞",
         "normalized_key": normalized_key,
+        "forms": {
+            "dictionary": forms["dictionary"],
+            "masu_stem": forms["masu_stem"],
+            "te_form": forms["te_form"],
+            "ta_form": forms["ta_form"],
+            "nai_form": forms["nai_form"],
+            "ba_form": forms["ba_form"],
+            "tara_form": forms["tara_form"],
+            "volitional_form": forms["volitional_form"],
+            "potential_form": forms["potential_form"],
+            "causative_form": forms["causative_form"],
+            "passive_form": forms["passive_form"],
+            "causative_passive_form": forms["causative_passive_form"],
+        },
         "masuStem": forms["renyou"],
         "te": forms["te"],
         "ta": forms["ta"],
         "nai": forms["nai"],
         "ba": forms["ba"],
+        "tara": forms["tara"],
+        "volitional": forms["volitional"],
+        "potential": forms["potential"],
         "causative": forms["causative"],
         "passive": forms["passive"],
-        "causativePassive": "",
+        "causativePassive": forms["causative_passive"],
         "source": source,
         "_pool_id": row.get("id"),
         "_pool_has_last_seen": "last_seen_at" in row,
         "_pool_has_last_used": "last_used_at" in row,
         "_pool_has_used_count": "used_in_material_count" in row,
     }
+    return normalize_material_verb_schema(item)
 
 
 def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
@@ -5553,28 +5809,38 @@ def material_verbs_from_db(limit, exclude_keys=None):
             continue
         seen.add(key)
         group = row.get("verb_group", "")
-        group_text = material_verb_group_label(group)
-        base_display = f"{row['dictionary_form']}（{row['reading']}） - {row['meaning']}｜{group_text}"
-        items.append(
-            {
-                "base": base_display,
-                "dictionary_form": row["dictionary_form"],
-                "reading": row["reading"],
-                "meaning": row["meaning"],
-                "verb_group": group,
-                "verb_group_label": group_text,
-                "normalized_key": key,
-                "masuStem": answer_display_value(row["renyou_form"]),
-                "te": answer_display_value(row["te_form"]),
-                "ta": answer_display_value(row["ta_form"]),
-                "nai": answer_display_value(row["nai_form"]),
-                "ba": answer_display_value(row["ba_form"]),
-                "causative": answer_display_value(row["shieki_form"]),
-                "passive": answer_display_value(row["ukemi_form"]),
-                "causativePassive": "",
-                "source": "verbs",
-            }
-        )
+        try:
+            group_int = int(group)
+        except (TypeError, ValueError):
+            group_int = infer_material_verb_group(row, row["dictionary_form"])
+        generated = conjugate_material_verb(row["dictionary_form"], group_int) or {}
+        item = {
+            "surface": row["dictionary_form"],
+            "dictionary_form": row["dictionary_form"],
+            "reading_hiragana": row["reading"],
+            "meaning_zh": row["meaning"],
+            "verb_group": group_int,
+            "verb_type": material_verb_type_label(group_int, row["dictionary_form"]),
+            "jlpt_level": row.get("jlpt_level", ""),
+            "part_of_speech": "動詞",
+            "normalized_key": key,
+            "forms": {
+                "dictionary": row["dictionary_form"],
+                "masu_stem": answer_display_value(row.get("renyou_form") or generated.get("masu_stem")),
+                "te_form": answer_display_value(row.get("te_form") or generated.get("te_form")),
+                "ta_form": answer_display_value(row.get("ta_form") or generated.get("ta_form")),
+                "nai_form": answer_display_value(row.get("nai_form") or generated.get("nai_form")),
+                "ba_form": answer_display_value(row.get("ba_form") or generated.get("ba_form")),
+                "tara_form": answer_display_value(generated.get("tara_form")),
+                "volitional_form": answer_display_value(generated.get("volitional_form")),
+                "potential_form": answer_display_value(generated.get("potential_form")),
+                "causative_form": answer_display_value(row.get("shieki_form") or generated.get("causative_form")),
+                "passive_form": answer_display_value(row.get("ukemi_form") or generated.get("passive_form")),
+                "causative_passive_form": answer_display_value(generated.get("causative_passive_form")),
+            },
+            "source": "verbs",
+        }
+        items.append(normalize_material_verb_schema(item))
         if len(items) >= limit:
             break
     return items
@@ -5649,7 +5915,7 @@ def material_seed_verbs(settings, limit, exclude_keys=None):
         copied = dict(item)
         copied.setdefault("normalized_key", key)
         copied["source"] = "seed"
-        items.append(copied)
+        items.append(normalize_material_verb_schema(copied))
         if len(items) >= limit:
             return items
     return items[:limit]
@@ -6042,7 +6308,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         verb_source_summary["verbs"] += len(db_verbs)
         if db_verbs:
             print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
-    verbs = verbs[:verb_count]
+    verbs = [normalize_material_verb_schema(item) for item in verbs[:verb_count]]
     selected_verb_keys = [item_normalized_key(item) for item in verbs if item_normalized_key(item)]
 
     wrong_items = due_wrong_answer_summary()
@@ -6364,17 +6630,19 @@ def material_from_rows(rows, target_date=None):
             )
         if row["verb_base"]:
             verbs.append(
-                {
-                    "base": row["verb_base"],
-                    "masuStem": row.get("verb_masu_stem", ""),
-                    "te": row["verb_te"],
-                    "ta": row["verb_ta"],
-                    "nai": row["verb_nai"],
-                    "ba": row["verb_ba"],
-                    "causative": row["verb_causative"],
-                    "passive": row["verb_passive"],
-                    "causativePassive": row["verb_causative_passive"],
-                }
+                normalize_material_verb_schema(
+                    {
+                        "base": row["verb_base"],
+                        "masuStem": row.get("verb_masu_stem", ""),
+                        "te": row["verb_te"],
+                        "ta": row["verb_ta"],
+                        "nai": row["verb_nai"],
+                        "ba": row["verb_ba"],
+                        "causative": row["verb_causative"],
+                        "passive": row["verb_passive"],
+                        "causativePassive": row["verb_causative_passive"],
+                    }
+                )
             )
 
     json_rows = rows[rows["material_json"].astype(str).str.strip() != ""] if "material_json" in rows.columns else rows
@@ -6416,7 +6684,7 @@ def material_from_rows(rows, target_date=None):
             ]
         payload_verbs = material_payload.get("verbs") or []
         if payload_verbs:
-            verbs = payload_verbs
+            verbs = [normalize_material_verb_schema(item) for item in payload_verbs]
 
     date_iso = canonical_material_date(first.get("material_date") or first.get("date") or target_date)
     try:
