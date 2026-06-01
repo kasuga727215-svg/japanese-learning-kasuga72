@@ -4339,6 +4339,54 @@ def get_recent_used_normalized_keys(days=14, material_date=None, include_all_ver
         return set()
 
 
+def get_recent_used_verb_keys(material_date=None, days=14, include_all_versions=True):
+    try:
+        day_count = max(0, int(days or 0))
+    except (TypeError, ValueError):
+        day_count = 14
+    if day_count <= 0:
+        return set()
+    try:
+        end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
+    except Exception:
+        end_date = taipei_now().date()
+    start_date = end_date - timedelta(days=day_count - 1)
+    start, end = start_date.isoformat(), end_date.isoformat()
+    try:
+        if DATABASE_URL and not vocab_pool_db_query_allowed():
+            return set()
+        ensure_vocab_rules_store()
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT normalized_key
+                        FROM vocab_selection_logs
+                        WHERE material_date BETWEEN %s AND %s
+                          AND selected_for = 'verb'
+                          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                        """,
+                        (start, end),
+                    )
+                    return {normalize_vocab_key(row[0]) for row in cur.fetchall() if row and row[0]}
+        rowset = sqlite_dicts(
+            """
+            SELECT DISTINCT normalized_key
+            FROM vocab_selection_logs
+            WHERE material_date BETWEEN ? AND ?
+              AND selected_for = 'verb'
+              AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+            """,
+            (start, end),
+        )
+        return {normalize_vocab_key(row.get("normalized_key")) for row in rowset if row.get("normalized_key")}
+    except Exception as exc:
+        print(f"[verb-selector] recent verb lookup failed; days={days}; reason={exc}")
+        mark_vocab_pool_db_unavailable(exc)
+        return set()
+
+
 def jlpt_level_rank(level):
     try:
         return int(str(level or "").upper().replace("N", ""))
@@ -5079,8 +5127,8 @@ def record_vocab_selection_logs(items, selected_for="word", material_date=None, 
                 {
                     "material_date": material_date,
                     "vocabulary_id": item.get("_pool_id"),
-                    "surface": item.get("word", ""),
-                    "base_form": item.get("base_form", item.get("word", "")),
+                    "surface": first_text(item, ["word", "surface", "dictionary_form", "base_form", "term"]),
+                    "base_form": first_text(item, ["base_form", "dictionary_form", "surface", "word", "term"]),
                     "normalized_key": item_normalized_key(item),
                     "rule_key": rule_key,
                     "group_key": source_type,
@@ -6390,13 +6438,15 @@ def build_material_verb_from_vocab_row(row):
     return normalize_material_verb_schema(item)
 
 
-def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
+def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, material_date=None, recent_keys_by_days=None):
     stats = {
         "duplicate_filtered_count": 0,
         "selected_keys": [],
         "source_summary": {"vocabulary_pool": 0, "vocabulary_pool_suru": 0},
         "rejected_fake_suru_count": 0,
         "verb_candidate_count": 0,
+        "recent_duplicate_rejected_count": 0,
+        "cooldown_days_used": 14,
     }
     if limit <= 0:
         return [], stats
@@ -6406,15 +6456,11 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
 
     target = settings.get("target_level", "")
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
-    today = taipei_now().date()
-    buckets = {
-        "target_fresh": [],
-        "target_relaxed7": [],
-        "adjacent_fresh": [],
-        "adjacent_relaxed7": [],
-        "distant_fresh": [],
-        "cooldown_any": [],
+    recent_keys_by_days = recent_keys_by_days or {
+        days: get_recent_used_verb_keys(material_date=material_date, days=days)
+        for days in (14, 7, 3)
     }
+    candidates = []
 
     rejected_log_count = 0
     for row in rows:
@@ -6438,15 +6484,8 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
         if not key or key in seen:
             stats["duplicate_filtered_count"] += 1
             continue
-        seen.add(key)
         row_level = first_text(row, ["jlpt_level", "target_level", "level"])
         level_distance = preferred_level_distance(target, row_level)
-        try:
-            cooldown_days = max(14, int(row.get("cooldown_days", 14) or 14))
-        except (TypeError, ValueError):
-            cooldown_days = 14
-        last_used = parse_loose_date(first_text(row, ["last_used_at", "last_seen_at"]))
-        days_since = 99999 if not last_used else (today - last_used).days
         priority = first_text(row, ["priority", "weight"])
         try:
             priority_value = int(float(priority)) if priority else 0
@@ -6459,25 +6498,32 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None):
             -priority_value,
             random.random(),
         )
-        if level_distance == 0 and days_since >= cooldown_days:
-            buckets["target_fresh"].append(item)
-        elif level_distance == 0 and days_since >= 7:
-            buckets["target_relaxed7"].append(item)
-        elif level_distance == 1 and days_since >= cooldown_days:
-            buckets["adjacent_fresh"].append(item)
-        elif level_distance == 1 and days_since >= 7:
-            buckets["adjacent_relaxed7"].append(item)
-        elif level_distance > 1 and days_since >= cooldown_days:
-            buckets["distant_fresh"].append(item)
-        else:
-            buckets["cooldown_any"].append(item)
+        candidates.append(item)
 
-    ordered = []
-    for bucket_name in ("target_fresh", "target_relaxed7", "adjacent_fresh", "adjacent_relaxed7", "distant_fresh", "cooldown_any"):
-        ordered.extend(sorted(buckets[bucket_name], key=lambda item: item["_sort"]))
-        if len(ordered) >= limit:
+    candidates = sorted(candidates, key=lambda item: item["_sort"])
+    selected = []
+    selected_keys = set(seen)
+    for cooldown_days in (14, 7, 3, 0):
+        before_count = len(selected)
+        recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
+        for item in candidates:
+            if len(selected) >= limit:
+                break
+            key = item_normalized_key(item)
+            if not key or key in selected_keys:
+                continue
+            if cooldown_days > 0 and key in recent_keys:
+                stats["recent_duplicate_rejected_count"] += 1
+                continue
+            copied = dict(item)
+            copied["rule_key"] = f"verb:{copied.get('jlpt_level') or 'local'}"
+            selected.append(copied)
+            selected_keys.add(key)
+        if len(selected) > before_count:
+            stats["cooldown_days_used"] = cooldown_days
+        if len(selected) >= limit:
             break
-    selected = ordered[:limit]
+
     mark_vocabulary_pool_used(selected)
     if stats["rejected_fake_suru_count"] > rejected_log_count:
         print(
@@ -6704,18 +6750,26 @@ def seed_basic_safe_pool(settings=None):
     return rows + list(sample_material(settings or {}).get("vocab", [])) + LOCAL_SEED_VOCAB
 
 
-def material_verbs_from_db(limit, exclude_keys=None):
+def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_keys_by_days=None):
     if limit <= 0:
-        return []
+        return [], {"recent_duplicate_rejected_count": 0, "cooldown_days_used": 14, "candidates_from_db": 0}
     ensure_settings_store()
-    rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (max(limit * 4, limit),))
+    rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (max(limit * 12, limit, 80),))
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
-    items = []
+    recent_keys_by_days = recent_keys_by_days or {
+        days: get_recent_used_verb_keys(material_date=material_date, days=days)
+        for days in (14, 7, 3)
+    }
+    stats = {
+        "recent_duplicate_rejected_count": 0,
+        "cooldown_days_used": 14,
+        "candidates_from_db": len(rows),
+    }
+    candidates = []
     for row in rows:
         key = normalize_vocab_key(row.get("dictionary_form", ""))
         if not key or key in seen:
             continue
-        seen.add(key)
         group = row.get("verb_group", "")
         try:
             group_int = int(group)
@@ -6747,11 +6801,31 @@ def material_verbs_from_db(limit, exclude_keys=None):
                 "causative_passive_form": answer_display_value(generated.get("causative_passive_form")),
             },
             "source": "verbs",
+            "rule_key": f"verb:{row.get('jlpt_level') or 'local'}",
         }
-        items.append(normalize_material_verb_schema(item))
+        candidates.append(normalize_material_verb_schema(item))
+
+    items = []
+    selected_keys = set(seen)
+    for cooldown_days in (14, 7, 3, 0):
+        before_count = len(items)
+        recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
+        for item in candidates:
+            if len(items) >= limit:
+                break
+            key = item_normalized_key(item)
+            if not key or key in selected_keys:
+                continue
+            if cooldown_days > 0 and key in recent_keys:
+                stats["recent_duplicate_rejected_count"] += 1
+                continue
+            items.append(item)
+            selected_keys.add(key)
+        if len(items) > before_count:
+            stats["cooldown_days_used"] = cooldown_days
         if len(items) >= limit:
             break
-    return items
+    return items, stats
 
 
 NATURAL_SEED_VERB_ROWS = [
@@ -6785,6 +6859,149 @@ NATURAL_SEED_VERB_ROWS = [
 ]
 
 
+EXTENDED_SAFE_SEED_VERB_ROWS = [
+    ("見る", "みる", "看", "動詞", "N5"),
+    ("食べる", "たべる", "吃", "動詞", "N5"),
+    ("飲む", "のむ", "喝", "動詞", "N5"),
+    ("行く", "いく", "去", "動詞", "N5"),
+    ("来る", "くる", "來", "動詞", "N5"),
+    ("帰る", "かえる", "回去、回家", "動詞", "N5"),
+    ("読む", "よむ", "閱讀", "動詞", "N5"),
+    ("書く", "かく", "寫", "動詞", "N5"),
+    ("聞く", "きく", "聽、問", "動詞", "N5"),
+    ("話す", "はなす", "說話", "動詞", "N5"),
+    ("買う", "かう", "買", "動詞", "N5"),
+    ("使う", "つかう", "使用", "動詞", "N5"),
+    ("作る", "つくる", "製作", "動詞", "N5"),
+    ("会う", "あう", "見面", "動詞", "N5"),
+    ("思う", "おもう", "想、認為", "動詞", "N5"),
+    ("考える", "かんがえる", "思考、考慮", "動詞", "N4"),
+    ("分かる", "わかる", "知道、明白", "動詞", "N5"),
+    ("入る", "はいる", "進入", "動詞", "N5"),
+    ("出る", "でる", "出去、出現", "動詞", "N5"),
+    ("起きる", "おきる", "起床、發生", "動詞", "N5"),
+    ("寝る", "ねる", "睡覺", "動詞", "N5"),
+    ("働く", "はたらく", "工作", "動詞", "N5"),
+    ("休む", "やすむ", "休息、請假", "動詞", "N5"),
+    ("選ぶ", "えらぶ", "選擇", "動詞", "N4"),
+    ("始める", "はじめる", "開始", "動詞", "N5"),
+    ("終わる", "おわる", "結束", "動詞", "N5"),
+    ("続ける", "つづける", "繼續", "動詞", "N4"),
+    ("開ける", "あける", "打開", "動詞", "N5"),
+    ("閉める", "しめる", "關上", "動詞", "N5"),
+    ("待つ", "まつ", "等待", "動詞", "N5"),
+    ("持つ", "もつ", "持有、拿", "動詞", "N5"),
+    ("取る", "とる", "拿取", "動詞", "N5"),
+    ("置く", "おく", "放置", "動詞", "N5"),
+    ("送る", "おくる", "寄送、送行", "動詞", "N4"),
+    ("借りる", "かりる", "借入", "動詞", "N5"),
+    ("貸す", "かす", "借出", "動詞", "N5"),
+    ("教える", "おしえる", "教、告訴", "動詞", "N5"),
+    ("習う", "ならう", "學習", "動詞", "N5"),
+    ("忘れる", "わすれる", "忘記", "動詞", "N5"),
+    ("覚える", "おぼえる", "記住", "動詞", "N5"),
+    ("歩く", "あるく", "走路", "動詞", "N5"),
+    ("走る", "はしる", "跑", "動詞", "N5"),
+    ("住む", "すむ", "居住", "動詞", "N5"),
+    ("笑う", "わらう", "笑", "動詞", "N5"),
+    ("泣く", "なく", "哭", "動詞", "N4"),
+    ("遊ぶ", "あそぶ", "玩", "動詞", "N5"),
+    ("洗う", "あらう", "洗", "動詞", "N5"),
+    ("着る", "きる", "穿", "動詞", "N5"),
+    ("脱ぐ", "ぬぐ", "脫掉", "動詞", "N5"),
+    ("死ぬ", "しぬ", "死亡", "動詞", "N5"),
+    ("生きる", "いきる", "活著", "動詞", "N4"),
+    ("立つ", "たつ", "站立", "動詞", "N5"),
+    ("座る", "すわる", "坐下", "動詞", "N5"),
+    ("並ぶ", "ならぶ", "排隊、並列", "動詞", "N4"),
+    ("急ぐ", "いそぐ", "趕快", "動詞", "N4"),
+    ("手伝う", "てつだう", "幫忙", "動詞", "N4"),
+    ("呼ぶ", "よぶ", "呼叫、邀請", "動詞", "N5"),
+    ("決める", "きめる", "決定", "動詞", "N4"),
+    ("変える", "かえる", "改變", "動詞", "N4"),
+    ("増える", "ふえる", "增加", "動詞", "N4"),
+    ("減る", "へる", "減少", "動詞", "N4"),
+    ("知る", "しる", "知道", "動詞", "N5"),
+    ("信じる", "しんじる", "相信", "動詞", "N3"),
+    ("助ける", "たすける", "幫助", "動詞", "N4"),
+    ("探す", "さがす", "尋找", "動詞", "N4"),
+    ("払う", "はらう", "支付", "動詞", "N5"),
+    ("渡す", "わたす", "交給、渡過", "動詞", "N4"),
+    ("集める", "あつめる", "收集", "動詞", "N4"),
+    ("直す", "なおす", "修理、改正", "動詞", "N4"),
+    ("動く", "うごく", "移動、運作", "動詞", "N4"),
+    ("止まる", "とまる", "停止", "動詞", "N4"),
+    ("消す", "けす", "關掉、消除", "動詞", "N5"),
+    ("消える", "きえる", "消失", "動詞", "N4"),
+    ("開く", "ひらく", "打開、舉辦", "動詞", "N4"),
+    ("閉まる", "しまる", "關閉", "動詞", "N4"),
+    ("乗る", "のる", "搭乘", "動詞", "N5"),
+    ("降りる", "おりる", "下車、下來", "動詞", "N5"),
+    ("曲がる", "まがる", "轉彎", "動詞", "N5"),
+    ("泳ぐ", "およぐ", "游泳", "動詞", "N5"),
+    ("歌う", "うたう", "唱歌", "動詞", "N5"),
+    ("踊る", "おどる", "跳舞", "動詞", "N4"),
+    ("覚ます", "さます", "弄醒、醒來", "動詞", "N3"),
+    ("続く", "つづく", "持續", "動詞", "N4"),
+    ("届ける", "とどける", "送達", "動詞", "N3"),
+    ("変わる", "かわる", "改變", "動詞", "N4"),
+    ("育てる", "そだてる", "培育", "動詞", "N3"),
+    ("答える", "こたえる", "回答", "動詞", "N5"),
+    ("頼む", "たのむ", "拜託、點餐", "動詞", "N4"),
+    ("誘う", "さそう", "邀請", "動詞", "N3"),
+    ("運ぶ", "はこぶ", "搬運", "動詞", "N4"),
+    ("なくす", "なくす", "遺失", "動詞", "N4"),
+    ("拾う", "ひろう", "撿起", "動詞", "N4"),
+    ("捨てる", "すてる", "丟掉", "動詞", "N4"),
+    ("並べる", "ならべる", "排列", "動詞", "N4"),
+    ("比べる", "くらべる", "比較", "動詞", "N4"),
+    ("調べる", "しらべる", "調查", "動詞", "N4"),
+    ("相談する", "そうだんする", "商量", "サ變動詞", "N4"),
+    ("確認する", "かくにんする", "確認", "サ變動詞", "N3"),
+    ("説明する", "せつめいする", "說明", "サ變動詞", "N4"),
+    ("練習する", "れんしゅうする", "練習", "サ變動詞", "N5"),
+    ("勉強する", "べんきょうする", "學習", "サ變動詞", "N5"),
+    ("準備する", "じゅんびする", "準備", "サ變動詞", "N4"),
+]
+
+
+def seed_file_verb_items(settings):
+    items = []
+    for row in load_basic_seed_vocab_items(settings):
+        if "動詞" not in first_text(row, ["part_of_speech", "pos"]):
+            continue
+        item = build_material_verb_from_vocab_row(row)
+        if not item:
+            continue
+        item["source"] = "seed_basic_verb_pool"
+        item["normalized_key"] = normalize_vocab_key(first_text(row, ["normalized_key", "base_form", "surface"]) or item.get("surface"))
+        items.append(item)
+    return items
+
+
+def extended_safe_seed_verb_items():
+    items = []
+    for surface, reading, meaning, part_of_speech, level in EXTENDED_SAFE_SEED_VERB_ROWS:
+        item = build_material_verb_from_vocab_row(
+            {
+                "surface": surface,
+                "base_form": surface,
+                "reading_hiragana": reading,
+                "meaning_zh": meaning,
+                "part_of_speech": part_of_speech,
+                "jlpt_level": level,
+                "category": "general",
+                "source": "seed_basic_verb_pool",
+            }
+        )
+        if not item:
+            continue
+        item["source"] = "seed_basic_verb_pool"
+        item["normalized_key"] = normalize_vocab_key(surface)
+        items.append(item)
+    return items
+
+
 def natural_seed_verb_items(settings):
     items = []
     for surface, reading, meaning, part_of_speech, level in NATURAL_SEED_VERB_ROWS:
@@ -6808,25 +7025,56 @@ def natural_seed_verb_items(settings):
     return items
 
 
-def material_seed_verbs(settings, limit, exclude_keys=None):
+def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, recent_keys_by_days=None, return_stats=False):
+    stats = {
+        "candidates_from_seed": 0,
+        "recent_duplicate_rejected_count": 0,
+        "cooldown_days_used": 14,
+    }
     if limit <= 0:
-        return []
-    seed = natural_seed_verb_items(settings) + list(sample_material(settings).get("verbs", [])) + LOCAL_SEED_VERBS
-    items = []
+        return ([], stats) if return_stats else []
+    seed = (
+        seed_file_verb_items(settings)
+        + extended_safe_seed_verb_items()
+        + natural_seed_verb_items(settings)
+        + list(sample_material(settings).get("verbs", []))
+        + LOCAL_SEED_VERBS
+    )
+    random.shuffle(seed)
+    stats["candidates_from_seed"] = len(seed)
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
-    for item in seed:
-        base = str(item.get("base", "")).strip()
-        key = normalize_vocab_key(item.get("normalized_key") or item.get("dictionary_form") or item.get("base") or base)
-        if not base or not key or key in seen:
-            continue
-        seen.add(key)
-        copied = dict(item)
-        copied.setdefault("normalized_key", key)
-        copied["source"] = "seed"
-        items.append(normalize_material_verb_schema(copied))
+    recent_keys_by_days = recent_keys_by_days or {
+        days: get_recent_used_verb_keys(material_date=material_date, days=days)
+        for days in (14, 7, 3)
+    }
+    items = []
+    selected_keys = set(seen)
+    for cooldown_days in (14, 7, 3, 0):
+        before_count = len(items)
+        recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
+        for item in seed:
+            if len(items) >= limit:
+                break
+            base = str(item.get("base", "") or item.get("surface", "") or item.get("dictionary_form", "")).strip()
+            key = normalize_vocab_key(item.get("normalized_key") or item.get("dictionary_form") or item.get("surface") or item.get("base") or base)
+            if not base or not key or key in selected_keys:
+                continue
+            if cooldown_days > 0 and key in recent_keys:
+                stats["recent_duplicate_rejected_count"] += 1
+                continue
+            copied = dict(item)
+            copied.setdefault("normalized_key", key)
+            copied["source"] = copied.get("source") or "seed_basic_verb_pool"
+            copied["rule_key"] = f"verb:{copied.get('jlpt_level') or 'local'}"
+            normalized = normalize_material_verb_schema(copied)
+            normalized["rule_key"] = copied["rule_key"]
+            items.append(normalized)
+            selected_keys.add(key)
+        if len(items) > before_count:
+            stats["cooldown_days_used"] = cooldown_days
         if len(items) >= limit:
-            return items
-    return items[:limit]
+            break
+    return (items[:limit], stats) if return_stats else items[:limit]
 
 
 def due_wrong_answer_summary(limit=5):
@@ -7224,32 +7472,67 @@ def build_local_material(settings, force_seed=False, material_date=None):
     verb_source_summary = {"vocabulary_pool": 0, "vocabulary_pool_suru": 0, "verbs": 0, "seed_fallback": 0}
     rejected_fake_suru_count = 0
     verb_candidate_count = 0
+    verb_recent_duplicate_rejected_count = 0
+    verb_cooldown_days_used = 14
+    verb_candidates_from_db = 0
+    verb_candidates_from_seed = 0
     verbs = []
     selected_verb_keys = []
+    verb_recent_keys_by_days = {
+        days: get_recent_used_verb_keys(material_date=material_date or get_today_taipei_date(), days=days)
+        for days in (14, 7, 3)
+    }
     if not force_seed and not safe_mode:
-        verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(settings, verb_count, exclude_keys=selected_keys)
+        verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(
+            settings,
+            verb_count,
+            exclude_keys=selected_keys,
+            material_date=material_date or get_today_taipei_date(),
+            recent_keys_by_days=verb_recent_keys_by_days,
+        )
         verb_duplicate_filtered_count += verb_pool_stats.get("duplicate_filtered_count", 0)
         rejected_fake_suru_count += verb_pool_stats.get("rejected_fake_suru_count", 0)
         verb_candidate_count += verb_pool_stats.get("verb_candidate_count", 0)
+        verb_recent_duplicate_rejected_count += verb_pool_stats.get("recent_duplicate_rejected_count", 0)
+        verb_cooldown_days_used = min(verb_cooldown_days_used, verb_pool_stats.get("cooldown_days_used", 14))
+        verb_candidates_from_db += verb_pool_stats.get("verb_candidate_count", 0)
         selected_verb_keys.extend(verb_pool_stats.get("selected_keys", []))
         for source, count in verb_pool_stats.get("source_summary", {}).items():
             verb_source_summary[source] = verb_source_summary.get(source, 0) + count
     if len(verbs) < verb_count:
-        seed_verbs = material_seed_verbs(settings, verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
+        seed_verbs, seed_verb_stats = material_seed_verbs(
+            settings,
+            verb_count - len(verbs),
+            exclude_keys=set(selected_verb_keys) | set(selected_keys),
+            material_date=material_date or get_today_taipei_date(),
+            recent_keys_by_days=verb_recent_keys_by_days,
+            return_stats=True,
+        )
         verbs.extend(seed_verbs)
         seed_keys = [item_normalized_key(item) for item in seed_verbs if item_normalized_key(item)]
         selected_verb_keys.extend(seed_keys)
         source_counts["seed"] += len(seed_verbs)
         verb_source_summary["seed_fallback"] += len(seed_verbs)
+        verb_recent_duplicate_rejected_count += seed_verb_stats.get("recent_duplicate_rejected_count", 0)
+        verb_cooldown_days_used = min(verb_cooldown_days_used, seed_verb_stats.get("cooldown_days_used", 14))
+        verb_candidates_from_seed += seed_verb_stats.get("candidates_from_seed", 0)
         seed_used = bool(seed_verbs)
         if seed_verbs:
-            print(f"[verb-selector] seed fallback used count={len(seed_verbs)} source=natural_seed")
+            print(f"[verb-selector] seed fallback used count={len(seed_verbs)} source=seed_basic_verb_pool")
     if len(verbs) < verb_count and not force_seed:
-        db_verbs = material_verbs_from_db(verb_count - len(verbs), exclude_keys=set(selected_verb_keys) | set(selected_keys))
+        db_verbs, db_verb_stats = material_verbs_from_db(
+            verb_count - len(verbs),
+            exclude_keys=set(selected_verb_keys) | set(selected_keys),
+            material_date=material_date or get_today_taipei_date(),
+            recent_keys_by_days=verb_recent_keys_by_days,
+        )
         verbs.extend(db_verbs)
         db_keys = [item_normalized_key(item) for item in db_verbs if item_normalized_key(item)]
         selected_verb_keys.extend(db_keys)
         verb_source_summary["verbs"] += len(db_verbs)
+        verb_recent_duplicate_rejected_count += db_verb_stats.get("recent_duplicate_rejected_count", 0)
+        verb_cooldown_days_used = min(verb_cooldown_days_used, db_verb_stats.get("cooldown_days_used", 14))
+        verb_candidates_from_db += db_verb_stats.get("candidates_from_db", 0)
         if db_verbs:
             print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
     verbs = [normalize_material_verb_schema(item) for item in verbs[:verb_count]]
@@ -7327,6 +7610,22 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "selected_verb_keys": selected_verb_keys,
         "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
         "verb_source_summary": verb_source_summary,
+        "verb_duplicate_filter": {
+            "cooldown_days_requested": 14,
+            "cooldown_days_used": verb_cooldown_days_used,
+            "recent_duplicate_rejected_count": verb_recent_duplicate_rejected_count,
+        },
+        "verb_selection": {
+            "requested_count": verb_count,
+            "selected_count": len(verbs),
+            "source_counts": verb_source_summary,
+            "recent_duplicate_rejected_count": verb_recent_duplicate_rejected_count,
+            "cooldown_days_requested": 14,
+            "cooldown_days_used": verb_cooldown_days_used,
+            "selected_verbs": [first_text(item, ["surface", "dictionary_form", "base_form"]) for item in verbs],
+            "candidates_from_db": verb_candidates_from_db,
+            "candidates_from_seed": verb_candidates_from_seed,
+        },
         "rejected_fake_suru_count": rejected_fake_suru_count,
         "verb_candidate_count": verb_candidate_count,
         "seed_fallback_count": vocab_seed_fallback_count,
@@ -7365,6 +7664,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
         f"vocabulary_pool_suru={verb_source_summary.get('vocabulary_pool_suru', 0)} "
         f"verbs={verb_source_summary.get('verbs', 0)} seed_fallback={verb_source_summary.get('seed_fallback', 0)} "
         f"duplicates={verb_duplicate_filtered_count}"
+    )
+    print(
+        "[verb-selector] "
+        f"requested={verb_count} candidates_from_db={verb_candidates_from_db} "
+        f"candidates_from_seed={verb_candidates_from_seed} "
+        f"recent_used_count={len(verb_recent_keys_by_days.get(14, set()))} "
+        f"rejected_recent_duplicate={verb_recent_duplicate_rejected_count} "
+        f"cooldown_days_used={verb_cooldown_days_used} "
+        f"selected={[first_text(item, ['surface', 'dictionary_form', 'base_form']) for item in verbs]} "
+        f"elapsed_ms={metadata['generation_elapsed_ms']}"
     )
     return {
         "date": material_date_display(material_date or get_today_taipei_date()),
@@ -7567,6 +7876,17 @@ def save_material_for_date(material_date, material, settings, generation_source=
         except Exception as exc:
             print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
             print(traceback.format_exc())
+        try:
+            record_vocab_selection_logs(
+                verb_list,
+                selected_for="verb",
+                material_date=date_iso,
+                material_key=material_key,
+                material_version_no=version_no,
+            )
+        except Exception as exc:
+            print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
+            print(traceback.format_exc())
         invalidate_archive_dates_cache("daily material saved")
         return {
             "date": date,
@@ -7592,6 +7912,17 @@ def save_material_for_date(material_date, material, settings, generation_source=
         )
     except Exception as exc:
         print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
+        print(traceback.format_exc())
+    try:
+        record_vocab_selection_logs(
+            verb_list,
+            selected_for="verb",
+            material_date=date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+    except Exception as exc:
+        print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
         print(traceback.format_exc())
     invalidate_archive_dates_cache("daily material saved")
     return {
