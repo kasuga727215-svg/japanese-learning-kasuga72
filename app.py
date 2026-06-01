@@ -1378,6 +1378,196 @@ def n5_grammar_seed_rows():
             "learning_tip_zh": "把「ます → ません → ませんでした」當成禮貌體否定的基本變化。",
             "priority": 72,
         },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:tai",
+            "title": "たい",
+            "display_name": "たい：想要做某事",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "想要做某事。",
+            "connection": "動詞ます形去ます + たい",
+            "usage_summary_zh": "表示說話者自己想做某件事。",
+            "usage_detail_zh": "「たい」用來表達自己的願望，前面接動詞ます形去掉ます後的語幹。若要問對方想不想做，也可以用疑問句。",
+            "structure_formula": "動詞ます形去ます + たい",
+            "example_japanese": "日本へ行きたいです。",
+            "example_hiragana": "にほんへいきたいです。",
+            "example_zh": "我想去日本。",
+            "common_mistake_zh": "描述第三人稱想做某事時，通常不用直接說「彼は行きたいです」，可改用「行きたがっています」。",
+            "learning_tip_zh": "把「食べます」變成「食べたい」、「行きます」變成「行きたい」來練習。",
+            "note_zh": "否定形是「たくないです」，例如「行きたくないです」。",
+            "priority": 70,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:mashou",
+            "title": "ましょう",
+            "display_name": "ましょう：邀請 / 提議",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "一起做吧；我來做吧。",
+            "connection": "動詞ます形去ます + ましょう",
+            "usage_summary_zh": "用來邀請對方一起做某事，或主動提出做某事。",
+            "usage_detail_zh": "「ましょう」帶有禮貌的提議語氣，常用在邀請、安排活動或課堂指示中。",
+            "structure_formula": "動詞ます形去ます + ましょう",
+            "example_japanese": "一緒に勉強しましょう。",
+            "example_hiragana": "いっしょにべんきょうしましょう。",
+            "example_zh": "一起讀書吧。",
+            "common_mistake_zh": "不要把「ましょう」和單純未來式混在一起，它更像邀請或提議。",
+            "learning_tip_zh": "聽到「〜ましょうか」時，通常是「要不要我來～？」的語氣。",
+            "note_zh": "更口語的邀請可以用「〜しよう」。",
+            "priority": 68,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:te_kudasai",
+            "title": "てください",
+            "display_name": "てください：請求",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "請對方做某事。",
+            "connection": "動詞て形 + ください",
+            "usage_summary_zh": "用來禮貌地請對方做某個動作。",
+            "usage_detail_zh": "「てください」是很基本的請求句型。語氣比命令形柔和，但仍是要求對方行動。",
+            "structure_formula": "動詞て形 + ください",
+            "example_japanese": "ここに名前を書いてください。",
+            "example_hiragana": "ここになまえをかいてください。",
+            "example_zh": "請在這裡寫名字。",
+            "common_mistake_zh": "不要把辞書形直接接ください，應先變成て形。",
+            "learning_tip_zh": "先熟悉て形，再把常用動詞接上ください練習。",
+            "note_zh": "更委婉可用「〜ていただけますか」。",
+            "priority": 66,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:temo_ii",
+            "title": "てもいいです",
+            "display_name": "てもいいです：可以做某事",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "可以做某事；允許做某事。",
+            "connection": "動詞て形 + もいいです",
+            "usage_summary_zh": "表示允許或詢問是否可以做某事。",
+            "usage_detail_zh": "「てもいいです」常用在確認規則、請求許可，或告訴對方某件事可以做。",
+            "structure_formula": "動詞て形 + もいいです",
+            "example_japanese": "写真を撮ってもいいですか。",
+            "example_hiragana": "しゃしんをとってもいいですか。",
+            "example_zh": "可以拍照嗎？",
+            "common_mistake_zh": "詢問許可時常加「か」，變成「〜てもいいですか」。",
+            "learning_tip_zh": "可以和「てはいけません」一起對照學習。",
+            "note_zh": "回答允許時可說「はい、いいです」。",
+            "priority": 64,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:tewa_ikemasen",
+            "title": "てはいけません",
+            "display_name": "てはいけません：不可以做某事",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "不可以做某事；禁止。",
+            "connection": "動詞て形 + はいけません",
+            "usage_summary_zh": "表示規則上禁止做某個動作。",
+            "usage_detail_zh": "「てはいけません」常用於規定、告示、課堂或正式提醒，語氣比普通否定更像禁止。",
+            "structure_formula": "動詞て形 + はいけません",
+            "example_japanese": "ここでたばこを吸ってはいけません。",
+            "example_hiragana": "ここでたばこをすってはいけません。",
+            "example_zh": "不可以在這裡抽菸。",
+            "common_mistake_zh": "「ません」只是沒有做或不做，「てはいけません」是禁止。",
+            "learning_tip_zh": "看到規則說明時，常會遇到這個句型。",
+            "note_zh": "口語中也常聽到「〜ちゃだめです」。",
+            "priority": 62,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:koto_ga_aru",
+            "title": "ことがある",
+            "display_name": "ことがある：曾經 / 有時",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "曾經有某種經驗；有時會做某事。",
+            "connection": "動詞た形 + ことがある / 動詞辞書形 + ことがある",
+            "usage_summary_zh": "接た形時表示曾經有過的經驗；接辞書形時可表示有時會發生。",
+            "usage_detail_zh": "初學常先學「た形 + ことがあります」，表示人生經驗，例如去過、吃過、看過。",
+            "structure_formula": "動詞た形 + ことがある",
+            "example_japanese": "日本へ行ったことがあります。",
+            "example_hiragana": "にほんへいったことがあります。",
+            "example_zh": "我曾經去過日本。",
+            "common_mistake_zh": "表示經驗時要用た形，不是辞書形。",
+            "learning_tip_zh": "把「食べたことがあります」「見たことがあります」當作固定練習。",
+            "note_zh": "否定經驗是「〜たことがありません」。",
+            "priority": 60,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:koto_ga_dekimasu",
+            "title": "ことができます",
+            "display_name": "ことができます：能夠做某事",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "能夠做某件事。",
+            "connection": "動詞辞書形 + ことができます",
+            "usage_summary_zh": "表示有能力或條件可以做某件事。",
+            "usage_detail_zh": "「ことができます」是很基本的能力表現，比可能形更容易套用，適合初學者先掌握。",
+            "structure_formula": "動詞辞書形 + ことができます",
+            "example_japanese": "日本語を話すことができます。",
+            "example_hiragana": "にほんごをはなすことができます。",
+            "example_zh": "我會說日文。",
+            "common_mistake_zh": "前面要接辞書形，例如「話すこと」，不是「話しますこと」。",
+            "learning_tip_zh": "可和可能形「話せます」一起比較。",
+            "note_zh": "否定是「ことができません」。",
+            "priority": 58,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:to_omoimasu",
+            "title": "と思います",
+            "display_name": "と思います：我認為 / 我想",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "我認為；我想。",
+            "connection": "普通形 + と思います",
+            "usage_summary_zh": "用來表達自己的想法、推測或意見。",
+            "usage_detail_zh": "「と思います」前面通常接普通形句子。常用來讓語氣比直接斷言更柔和。",
+            "structure_formula": "普通形 + と思います",
+            "example_japanese": "明日は雨が降ると思います。",
+            "example_hiragana": "あしたはあめがふるとおもいます。",
+            "example_zh": "我覺得明天會下雨。",
+            "common_mistake_zh": "前面接句子時要用普通形，不要直接接ます形。",
+            "learning_tip_zh": "把「〜です」改成普通形後再接「と思います」。",
+            "note_zh": "引用別人的話時可用「と言いました」。",
+            "priority": 56,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "pattern:deshou",
+            "title": "でしょう",
+            "display_name": "でしょう：推量 / 確認",
+            "grammar_type": "sentence_pattern",
+            "meaning_zh": "大概吧；是吧。",
+            "connection": "普通形 + でしょう",
+            "usage_summary_zh": "表示推測，也可用來向對方確認。",
+            "usage_detail_zh": "「でしょう」比直接斷定更委婉。句尾語調上揚時，常帶有確認對方是否同意的感覺。",
+            "structure_formula": "普通形 + でしょう",
+            "example_japanese": "明日は晴れるでしょう。",
+            "example_hiragana": "あしたははれるでしょう。",
+            "example_zh": "明天大概會放晴吧。",
+            "common_mistake_zh": "不要和丁寧體的「です」重複接成不自然的形式。",
+            "learning_tip_zh": "天氣預報、推測句中很常見。",
+            "note_zh": "更口語的推測可用「だろう」。",
+            "priority": 54,
+        },
+        {
+            "jlpt_level": "N5",
+            "grammar_key": "sentence_end:ne_yo",
+            "title": "ね / よ",
+            "display_name": "ね / よ：語氣助詞",
+            "grammar_type": "expression",
+            "meaning_zh": "ね 表示確認或共感；よ 表示提醒或告知。",
+            "connection": "句子 + ね / よ",
+            "usage_summary_zh": "用在句尾調整語氣，讓句子更自然。",
+            "usage_detail_zh": "「ね」常用來尋求認同或共感；「よ」常用來告訴對方新資訊，或提醒對方注意。",
+            "structure_formula": "句子 + ね / よ",
+            "example_japanese": "今日は寒いですね。これは大切ですよ。",
+            "example_hiragana": "きょうはさむいですね。これはたいせつですよ。",
+            "example_zh": "今天很冷呢。這個很重要喔。",
+            "common_mistake_zh": "「よ」用太多會顯得強勢；「ね」用太多也可能讓語氣過黏。",
+            "learning_tip_zh": "先從固定句「そうですね」「いいですよ」開始感受語氣。",
+            "note_zh": "句尾助詞沒有固定中文翻譯，要從情境理解。",
+            "priority": 52,
+        },
     ]
     usage_items_map = {
         "particle_wa_topic": [
@@ -1974,6 +2164,12 @@ def migrate_grammar_points_sqlite(conn):
         conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN material_key TEXT")
     if "material_version_no" not in grammar_log_columns:
         conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN material_version_no INTEGER")
+    if "title" not in grammar_log_columns:
+        conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN title TEXT")
+    if "pattern" not in grammar_log_columns:
+        conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN pattern TEXT")
+    if "category" not in grammar_log_columns:
+        conn.execute("ALTER TABLE grammar_selection_logs ADD COLUMN category TEXT")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
@@ -3452,6 +3648,9 @@ def migrate_grammar_points_postgres():
             )
             cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS material_key TEXT")
             cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS material_version_no INTEGER")
+            cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS title TEXT")
+            cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS pattern TEXT")
+            cur.execute("ALTER TABLE grammar_selection_logs ADD COLUMN IF NOT EXISTS category TEXT")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_points_key ON grammar_points(grammar_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_level ON grammar_points(jlpt_level)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
@@ -7202,7 +7401,7 @@ def fetch_grammar_candidates(grammar_level, limit, cutoff_date=None):
                     ORDER BY priority DESC,
                              COALESCE(used_count, 0) ASC,
                              last_used_at ASC NULLS FIRST,
-                             id ASC
+                             RANDOM()
                     LIMIT %s
                     """,
                     params,
@@ -7234,7 +7433,7 @@ def fetch_grammar_candidates(grammar_level, limit, cutoff_date=None):
             ORDER BY priority DESC,
                      COALESCE(used_count, 0) ASC,
                      COALESCE(last_used_at, '') ASC,
-                     id ASC
+                     RANDOM()
             LIMIT ?
             """,
             params,
@@ -7242,7 +7441,65 @@ def fetch_grammar_candidates(grammar_level, limit, cutoff_date=None):
         return [dict(row) for row in rows]
 
 
-def record_grammar_selection(grammar_items, material_date):
+def grammar_item_dedupe_key(item):
+    if not isinstance(item, dict):
+        return ""
+    for key in ("grammar_key", "title", "display_name"):
+        value = str(item.get(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def get_recent_used_grammar_keys(material_date=None, days=14, include_all_versions=True):
+    try:
+        day_count = max(0, int(days or 0))
+    except (TypeError, ValueError):
+        day_count = 14
+    if day_count <= 0:
+        return set()
+    try:
+        end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
+    except Exception:
+        end_date = taipei_now().date()
+    start_date = end_date - timedelta(days=day_count - 1)
+    start, end = start_date.isoformat(), end_date.isoformat()
+    try:
+        ensure_grammar_points_store()
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT DISTINCT grammar_key
+                        FROM grammar_selection_logs
+                        WHERE material_date BETWEEN %s AND %s
+                          AND COALESCE(NULLIF(grammar_key, ''), '') <> ''
+                        """,
+                        (start, end),
+                    )
+                    return {str(row[0]).strip() for row in cur.fetchall() if row and row[0]}
+        rowset = sqlite_dicts(
+            """
+            SELECT DISTINCT grammar_key
+            FROM grammar_selection_logs
+            WHERE material_date BETWEEN ? AND ?
+              AND COALESCE(NULLIF(grammar_key, ''), '') <> ''
+            """,
+            (start, end),
+        )
+        return {str(row.get("grammar_key", "")).strip() for row in rowset if row.get("grammar_key")}
+    except Exception as exc:
+        print(f"[grammar-selector] recent grammar lookup failed; days={days}; reason={exc}")
+        return set()
+
+
+def seed_grammar_candidates(grammar_level):
+    rows = [row for row in default_grammar_seed_rows() if row.get("jlpt_level") == grammar_level]
+    return [grammar_item_from_row(row) for row in rows]
+
+
+def record_grammar_selection(grammar_items, material_date, material_key=None, material_version_no=None):
     if not grammar_items:
         return
     ensure_grammar_points_store()
@@ -7267,15 +7524,21 @@ def record_grammar_selection(grammar_items, material_date):
                     cur.execute(
                         """
                         INSERT INTO grammar_selection_logs (
-                            material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type, created_at
+                            material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type,
+                            material_key, material_version_no, title, pattern, category, created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             date_iso,
                             grammar_id,
                             item.get("grammar_key", ""),
                             item.get("jlpt_level", ""),
+                            item.get("grammar_type", ""),
+                            material_key or "",
+                            material_version_no,
+                            item.get("title", ""),
+                            item.get("connection", "") or item.get("structure_formula", ""),
                             item.get("grammar_type", ""),
                             now,
                         ),
@@ -7299,15 +7562,21 @@ def record_grammar_selection(grammar_items, material_date):
             conn.execute(
                 """
                 INSERT INTO grammar_selection_logs (
-                    material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type, created_at
+                    material_date, grammar_point_id, grammar_key, jlpt_level, grammar_type,
+                    material_key, material_version_no, title, pattern, category, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     date_iso,
                     grammar_id,
                     item.get("grammar_key", ""),
                     item.get("jlpt_level", ""),
+                    item.get("grammar_type", ""),
+                    material_key or "",
+                    material_version_no,
+                    item.get("title", ""),
+                    item.get("connection", "") or item.get("structure_formula", ""),
                     item.get("grammar_type", ""),
                     now,
                 ),
@@ -7316,6 +7585,7 @@ def record_grammar_selection(grammar_items, material_date):
 
 
 def select_grammar_points(grammar_level, grammar_count, material_date=None):
+    selector_started = time.perf_counter()
     grammar_level = grammar_level if grammar_level in LEVELS else "N5"
     try:
         grammar_count = int(grammar_count)
@@ -7323,51 +7593,144 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
         grammar_count = default_grammar_count(grammar_level)
     grammar_count = max(0, min(grammar_count, 10))
     if grammar_count <= 0:
-        return [], {"grammar_pool_empty": False, "grammar_fallback_used": False, "grammar_warnings": []}
+        return [], {
+            "grammar_pool_empty": False,
+            "grammar_fallback_used": False,
+            "grammar_warnings": [],
+            "grammar_selection": {},
+            "grammar_duplicate_filter": {
+                "cooldown_days_requested": 14,
+                "cooldown_days_used": 0,
+                "recent_duplicate_rejected_count": 0,
+            },
+        }
 
     selected = []
     selected_keys = set()
     fallback_used = False
     warnings = []
-    cutoff_date = (parse_material_date(material_date) or taipei_now().date()) - timedelta(days=7)
     levels = GRAMMAR_LEVEL_FALLBACKS.get(grammar_level, [grammar_level])
-    try:
-        for level in levels:
+    material_date_value = material_date or get_today_taipei_date()
+    recent_keys_by_days = {
+        days: get_recent_used_grammar_keys(material_date_value, days=days)
+        for days in (14, 7, 3)
+    }
+    candidates_from_db = 0
+    candidates_from_seed = 0
+    recent_duplicate_rejected_count = 0
+    cooldown_days_used = 14
+    source_counts = {"grammar_points": 0, "seed_grammar_pool": 0}
+
+    def try_take(candidates, cooldown_days, source_name):
+        nonlocal recent_duplicate_rejected_count, candidates_from_db, candidates_from_seed
+        rows = list(candidates or [])
+        random.shuffle(rows)
+        if source_name == "grammar_points":
+            candidates_from_db += len(rows)
+        else:
+            candidates_from_seed += len(rows)
+        recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days else set()
+        for row in rows:
             if len(selected) >= grammar_count:
                 break
-            rows = fetch_grammar_candidates(level, grammar_count - len(selected), cutoff_date.isoformat())
-            for row in rows:
-                item = grammar_item_from_row(row)
-                key = item.get("grammar_key")
-                if key and key not in selected_keys:
-                    selected.append(item)
-                    selected_keys.add(key)
-        if len(selected) < grammar_count:
-            fallback_used = True
+            item = row if isinstance(row, dict) and isinstance(row.get("usage_items"), list) else grammar_item_from_row(row)
+            key = grammar_item_dedupe_key(item)
+            if not key or key in selected_keys:
+                continue
+            if cooldown_days and key in recent_keys:
+                recent_duplicate_rejected_count += 1
+                continue
+            selected.append(item)
+            selected_keys.add(key)
+            source_counts[source_name] = source_counts.get(source_name, 0) + 1
+
+    try:
+        for cooldown_days in (14, 7, 3, 0):
+            if len(selected) >= grammar_count:
+                break
             for level in levels:
                 if len(selected) >= grammar_count:
                     break
-                rows = fetch_grammar_candidates(level, grammar_count - len(selected), None)
-                for row in rows:
-                    item = grammar_item_from_row(row)
-                    key = item.get("grammar_key")
-                    if key and key not in selected_keys:
-                        selected.append(item)
-                        selected_keys.add(key)
+                fetch_limit = max(30, (grammar_count - len(selected)) * 12)
+                try:
+                    rows = fetch_grammar_candidates(level, fetch_limit, None)
+                except Exception as exc:
+                    rows = []
+                    warnings.append("grammar_pool_db_unavailable")
+                    print(f"[grammar-selector] db candidate fetch failed level={level}; reason={exc}")
+                try_take(rows, cooldown_days, "grammar_points")
+            if len(selected) < grammar_count:
+                fallback_used = True
+                for level in levels:
+                    if len(selected) >= grammar_count:
+                        break
+                    seed_items = seed_grammar_candidates(level)
+                    try_take(seed_items, cooldown_days, "seed_grammar_pool")
+            if len(selected) >= grammar_count:
+                cooldown_days_used = cooldown_days
+                break
         if not selected:
             warnings.append("grammar_pool_empty")
         elif len(selected) < grammar_count:
             warnings.append("grammar_pool_insufficient")
-        record_grammar_selection(selected, material_date or get_today_taipei_date())
+        if cooldown_days_used < 14:
+            warnings.append("grammar_cooldown_relaxed")
+        elapsed_ms = round((time.perf_counter() - selector_started) * 1000)
+        selected_key_list = [grammar_item_dedupe_key(item) for item in selected if grammar_item_dedupe_key(item)]
+        print(
+            "[grammar-selector] "
+            f"level={grammar_level} requested={grammar_count} "
+            f"candidates_from_db={candidates_from_db} candidates_from_seed={candidates_from_seed} "
+            f"recent_used_count={len(recent_keys_by_days.get(14, set()))} "
+            f"rejected_recent_duplicate={recent_duplicate_rejected_count} "
+            f"cooldown_days_used={cooldown_days_used} selected={selected_key_list} "
+            f"elapsed_ms={elapsed_ms}"
+        )
         return selected, {
             "grammar_pool_empty": not bool(selected),
             "grammar_fallback_used": fallback_used,
             "grammar_warnings": warnings,
+            "grammar_selection": {
+                "requested_count": grammar_count,
+                "selected_count": len(selected),
+                "grammar_level": grammar_level,
+                "source_counts": source_counts,
+                "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
+                "cooldown_days_requested": 14,
+                "cooldown_days_used": cooldown_days_used,
+                "selected_grammar_keys": selected_key_list,
+                "candidates_from_db": candidates_from_db,
+                "candidates_from_seed": candidates_from_seed,
+            },
+            "grammar_duplicate_filter": {
+                "cooldown_days_requested": 14,
+                "cooldown_days_used": cooldown_days_used,
+                "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
+            },
         }
     except Exception as exc:
         print(f"[grammar-pool] local grammar selection failed; reason={exc}")
         print(traceback.format_exc())
-        return [], {"grammar_pool_empty": True, "grammar_fallback_used": True, "grammar_warnings": ["grammar_pool_empty"]}
+        return [], {
+            "grammar_pool_empty": True,
+            "grammar_fallback_used": True,
+            "grammar_warnings": ["grammar_pool_empty"],
+            "grammar_selection": {
+                "requested_count": grammar_count,
+                "selected_count": 0,
+                "grammar_level": grammar_level,
+                "source_counts": {"grammar_points": 0, "seed_grammar_pool": 0},
+                "recent_duplicate_rejected_count": 0,
+                "cooldown_days_requested": 14,
+                "cooldown_days_used": 0,
+                "selected_grammar_keys": [],
+            },
+            "grammar_duplicate_filter": {
+                "cooldown_days_requested": 14,
+                "cooldown_days_used": 0,
+                "recent_duplicate_rejected_count": 0,
+            },
+        }
 
 
 def build_local_material(settings, force_seed=False, material_date=None):
@@ -7643,6 +8006,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "grammar_keys": [item.get("grammar_key", "") for item in grammar_points if item.get("grammar_key")],
         "grammar_fallback_used": bool(grammar_stats.get("grammar_fallback_used")),
         "grammar_warnings": grammar_stats.get("grammar_warnings", []),
+        "grammar_selection": grammar_stats.get("grammar_selection", {}),
+        "grammar_duplicate_filter": grammar_stats.get("grammar_duplicate_filter", {}),
         "warnings": generation_warnings,
         "seed_used": seed_used,
         "generated_at": utc_now_iso(),
@@ -7887,6 +8252,16 @@ def save_material_for_date(material_date, material, settings, generation_source=
         except Exception as exc:
             print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
             print(traceback.format_exc())
+        try:
+            record_grammar_selection(
+                material.get("grammar_points") or [],
+                date_iso,
+                material_key=material_key,
+                material_version_no=version_no,
+            )
+        except Exception as exc:
+            print(f"[grammar-selector] selection log write failed material_key={material_key}; reason={exc}")
+            print(traceback.format_exc())
         invalidate_archive_dates_cache("daily material saved")
         return {
             "date": date,
@@ -7923,6 +8298,16 @@ def save_material_for_date(material_date, material, settings, generation_source=
         )
     except Exception as exc:
         print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
+        print(traceback.format_exc())
+    try:
+        record_grammar_selection(
+            material.get("grammar_points") or [],
+            date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+    except Exception as exc:
+        print(f"[grammar-selector] selection log write failed material_key={material_key}; reason={exc}")
         print(traceback.format_exc())
     invalidate_archive_dates_cache("daily material saved")
     return {
