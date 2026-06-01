@@ -5338,11 +5338,57 @@ def approved_slang_vocab_items_for_rule(limit):
     return items
 
 
+def allocate_vocab_slots(settings, available_rules, word_count):
+    try:
+        total_slots = max(0, int(word_count or 0))
+    except (TypeError, ValueError):
+        total_slots = 0
+    if total_slots <= 0:
+        return {}
+    ordered_rules = [
+        rule for rule in sorted(
+            available_rules,
+            key=lambda item: (-int(item.get("priority", 0) or 0), SIX_MAIN_VOCAB_RULE_ORDER.index(item["rule_key"])),
+        )
+        if boolish(rule.get("enabled")) and int(rule.get("max_per_material", 0) or 0) > 0
+    ]
+    caps = {
+        rule["rule_key"]: min(int(rule.get("max_per_material", 0) or 0), total_slots)
+        for rule in ordered_rules
+    }
+    slots = {rule["rule_key"]: 0 for rule in ordered_rules}
+    remaining = total_slots
+
+    for rule in ordered_rules:
+        rule_key = rule["rule_key"]
+        if remaining <= 0:
+            break
+        if caps.get(rule_key, 0) <= 0:
+            continue
+        slots[rule_key] += 1
+        remaining -= 1
+
+    while remaining > 0:
+        progressed = False
+        for rule in ordered_rules:
+            rule_key = rule["rule_key"]
+            if remaining <= 0:
+                break
+            if slots.get(rule_key, 0) >= caps.get(rule_key, 0):
+                continue
+            slots[rule_key] += 1
+            remaining -= 1
+            progressed = True
+        if not progressed:
+            break
+    return {key: count for key, count in slots.items() if count > 0}
+
+
 def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
     started = time.perf_counter()
     material_date = canonical_material_date(material_date or get_today_taipei_date())
     stats = {
-        "selection_strategy": "six_main_rules_period_first_with_fallback",
+        "selection_strategy": "period_first_balanced_slot_allocation",
         "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
         "db_pool_used": False,
         "seed_fallback_used": False,
@@ -5359,10 +5405,10 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         "category_counts": {},
         "candidate_counts": {},
         "selected_rule_counts": {},
-        "rule_selection": {"available_rules": [], "blocked_by_period": [], "selected_counts": {}},
         "rule_remaining_after_generation": {},
         "rejected_recent_duplicate_count": 0,
         "rejected_by_category_quota": {},
+        "slot_allocation": {},
         "prefiltered_low_quality_compound_count": 0,
         "prefiltered_unsupported_category_count": 0,
         "skipped_empty_jlpt_count": 0,
@@ -5388,6 +5434,8 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         else:
             stats["rule_selection"]["blocked_by_period"].append(rule_key)
     available_rules.sort(key=lambda rule: (-int(rule.get("priority", 0) or 0), SIX_MAIN_VOCAB_RULE_ORDER.index(rule["rule_key"])))
+    planned_slots = allocate_vocab_slots(settings, available_rules, limit)
+    stats["slot_allocation"] = dict(planned_slots)
 
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if normalize_vocab_key(key)}
@@ -5457,39 +5505,50 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
             return vocab_items + slang_items
         return []
 
-    for cooldown_days in (14, 7, 3, 0):
-        if len(selected) >= limit:
-            break
-        selected_before_cooldown = len(selected)
-        for rule in available_rules:
+    def select_with_slot_limits(slot_limits):
+        for cooldown_days in (14, 7, 3, 0):
             if len(selected) >= limit:
                 break
-            rule_key = rule["rule_key"]
-            max_per_material = clamp_int(rule.get("max_per_material", 0), 0, 0)
-            already_selected = stats["selected_rule_counts"].get(rule_key, 0)
-            remaining_for_rule = max(0, max_per_material - already_selected)
-            if remaining_for_rule <= 0:
-                continue
-            needed = min(limit - len(selected), remaining_for_rule)
-            for item in rows_for_rule(rule, needed, cooldown_days):
-                if len(selected) >= limit or stats["selected_rule_counts"].get(rule_key, 0) >= max_per_material:
+            selected_before_cooldown = len(selected)
+            for rule in available_rules:
+                if len(selected) >= limit:
                     break
-                if not item:
+                rule_key = rule["rule_key"]
+                max_per_material = clamp_int(rule.get("max_per_material", 0), 0, 0)
+                slot_limit = min(int(slot_limits.get(rule_key, 0) or 0), max_per_material)
+                already_selected = stats["selected_rule_counts"].get(rule_key, 0)
+                remaining_for_rule = max(0, slot_limit - already_selected)
+                if remaining_for_rule <= 0:
                     continue
-                key = item_normalized_key(item)
-                if not key or key in selected_keys:
-                    stats["rejected_recent_duplicate_count"] += 1
-                    continue
-                if cooldown_days > 0 and key in recent_keys_by_days.get(cooldown_days, set()):
-                    stats["rejected_recent_duplicate_count"] += 1
-                    continue
-                low_quality, _ = is_low_quality_compound_word(item)
-                if low_quality:
-                    stats["rejected_low_quality_count"] += 1
-                    continue
-                select_item(item, rule_key)
-        if len(selected) > selected_before_cooldown:
-            stats["cooldown_days_used"] = cooldown_days
+                needed = min(limit - len(selected), remaining_for_rule)
+                for item in rows_for_rule(rule, needed, cooldown_days):
+                    if len(selected) >= limit or stats["selected_rule_counts"].get(rule_key, 0) >= slot_limit:
+                        break
+                    if not item:
+                        continue
+                    key = item_normalized_key(item)
+                    if not key or key in selected_keys:
+                        stats["rejected_recent_duplicate_count"] += 1
+                        continue
+                    if cooldown_days > 0 and key in recent_keys_by_days.get(cooldown_days, set()):
+                        stats["rejected_recent_duplicate_count"] += 1
+                        continue
+                    low_quality, _ = is_low_quality_compound_word(item)
+                    if low_quality:
+                        stats["rejected_low_quality_count"] += 1
+                        continue
+                    select_item(item, rule_key)
+            if len(selected) > selected_before_cooldown:
+                stats["cooldown_days_used"] = cooldown_days
+
+    select_with_slot_limits(planned_slots)
+    if len(selected) < limit:
+        refill_limits = {
+            rule["rule_key"]: min(clamp_int(rule.get("max_per_material", 0), 0, 0), limit)
+            for rule in available_rules
+            if clamp_int(rule.get("max_per_material", 0), 0, 0) > 0
+        }
+        select_with_slot_limits(refill_limits)
 
     selected = selected[:limit]
     mark_vocabulary_pool_used([item for item in selected if item.get("source") == "vocabulary_pool"])
@@ -5508,11 +5567,13 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     stats["selected_from_db_count"] = len(selected)
     stats["generation_elapsed_ms"] = round((time.perf_counter() - started) * 1000)
     print(
-        f"[vocab-selector] strategy=six_main_rules target_level={settings.get('target_level')} word_count={limit} "
+        f"[vocab-allocation] requested={limit} "
         f"available_rules={stats['rule_selection']['available_rules']} "
         f"blocked_by_period={stats['rule_selection']['blocked_by_period']} "
+        f"planned_slots={stats['slot_allocation']} "
         f"selected_counts={stats['rule_selection']['selected_counts']} "
-        f"cooldown_days_used={stats['cooldown_days_used']} elapsed_ms={stats['generation_elapsed_ms']}"
+        f"cooldown_days_used={stats['cooldown_days_used']} "
+        f"fallback_count=0 elapsed_ms={stats['generation_elapsed_ms']}"
     )
     return (selected, stats) if return_stats else selected
 
@@ -6577,6 +6638,11 @@ def merge_vocab_selector_stats(target, source):
     target["selected_from_db_count"] = target.get("selected_from_db_count", 0) + source.get("selected_from_db_count", 0)
     target["selected_from_seed_fallback_count"] = target.get("selected_from_seed_fallback_count", 0) + source.get("selected_from_seed_fallback_count", 0)
     target["generation_elapsed_ms"] = target.get("generation_elapsed_ms", 0) + source.get("generation_elapsed_ms", 0)
+    if source.get("selection_strategy"):
+        target["selection_strategy"] = source["selection_strategy"]
+    target.setdefault("slot_allocation", {})
+    for rule_key, count in (source.get("slot_allocation") or {}).items():
+        target["slot_allocation"][rule_key] = target["slot_allocation"].get(rule_key, 0) + count
     for key in ("category_counts", "candidate_counts", "selected_rule_counts"):
         target.setdefault(key, {})
         for name, count in (source.get(key) or {}).items():
@@ -7066,7 +7132,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
-        "selection_strategy": "six_main_rules_period_first",
+        "selection_strategy": "period_first_balanced_slot_allocation",
         "local_generation_safe_mode": safe_mode,
         "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS),
         "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES),
@@ -7085,6 +7151,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "candidate_counts": {},
         "selected_rule_counts": {},
         "rule_remaining_after_generation": {},
+        "slot_allocation": {},
         "rejected_recent_duplicate_count": 0,
         "rejected_by_category_quota": {},
         "prefiltered_low_quality_compound_count": 0,
@@ -7206,7 +7273,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         generation_warnings.append("insufficient_safe_vocab_pool")
     metadata = {
         "generation_mode": "local",
-        "selection_strategy": "six_main_rules_period_first_with_fallback",
+        "selection_strategy": "period_first_balanced_slot_allocation",
         "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
         "db_pool_used": bool(vocab_selector_stats.get("db_pool_used", False)),
         "seed_fallback_used": bool(vocab_seed_fallback_count),
@@ -7226,6 +7293,9 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "vocab_rule_summary": vocab_selector_stats.get("selected_rule_counts", {}),
         "selected_rule_counts": vocab_selector_stats.get("selected_rule_counts", {}),
         "rule_selection": vocab_selector_stats.get("rule_selection", {}),
+        "slot_allocation": vocab_selector_stats.get("slot_allocation", {}),
+        "selected_counts": vocab_selector_stats.get("rule_selection", {}).get("selected_counts", {}),
+        "blocked_by_period": vocab_selector_stats.get("rule_selection", {}).get("blocked_by_period", []),
         "rule_remaining_after_generation": vocab_selector_stats.get("rule_remaining_after_generation", {}),
         "selected_by_jlpt_count": vocab_selector_stats.get("selected_by_jlpt_count", 0),
         "selected_target_jlpt_count": vocab_selector_stats.get("selected_target_jlpt_count", 0),
@@ -7249,7 +7319,9 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "selected_normalized_keys": selected_normalized_keys,
         "duplicate_filtered_count": duplicate_filtered_count,
         "duplicate_filter": {
+            "cooldown_days_requested": 14,
             "cooldown_days": vocab_selector_stats.get("cooldown_days_used", 14),
+            "cooldown_days_used": vocab_selector_stats.get("cooldown_days_used", 14),
             "rejected_recent_duplicate_count": vocab_selector_stats.get("rejected_recent_duplicate_count", 0),
         },
         "selected_verb_keys": selected_verb_keys,
@@ -7261,6 +7333,10 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "vocab_seed_fallback_count": vocab_seed_fallback_count,
         "verb_seed_fallback_count": verb_source_summary.get("verbs", 0) + verb_source_summary.get("seed_fallback", 0),
         "fallback_reason": "insufficient_vocab" if len(vocab) < vocab_count else ("insufficient_verbs" if (verb_source_summary.get("verbs", 0) or verb_source_summary.get("seed_fallback", 0)) else ""),
+        "fallback": {
+            "used": bool(vocab_seed_fallback_count),
+            "count": vocab_seed_fallback_count,
+        },
         "wrong_reviews": wrong_items,
         "quiz": quiz,
         "grammar_count": len(grammar_points),
@@ -7670,14 +7746,12 @@ def build_telegram_notification(material, date, app_url=None):
         ) or html.escape(material.get("grammar", {}).get("title", "今日文法"))
     else:
         grammar_title = html.escape(material.get("grammar", {}).get("title", "今日文法"))
-    level = html.escape(material.get("targetLevel", ""))
     version_no = material.get("version_no")
     source = material.get("generation_source", "")
     date_label = html.escape(f"{date} -- {version_no}" if version_no else str(date))
     return (
         f"<b>日語學習自動化系統</b>\n"
         f"日期：{date_label}\n"
-        f"等級：{level}\n\n"
         f"來源：{html.escape(source or 'local')}\n\n"
         f"<b>今日單字：</b>{words or '暫無'}\n"
         f"<b>今日文法：</b>\n{grammar_title}\n\n"
