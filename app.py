@@ -108,6 +108,8 @@ CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
 LOCAL_GENERATION_SAFE_MODE_DEFAULT = os.environ.get("LOCAL_GENERATION_SAFE_MODE", "true").strip().lower()
+LOCAL_SELECTION_COOLDOWN_DAYS = read_int_env("LOCAL_SELECTION_COOLDOWN_DAYS", 7, 0, 30)
+LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX = os.environ.get("LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX", "false").strip().lower() == "true"
 RUN_MIGRATIONS_ON_REQUEST = os.environ.get("RUN_MIGRATIONS_ON_REQUEST", "false").strip().lower() == "true"
 DB_CONNECT_TIMEOUT_SECONDS = read_int_env("DB_CONNECT_TIMEOUT_SECONDS", 5, 1, 20)
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
@@ -643,6 +645,21 @@ def utc_now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def local_selection_cooldown_sequence():
+    base_days = max(0, int(LOCAL_SELECTION_COOLDOWN_DAYS or 0))
+    if base_days <= 0:
+        return (0,)
+    if not LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX:
+        return (base_days,)
+    sequence = [base_days]
+    for days in (14, 7, 3, 0):
+        if days < base_days and days not in sequence:
+            sequence.append(days)
+    if 0 not in sequence:
+        sequence.append(0)
+    return tuple(sequence)
+
+
 def clean_timestamp(value):
     if value is None:
         return None
@@ -1103,12 +1120,15 @@ def migrate_vocab_rules_sqlite(conn):
         conn.execute("ALTER TABLE vocab_selection_logs ADD COLUMN material_key TEXT")
     if "material_version_no" not in vocab_log_columns:
         conn.execute("ALTER TABLE vocab_selection_logs ADD COLUMN material_version_no INTEGER")
+    if "selected_for" not in vocab_log_columns:
+        conn.execute("ALTER TABLE vocab_selection_logs ADD COLUMN selected_for TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_rule_key ON vocab_appearance_rules(rule_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_group_key ON vocab_appearance_rules(group_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_date ON vocab_selection_logs(material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_rule_date ON vocab_selection_logs(rule_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_date_key ON vocab_selection_logs(selected_for, material_date, normalized_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
 
@@ -2175,6 +2195,7 @@ def migrate_grammar_points_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_logs_date_key ON grammar_selection_logs(material_date, grammar_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_material_key ON grammar_selection_logs(material_key)")
     seed_grammar_points_sqlite(conn)
@@ -3556,12 +3577,14 @@ def migrate_vocab_rules_postgres():
             )
             cur.execute("ALTER TABLE vocab_selection_logs ADD COLUMN IF NOT EXISTS material_key TEXT")
             cur.execute("ALTER TABLE vocab_selection_logs ADD COLUMN IF NOT EXISTS material_version_no INTEGER")
+            cur.execute("ALTER TABLE vocab_selection_logs ADD COLUMN IF NOT EXISTS selected_for TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_rule_key ON vocab_appearance_rules(rule_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_rules_group_key ON vocab_appearance_rules(group_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_date ON vocab_selection_logs(material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_rule_date ON vocab_selection_logs(rule_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_date_key ON vocab_selection_logs(selected_for, material_date, normalized_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
         conn.commit()
@@ -3656,6 +3679,7 @@ def migrate_grammar_points_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_points_active ON grammar_points(is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_date ON grammar_selection_logs(material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_key_date ON grammar_selection_logs(grammar_key, material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_logs_date_key ON grammar_selection_logs(material_date, grammar_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_level_date ON grammar_selection_logs(jlpt_level, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_selection_logs_material_key ON grammar_selection_logs(material_key)")
             seed_grammar_points_postgres(cur)
@@ -4492,18 +4516,20 @@ def item_normalized_key(item):
     return ""
 
 
-def get_recent_used_normalized_keys(days=14, material_date=None, include_all_versions=True):
+def get_recent_used_normalized_keys(days=None, material_date=None, include_all_versions=True):
     try:
+        if days is None:
+            days = LOCAL_SELECTION_COOLDOWN_DAYS
         day_count = max(0, int(days or 0))
     except (TypeError, ValueError):
-        day_count = 14
+        day_count = LOCAL_SELECTION_COOLDOWN_DAYS
     if day_count <= 0:
         return set()
     try:
         end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
     except Exception:
         end_date = taipei_now().date()
-    start_date = end_date - timedelta(days=day_count - 1)
+    start_date = end_date - timedelta(days=day_count)
     start, end = start_date.isoformat(), end_date.isoformat()
     try:
         if DATABASE_URL and not vocab_pool_db_query_allowed():
@@ -4517,6 +4543,7 @@ def get_recent_used_normalized_keys(days=14, material_date=None, include_all_ver
                         SELECT DISTINCT normalized_key
                         FROM vocab_selection_logs
                         WHERE material_date BETWEEN %s AND %s
+                          AND (selected_for = 'word' OR selected_for IS NULL OR selected_for = '')
                           AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
                         """,
                         (start, end),
@@ -4527,6 +4554,7 @@ def get_recent_used_normalized_keys(days=14, material_date=None, include_all_ver
             SELECT DISTINCT normalized_key
             FROM vocab_selection_logs
             WHERE material_date BETWEEN ? AND ?
+              AND (selected_for = 'word' OR selected_for IS NULL OR selected_for = '')
               AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
             """,
             (start, end),
@@ -4538,18 +4566,20 @@ def get_recent_used_normalized_keys(days=14, material_date=None, include_all_ver
         return set()
 
 
-def get_recent_used_verb_keys(material_date=None, days=14, include_all_versions=True):
+def get_recent_used_verb_keys(material_date=None, days=None, include_all_versions=True):
     try:
+        if days is None:
+            days = LOCAL_SELECTION_COOLDOWN_DAYS
         day_count = max(0, int(days or 0))
     except (TypeError, ValueError):
-        day_count = 14
+        day_count = LOCAL_SELECTION_COOLDOWN_DAYS
     if day_count <= 0:
         return set()
     try:
         end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
     except Exception:
         end_date = taipei_now().date()
-    start_date = end_date - timedelta(days=day_count - 1)
+    start_date = end_date - timedelta(days=day_count)
     start, end = start_date.isoformat(), end_date.isoformat()
     try:
         if DATABASE_URL and not vocab_pool_db_query_allowed():
@@ -5660,7 +5690,8 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         "prefiltered_unsupported_category_count": 0,
         "skipped_empty_jlpt_count": 0,
         "safe_jlpt_candidates": 0,
-        "cooldown_days_used": 14,
+        "recent_used_word_count": 0,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "generation_elapsed_ms": 0,
         "rule_selection": {
             "available_rules": [],
@@ -5686,11 +5717,13 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
 
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if normalize_vocab_key(key)}
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = {
-        14: get_recent_used_normalized_keys(14, material_date=material_date),
-        7: get_recent_used_normalized_keys(7, material_date=material_date),
-        3: get_recent_used_normalized_keys(3, material_date=material_date),
+        days: get_recent_used_normalized_keys(days, material_date=material_date)
+        for days in cooldown_sequence
+        if days > 0
     }
+    stats["recent_used_word_count"] = len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))
     sns_slang_ids = []
 
     def select_item(item, rule_key):
@@ -5753,7 +5786,7 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         return []
 
     def select_with_slot_limits(slot_limits):
-        for cooldown_days in (14, 7, 3, 0):
+        for cooldown_days in cooldown_sequence:
             if len(selected) >= limit:
                 break
             selected_before_cooldown = len(selected)
@@ -5798,6 +5831,9 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         select_with_slot_limits(refill_limits)
 
     selected = selected[:limit]
+    insufficient_unique = len(selected) < limit
+    if insufficient_unique:
+        stats.setdefault("warnings", []).append("insufficient_unique_words_after_7_day_cooldown")
     mark_vocabulary_pool_used([item for item in selected if item.get("source") == "vocabulary_pool"])
     mark_slang_used_in_material(sns_slang_ids)
     for item in selected:
@@ -5821,6 +5857,13 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         f"selected_counts={stats['rule_selection']['selected_counts']} "
         f"cooldown_days_used={stats['cooldown_days_used']} "
         f"fallback_count=0 elapsed_ms={stats['generation_elapsed_ms']}"
+    )
+    print(
+        "[vocab-selector] "
+        f"cooldown_days={LOCAL_SELECTION_COOLDOWN_DAYS} "
+        f"recent_used_word_count={len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
+        f"selected_word_count={len(selected)} "
+        f"insufficient_unique={str(insufficient_unique).lower()}"
     )
     return (selected, stats) if return_stats else selected
 
@@ -5854,7 +5897,7 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
         "prefiltered_unsupported_category_count": 0,
         "skipped_empty_jlpt_count": 0,
         "safe_jlpt_candidates": 0,
-        "cooldown_days_used": 14,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "generation_elapsed_ms": 0,
     }
     if limit <= 0:
@@ -5869,10 +5912,11 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
     selected_rule_counts = {}
     low_quality_examples = []
     quota_examples = []
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = {
-        14: get_recent_used_normalized_keys(14, material_date=material_date),
-        7: get_recent_used_normalized_keys(7, material_date=material_date),
-        3: get_recent_used_normalized_keys(3, material_date=material_date),
+        days: get_recent_used_normalized_keys(days, material_date=material_date)
+        for days in cooldown_sequence
+        if days > 0
     }
     try:
         today = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
@@ -5932,8 +5976,8 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
                 if len(quota_examples) < 5:
                     quota_examples.append({"surface": item.get("word"), "reason": reason})
                 continue
-            if cooldown_days != 14:
-                stats["cooldown_days_used"] = min(stats.get("cooldown_days_used", 14), cooldown_days)
+            if cooldown_days != LOCAL_SELECTION_COOLDOWN_DAYS:
+                stats["cooldown_days_used"] = min(stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS), cooldown_days)
             selected_keys.add(key)
             item["_matched_rule_keys"] = [rule["rule_key"] for rule in matches]
             selected.append(item)
@@ -5950,7 +5994,7 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
 
     level_order = safe_mode_level_order(target) if safe_mode else JLPT_ADJACENCY.get(target, [target] if target else [])
     per_level_limit = max(limit * 6, 80)
-    for cooldown_days in (14, 7, 3):
+    for cooldown_days in cooldown_sequence:
         if len(selected) >= limit:
             break
         for level in level_order:
@@ -5975,7 +6019,7 @@ def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, retu
                 allowed_categories.append(value)
         allowed_categories = sorted(set(allowed_categories), key=lambda value: -int((rules.get(make_vocab_rule_key("category", value)) or {}).get("priority", 0) or 0))
         if allowed_categories:
-            for cooldown_days in (14, 7, 3):
+            for cooldown_days in cooldown_sequence:
                 if len(selected) >= limit:
                     break
                 exclude_for_sql = set(selected_keys)
@@ -6645,7 +6689,7 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         "rejected_fake_suru_count": 0,
         "verb_candidate_count": 0,
         "recent_duplicate_rejected_count": 0,
-        "cooldown_days_used": 14,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
     }
     if limit <= 0:
         return [], stats
@@ -6655,9 +6699,11 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
 
     target = settings.get("target_level", "")
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = recent_keys_by_days or {
         days: get_recent_used_verb_keys(material_date=material_date, days=days)
-        for days in (14, 7, 3)
+        for days in cooldown_sequence
+        if days > 0
     }
     candidates = []
 
@@ -6702,7 +6748,7 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
     candidates = sorted(candidates, key=lambda item: item["_sort"])
     selected = []
     selected_keys = set(seen)
-    for cooldown_days in (14, 7, 3, 0):
+    for cooldown_days in cooldown_sequence:
         before_count = len(selected)
         recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
         for item in candidates:
@@ -6824,10 +6870,11 @@ def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
     seed = seed_basic_safe_pool(settings)
     selected = []
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = {
-        14: get_recent_used_normalized_keys(14, material_date=material_date),
-        7: get_recent_used_normalized_keys(7, material_date=material_date),
-        3: get_recent_used_normalized_keys(3, material_date=material_date),
+        days: get_recent_used_normalized_keys(days, material_date=material_date)
+        for days in cooldown_sequence
+        if days > 0
     }
 
     def normalized_seed_item(item):
@@ -6850,7 +6897,7 @@ def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
         }
 
     seed_items = [item for item in (normalized_seed_item(raw) for raw in seed) if item]
-    for cooldown_days in (14, 7, 3, 0):
+    for cooldown_days in cooldown_sequence:
         for item in seed_items:
             if len(selected) >= limit:
                 return selected
@@ -6908,7 +6955,10 @@ def merge_vocab_selector_stats(target, source):
     target.setdefault("rejected_by_category_quota", {})
     for name, count in (source.get("rejected_by_category_quota") or {}).items():
         target["rejected_by_category_quota"][name] = target["rejected_by_category_quota"].get(name, 0) + count
-    target["cooldown_days_used"] = min(target.get("cooldown_days_used", 14), source.get("cooldown_days_used", 14))
+    target["cooldown_days_used"] = min(
+        target.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
+        source.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
+    )
     return target
 
 
@@ -6951,17 +7001,19 @@ def seed_basic_safe_pool(settings=None):
 
 def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_keys_by_days=None):
     if limit <= 0:
-        return [], {"recent_duplicate_rejected_count": 0, "cooldown_days_used": 14, "candidates_from_db": 0}
+        return [], {"recent_duplicate_rejected_count": 0, "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS, "candidates_from_db": 0}
     ensure_settings_store()
     rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (max(limit * 12, limit, 80),))
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = recent_keys_by_days or {
         days: get_recent_used_verb_keys(material_date=material_date, days=days)
-        for days in (14, 7, 3)
+        for days in cooldown_sequence
+        if days > 0
     }
     stats = {
         "recent_duplicate_rejected_count": 0,
-        "cooldown_days_used": 14,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "candidates_from_db": len(rows),
     }
     candidates = []
@@ -7006,7 +7058,7 @@ def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_
 
     items = []
     selected_keys = set(seen)
-    for cooldown_days in (14, 7, 3, 0):
+    for cooldown_days in cooldown_sequence:
         before_count = len(items)
         recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
         for item in candidates:
@@ -7228,7 +7280,7 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
     stats = {
         "candidates_from_seed": 0,
         "recent_duplicate_rejected_count": 0,
-        "cooldown_days_used": 14,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
     }
     if limit <= 0:
         return ([], stats) if return_stats else []
@@ -7242,13 +7294,15 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
     random.shuffle(seed)
     stats["candidates_from_seed"] = len(seed)
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = recent_keys_by_days or {
         days: get_recent_used_verb_keys(material_date=material_date, days=days)
-        for days in (14, 7, 3)
+        for days in cooldown_sequence
+        if days > 0
     }
     items = []
     selected_keys = set(seen)
-    for cooldown_days in (14, 7, 3, 0):
+    for cooldown_days in cooldown_sequence:
         before_count = len(items)
         recent_keys = recent_keys_by_days.get(cooldown_days, set()) if cooldown_days > 0 else set()
         for item in seed:
@@ -7451,18 +7505,20 @@ def grammar_item_dedupe_key(item):
     return ""
 
 
-def get_recent_used_grammar_keys(material_date=None, days=14, include_all_versions=True):
+def get_recent_used_grammar_keys(material_date=None, days=None, include_all_versions=True):
     try:
+        if days is None:
+            days = LOCAL_SELECTION_COOLDOWN_DAYS
         day_count = max(0, int(days or 0))
     except (TypeError, ValueError):
-        day_count = 14
+        day_count = LOCAL_SELECTION_COOLDOWN_DAYS
     if day_count <= 0:
         return set()
     try:
         end_date = datetime.strptime(canonical_material_date(material_date or get_today_taipei_date()), "%Y-%m-%d").date()
     except Exception:
         end_date = taipei_now().date()
-    start_date = end_date - timedelta(days=day_count - 1)
+    start_date = end_date - timedelta(days=day_count)
     start, end = start_date.isoformat(), end_date.isoformat()
     try:
         ensure_grammar_points_store()
@@ -7599,9 +7655,12 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
             "grammar_warnings": [],
             "grammar_selection": {},
             "grammar_duplicate_filter": {
-                "cooldown_days_requested": 14,
+                "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
                 "cooldown_days_used": 0,
                 "recent_duplicate_rejected_count": 0,
+                "recent_used_count": 0,
+                "selected_count": 0,
+                "insufficient_unique": False,
             },
         }
 
@@ -7613,12 +7672,13 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
     material_date_value = material_date or get_today_taipei_date()
     recent_keys_by_days = {
         days: get_recent_used_grammar_keys(material_date_value, days=days)
-        for days in (14, 7, 3)
+        for days in local_selection_cooldown_sequence()
+        if days > 0
     }
     candidates_from_db = 0
     candidates_from_seed = 0
     recent_duplicate_rejected_count = 0
-    cooldown_days_used = 14
+    cooldown_days_used = LOCAL_SELECTION_COOLDOWN_DAYS
     source_counts = {"grammar_points": 0, "seed_grammar_pool": 0}
 
     def try_take(candidates, cooldown_days, source_name):
@@ -7645,7 +7705,7 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
             source_counts[source_name] = source_counts.get(source_name, 0) + 1
 
     try:
-        for cooldown_days in (14, 7, 3, 0):
+        for cooldown_days in local_selection_cooldown_sequence():
             if len(selected) >= grammar_count:
                 break
             for level in levels:
@@ -7671,9 +7731,11 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
                 break
         if not selected:
             warnings.append("grammar_pool_empty")
+            warnings.append("insufficient_unique_grammar_after_7_day_cooldown")
         elif len(selected) < grammar_count:
             warnings.append("grammar_pool_insufficient")
-        if cooldown_days_used < 14:
+            warnings.append("insufficient_unique_grammar_after_7_day_cooldown")
+        if cooldown_days_used < LOCAL_SELECTION_COOLDOWN_DAYS:
             warnings.append("grammar_cooldown_relaxed")
         elapsed_ms = round((time.perf_counter() - selector_started) * 1000)
         selected_key_list = [grammar_item_dedupe_key(item) for item in selected if grammar_item_dedupe_key(item)]
@@ -7681,10 +7743,17 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
             "[grammar-selector] "
             f"level={grammar_level} requested={grammar_count} "
             f"candidates_from_db={candidates_from_db} candidates_from_seed={candidates_from_seed} "
-            f"recent_used_count={len(recent_keys_by_days.get(14, set()))} "
+            f"recent_used_count={len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
             f"rejected_recent_duplicate={recent_duplicate_rejected_count} "
             f"cooldown_days_used={cooldown_days_used} selected={selected_key_list} "
             f"elapsed_ms={elapsed_ms}"
+        )
+        print(
+            "[grammar-selector] "
+            f"cooldown_days={LOCAL_SELECTION_COOLDOWN_DAYS} "
+            f"recent_used_grammar_count={len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
+            f"selected_grammar_count={len(selected)} "
+            f"insufficient_unique={str(len(selected) < grammar_count).lower()}"
         )
         return selected, {
             "grammar_pool_empty": not bool(selected),
@@ -7696,16 +7765,19 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
                 "grammar_level": grammar_level,
                 "source_counts": source_counts,
                 "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
-                "cooldown_days_requested": 14,
+                "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
                 "cooldown_days_used": cooldown_days_used,
                 "selected_grammar_keys": selected_key_list,
                 "candidates_from_db": candidates_from_db,
                 "candidates_from_seed": candidates_from_seed,
             },
             "grammar_duplicate_filter": {
-                "cooldown_days_requested": 14,
+                "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
                 "cooldown_days_used": cooldown_days_used,
                 "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
+                "recent_used_count": len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set())),
+                "selected_count": len(selected),
+                "insufficient_unique": len(selected) < grammar_count,
             },
         }
     except Exception as exc:
@@ -7721,14 +7793,17 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
                 "grammar_level": grammar_level,
                 "source_counts": {"grammar_points": 0, "seed_grammar_pool": 0},
                 "recent_duplicate_rejected_count": 0,
-                "cooldown_days_requested": 14,
+                "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
                 "cooldown_days_used": 0,
                 "selected_grammar_keys": [],
             },
             "grammar_duplicate_filter": {
-                "cooldown_days_requested": 14,
+                "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
                 "cooldown_days_used": 0,
                 "recent_duplicate_rejected_count": 0,
+                "recent_used_count": 0,
+                "selected_count": 0,
+                "insufficient_unique": True,
             },
         }
 
@@ -7769,7 +7844,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "prefiltered_unsupported_category_count": 0,
         "skipped_empty_jlpt_count": 0,
         "safe_jlpt_candidates": 0,
-        "cooldown_days_used": 14,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "generation_elapsed_ms": 0,
     }
     seed_used = False
@@ -7836,14 +7911,15 @@ def build_local_material(settings, force_seed=False, material_date=None):
     rejected_fake_suru_count = 0
     verb_candidate_count = 0
     verb_recent_duplicate_rejected_count = 0
-    verb_cooldown_days_used = 14
+    verb_cooldown_days_used = LOCAL_SELECTION_COOLDOWN_DAYS
     verb_candidates_from_db = 0
     verb_candidates_from_seed = 0
     verbs = []
     selected_verb_keys = []
     verb_recent_keys_by_days = {
         days: get_recent_used_verb_keys(material_date=material_date or get_today_taipei_date(), days=days)
-        for days in (14, 7, 3)
+        for days in local_selection_cooldown_sequence()
+        if days > 0
     }
     if not force_seed and not safe_mode:
         verbs, verb_pool_stats = material_verbs_from_vocabulary_pool(
@@ -7857,7 +7933,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         rejected_fake_suru_count += verb_pool_stats.get("rejected_fake_suru_count", 0)
         verb_candidate_count += verb_pool_stats.get("verb_candidate_count", 0)
         verb_recent_duplicate_rejected_count += verb_pool_stats.get("recent_duplicate_rejected_count", 0)
-        verb_cooldown_days_used = min(verb_cooldown_days_used, verb_pool_stats.get("cooldown_days_used", 14))
+        verb_cooldown_days_used = min(verb_cooldown_days_used, verb_pool_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_db += verb_pool_stats.get("verb_candidate_count", 0)
         selected_verb_keys.extend(verb_pool_stats.get("selected_keys", []))
         for source, count in verb_pool_stats.get("source_summary", {}).items():
@@ -7877,7 +7953,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         source_counts["seed"] += len(seed_verbs)
         verb_source_summary["seed_fallback"] += len(seed_verbs)
         verb_recent_duplicate_rejected_count += seed_verb_stats.get("recent_duplicate_rejected_count", 0)
-        verb_cooldown_days_used = min(verb_cooldown_days_used, seed_verb_stats.get("cooldown_days_used", 14))
+        verb_cooldown_days_used = min(verb_cooldown_days_used, seed_verb_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_seed += seed_verb_stats.get("candidates_from_seed", 0)
         seed_used = bool(seed_verbs)
         if seed_verbs:
@@ -7894,7 +7970,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         selected_verb_keys.extend(db_keys)
         verb_source_summary["verbs"] += len(db_verbs)
         verb_recent_duplicate_rejected_count += db_verb_stats.get("recent_duplicate_rejected_count", 0)
-        verb_cooldown_days_used = min(verb_cooldown_days_used, db_verb_stats.get("cooldown_days_used", 14))
+        verb_cooldown_days_used = min(verb_cooldown_days_used, db_verb_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_db += db_verb_stats.get("candidates_from_db", 0)
         if db_verbs:
             print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
@@ -7915,11 +7991,29 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "exp": "今日文法由本地題庫抽取，不消耗 Gemini API 額度。請先掌握例句中的助詞、句型功能與常見錯誤。",
         "examples": grammar_examples,
     }
+    if len(vocab) < vocab_count:
+        generation_warnings.append("insufficient_unique_words_after_7_day_cooldown")
+    if len(verbs) < verb_count:
+        generation_warnings.append("insufficient_unique_verbs_after_7_day_cooldown")
+    if len(grammar_points) < grammar_count:
+        generation_warnings.append("insufficient_unique_grammar_after_7_day_cooldown")
     if safe_mode and len(vocab) < vocab_count:
         generation_warnings.append("insufficient_safe_vocab_pool")
+    for warning in (vocab_selector_stats.get("warnings") or []):
+        if warning == "insufficient_unique_words_after_7_day_cooldown" and len(vocab) >= vocab_count:
+            continue
+        if warning and warning not in generation_warnings:
+            generation_warnings.append(warning)
+    for warning in (grammar_stats.get("grammar_warnings") or []):
+        if warning and warning not in generation_warnings:
+            generation_warnings.append(warning)
     metadata = {
         "generation_mode": "local",
         "selection_strategy": "period_first_balanced_slot_allocation",
+        "cooldown_policy": {
+            "days": LOCAL_SELECTION_COOLDOWN_DAYS,
+            "allow_relax": LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX,
+        },
         "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
         "db_pool_used": bool(vocab_selector_stats.get("db_pool_used", False)),
         "seed_fallback_used": bool(vocab_seed_fallback_count),
@@ -7965,25 +8059,33 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "selected_normalized_keys": selected_normalized_keys,
         "duplicate_filtered_count": duplicate_filtered_count,
         "duplicate_filter": {
-            "cooldown_days_requested": 14,
-            "cooldown_days": vocab_selector_stats.get("cooldown_days_used", 14),
-            "cooldown_days_used": vocab_selector_stats.get("cooldown_days_used", 14),
+            "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
+            "cooldown_days": vocab_selector_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
+            "cooldown_days_used": vocab_selector_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
             "rejected_recent_duplicate_count": vocab_selector_stats.get("rejected_recent_duplicate_count", 0),
+        },
+        "word_duplicate_filter": {
+            "recent_used_count": vocab_selector_stats.get("recent_used_word_count", 0),
+            "selected_count": len(vocab),
+            "insufficient_unique": len(vocab) < vocab_count,
         },
         "selected_verb_keys": selected_verb_keys,
         "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
         "verb_source_summary": verb_source_summary,
         "verb_duplicate_filter": {
-            "cooldown_days_requested": 14,
+            "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
             "cooldown_days_used": verb_cooldown_days_used,
             "recent_duplicate_rejected_count": verb_recent_duplicate_rejected_count,
+            "recent_used_count": len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set())),
+            "selected_count": len(verbs),
+            "insufficient_unique": len(verbs) < verb_count,
         },
         "verb_selection": {
             "requested_count": verb_count,
             "selected_count": len(verbs),
             "source_counts": verb_source_summary,
             "recent_duplicate_rejected_count": verb_recent_duplicate_rejected_count,
-            "cooldown_days_requested": 14,
+            "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
             "cooldown_days_used": verb_cooldown_days_used,
             "selected_verbs": [first_text(item, ["surface", "dictionary_form", "base_form"]) for item in verbs],
             "candidates_from_db": verb_candidates_from_db,
@@ -8034,11 +8136,18 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "[verb-selector] "
         f"requested={verb_count} candidates_from_db={verb_candidates_from_db} "
         f"candidates_from_seed={verb_candidates_from_seed} "
-        f"recent_used_count={len(verb_recent_keys_by_days.get(14, set()))} "
+        f"recent_used_count={len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
         f"rejected_recent_duplicate={verb_recent_duplicate_rejected_count} "
         f"cooldown_days_used={verb_cooldown_days_used} "
         f"selected={[first_text(item, ['surface', 'dictionary_form', 'base_form']) for item in verbs]} "
         f"elapsed_ms={metadata['generation_elapsed_ms']}"
+    )
+    print(
+        "[verb-selector] "
+        f"cooldown_days={LOCAL_SELECTION_COOLDOWN_DAYS} "
+        f"recent_used_verb_count={len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
+        f"selected_verb_count={len(verbs)} "
+        f"insufficient_unique={str(len(verbs) < verb_count).lower()}"
     )
     return {
         "date": material_date_display(material_date or get_today_taipei_date()),
