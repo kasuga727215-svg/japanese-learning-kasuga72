@@ -6240,6 +6240,41 @@ SAFE_SURU_NOUNS = {
     "調整",
 }
 SAFE_SURU_VERBS = {f"{noun}する" for noun in SAFE_SURU_NOUNS}
+SURU_VERB_LIMIT_PER_MATERIAL = 1
+
+
+def verb_surface_for_filter(item):
+    if not isinstance(item, dict):
+        return ""
+    return first_text(item, ["surface", "dictionary_form", "base_form", "term", "word", "base"])
+
+
+def is_suru_verb_surface(surface):
+    text = str(surface or "").strip()
+    return text == "する" or (text.endswith("する") and len(text) > len("する"))
+
+
+def is_suru_compound_surface(surface):
+    text = str(surface or "").strip()
+    return text.endswith("する") and text != "する"
+
+
+def is_core_suru_verb_item(item):
+    if not isinstance(item, dict):
+        return False
+    source = first_text(item, ["source", "_raw_source"]).lower()
+    quality = first_text(item, ["quality"]).lower()
+    return boolish(item.get("is_core_verb")) or source in {"manual_core", "core_verb"} or (source == "manual" and quality == "core")
+
+
+def should_exclude_suru_compound_verb(item):
+    return is_suru_compound_surface(verb_surface_for_filter(item)) and not is_core_suru_verb_item(item)
+
+
+def material_verb_is_suru(item):
+    surface = verb_surface_for_filter(item)
+    verb_type = first_text(item, ["verb_type", "verb_group_label", "part_of_speech"])
+    return is_suru_verb_surface(surface) or "サ" in verb_type or "suru" in verb_type.lower()
 
 
 def material_verb_group_label(group):
@@ -6401,6 +6436,8 @@ def fake_suru_rejection_reason(row):
 
 
 def row_can_be_suru_verb(row):
+    if not is_core_suru_verb_item(row):
+        return False
     if row_is_explicit_verb(row):
         return False
     category = first_text(row, ["category"]).lower()
@@ -6416,6 +6453,8 @@ def row_can_be_suru_verb(row):
 
 
 def is_valid_verb_candidate(row):
+    if should_exclude_suru_compound_verb(row):
+        return False, "suru_compound_not_core"
     if row_is_explicit_verb(row) or row_can_be_suru_verb(row):
         return True, ""
     return False, fake_suru_rejection_reason(row)
@@ -6687,6 +6726,7 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         "selected_keys": [],
         "source_summary": {"vocabulary_pool": 0, "vocabulary_pool_suru": 0},
         "rejected_fake_suru_count": 0,
+        "excluded_suru_compound_count": 0,
         "verb_candidate_count": 0,
         "recent_duplicate_rejected_count": 0,
         "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
@@ -6713,7 +6753,9 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         if not is_valid:
             if rejection_reason:
                 stats["rejected_fake_suru_count"] += 1
-                if rejected_log_count < 25:
+                if rejection_reason == "suru_compound_not_core":
+                    stats["excluded_suru_compound_count"] += 1
+                if rejected_log_count < 5:
                     rejected_log_count += 1
                     print(
                         "[verb-selector] rejected fake suru verb "
@@ -6987,16 +7029,207 @@ def load_basic_seed_vocab_items(settings=None):
     return rows
 
 
+EXTENDED_SAFE_SEED_VOCAB_ROWS = [
+    ("朝ご飯", "あさごはん", "早餐", "名詞", "N5", "daily"),
+    ("昼ご飯", "ひるごはん", "午餐", "名詞", "N5", "daily"),
+    ("晩ご飯", "ばんごはん", "晚餐", "名詞", "N5", "daily"),
+    ("朝", "あさ", "早上", "名詞", "N5", "daily"),
+    ("昼", "ひる", "中午、白天", "名詞", "N5", "daily"),
+    ("夜", "よる", "晚上", "名詞", "N5", "daily"),
+    ("午前", "ごぜん", "上午", "名詞", "N5", "daily"),
+    ("午後", "ごご", "下午", "名詞", "N5", "daily"),
+    ("毎朝", "まいあさ", "每天早上", "名詞", "N5", "daily"),
+    ("毎晩", "まいばん", "每天晚上", "名詞", "N5", "daily"),
+    ("今週", "こんしゅう", "這週", "名詞", "N5", "daily"),
+    ("来週", "らいしゅう", "下週", "名詞", "N5", "daily"),
+    ("先週", "せんしゅう", "上週", "名詞", "N5", "daily"),
+    ("今年", "ことし", "今年", "名詞", "N5", "daily"),
+    ("来年", "らいねん", "明年", "名詞", "N5", "daily"),
+    ("去年", "きょねん", "去年", "名詞", "N5", "daily"),
+    ("春", "はる", "春天", "名詞", "N5", "daily"),
+    ("夏", "なつ", "夏天", "名詞", "N5", "daily"),
+    ("秋", "あき", "秋天", "名詞", "N5", "daily"),
+    ("冬", "ふゆ", "冬天", "名詞", "N5", "daily"),
+    ("月曜日", "げつようび", "星期一", "名詞", "N5", "daily"),
+    ("火曜日", "かようび", "星期二", "名詞", "N5", "daily"),
+    ("水曜日", "すいようび", "星期三", "名詞", "N5", "daily"),
+    ("木曜日", "もくようび", "星期四", "名詞", "N5", "daily"),
+    ("金曜日", "きんようび", "星期五", "名詞", "N5", "daily"),
+    ("土曜日", "どようび", "星期六", "名詞", "N5", "daily"),
+    ("日曜日", "にちようび", "星期日", "名詞", "N5", "daily"),
+    ("家", "いえ", "家", "名詞", "N5", "daily"),
+    ("庭", "にわ", "庭院", "名詞", "N5", "daily"),
+    ("台所", "だいどころ", "廚房", "名詞", "N5", "daily"),
+    ("トイレ", "といれ", "廁所", "名詞", "N5", "daily"),
+    ("風呂", "ふろ", "澡堂、浴室", "名詞", "N5", "daily"),
+    ("玄関", "げんかん", "玄關", "名詞", "N5", "daily"),
+    ("窓", "まど", "窗戶", "名詞", "N5", "daily"),
+    ("ドア", "どあ", "門", "名詞", "N5", "daily"),
+    ("時計", "とけい", "時鐘、手錶", "名詞", "N5", "daily"),
+    ("傘", "かさ", "傘", "名詞", "N5", "daily"),
+    ("鞄", "かばん", "包包", "名詞", "N5", "daily"),
+    ("靴", "くつ", "鞋子", "名詞", "N5", "daily"),
+    ("服", "ふく", "衣服", "名詞", "N5", "daily"),
+    ("帽子", "ぼうし", "帽子", "名詞", "N5", "daily"),
+    ("紙", "かみ", "紙", "名詞", "N5", "daily"),
+    ("鉛筆", "えんぴつ", "鉛筆", "名詞", "N5", "daily"),
+    ("ペン", "ぺん", "筆", "名詞", "N5", "daily"),
+    ("新聞", "しんぶん", "報紙", "名詞", "N5", "daily"),
+    ("雑誌", "ざっし", "雜誌", "名詞", "N5", "daily"),
+    ("辞書", "じしょ", "字典", "名詞", "N5", "daily"),
+    ("手紙", "てがみ", "信", "名詞", "N5", "daily"),
+    ("切手", "きって", "郵票", "名詞", "N5", "daily"),
+    ("荷物", "にもつ", "行李、包裹", "名詞", "N5", "daily"),
+    ("写真", "しゃしん", "照片", "名詞", "N5", "daily"),
+    ("映画", "えいが", "電影", "名詞", "N5", "daily"),
+    ("音楽", "おんがく", "音樂", "名詞", "N5", "daily"),
+    ("料理", "りょうり", "料理", "名詞", "N5", "daily"),
+    ("旅行", "りょこう", "旅行", "名詞", "N5", "daily"),
+    ("宿題", "しゅくだい", "作業", "名詞", "N5", "daily"),
+    ("質問", "しつもん", "問題、提問", "名詞", "N5", "daily"),
+    ("答え", "こたえ", "答案", "名詞", "N5", "daily"),
+    ("病院", "びょういん", "醫院", "名詞", "N5", "daily"),
+    ("銀行", "ぎんこう", "銀行", "名詞", "N5", "daily"),
+    ("郵便局", "ゆうびんきょく", "郵局", "名詞", "N5", "daily"),
+    ("図書館", "としょかん", "圖書館", "名詞", "N5", "daily"),
+    ("食堂", "しょくどう", "食堂", "名詞", "N5", "daily"),
+    ("公園", "こうえん", "公園", "名詞", "N5", "daily"),
+    ("道", "みち", "道路", "名詞", "N5", "daily"),
+    ("交差点", "こうさてん", "十字路口", "名詞", "N5", "daily"),
+    ("右", "みぎ", "右邊", "名詞", "N5", "daily"),
+    ("左", "ひだり", "左邊", "名詞", "N5", "daily"),
+    ("前", "まえ", "前面", "名詞", "N5", "daily"),
+    ("後ろ", "うしろ", "後面", "名詞", "N5", "daily"),
+    ("近く", "ちかく", "附近", "名詞", "N5", "daily"),
+    ("隣", "となり", "隔壁、旁邊", "名詞", "N5", "daily"),
+    ("中", "なか", "裡面", "名詞", "N5", "daily"),
+    ("外", "そと", "外面", "名詞", "N5", "daily"),
+    ("上", "うえ", "上面", "名詞", "N5", "daily"),
+    ("下", "した", "下面", "名詞", "N5", "daily"),
+    ("犬", "いぬ", "狗", "名詞", "N5", "daily"),
+    ("猫", "ねこ", "貓", "名詞", "N5", "daily"),
+    ("魚", "さかな", "魚", "名詞", "N5", "daily"),
+    ("肉", "にく", "肉", "名詞", "N5", "daily"),
+    ("野菜", "やさい", "蔬菜", "名詞", "N5", "daily"),
+    ("果物", "くだもの", "水果", "名詞", "N5", "daily"),
+    ("卵", "たまご", "蛋", "名詞", "N5", "daily"),
+    ("牛乳", "ぎゅうにゅう", "牛奶", "名詞", "N5", "daily"),
+    ("お茶", "おちゃ", "茶", "名詞", "N5", "daily"),
+    ("町", "まち", "城鎮、街道", "名詞", "N5", "daily"),
+    ("村", "むら", "村莊", "名詞", "N5", "daily"),
+    ("国", "くに", "國家", "名詞", "N5", "daily"),
+    ("外国", "がいこく", "外國", "名詞", "N5", "daily"),
+    ("人", "ひと", "人", "名詞", "N5", "daily"),
+    ("子供", "こども", "小孩", "名詞", "N5", "daily"),
+    ("男の人", "おとこのひと", "男人", "名詞", "N5", "daily"),
+    ("女の人", "おんなのひと", "女人", "名詞", "N5", "daily"),
+    ("白い", "しろい", "白色的", "い形容詞", "N5", "common"),
+    ("黒い", "くろい", "黑色的", "い形容詞", "N5", "common"),
+    ("赤い", "あかい", "紅色的", "い形容詞", "N5", "common"),
+    ("青い", "あおい", "藍色的", "い形容詞", "N5", "common"),
+    ("暑い", "あつい", "炎熱的", "い形容詞", "N5", "common"),
+    ("寒い", "さむい", "寒冷的", "い形容詞", "N5", "common"),
+    ("暖かい", "あたたかい", "溫暖的", "い形容詞", "N5", "common"),
+    ("涼しい", "すずしい", "涼爽的", "い形容詞", "N5", "common"),
+    ("重い", "おもい", "重的", "い形容詞", "N5", "common"),
+    ("軽い", "かるい", "輕的", "い形容詞", "N5", "common"),
+    ("近い", "ちかい", "近的", "い形容詞", "N5", "common"),
+    ("遠い", "とおい", "遠的", "い形容詞", "N5", "common"),
+    ("早い", "はやい", "早的、快的", "い形容詞", "N5", "common"),
+    ("遅い", "おそい", "慢的、晚的", "い形容詞", "N5", "common"),
+    ("長い", "ながい", "長的", "い形容詞", "N5", "common"),
+    ("短い", "みじかい", "短的", "い形容詞", "N5", "common"),
+    ("多い", "おおい", "多的", "い形容詞", "N5", "common"),
+    ("少ない", "すくない", "少的", "い形容詞", "N5", "common"),
+    ("静か", "しずか", "安靜", "な形容詞", "N5", "common"),
+    ("元気", "げんき", "有精神、健康", "な形容詞", "N5", "common"),
+    ("暇", "ひま", "有空", "な形容詞", "N5", "common"),
+    ("有名", "ゆうめい", "有名", "な形容詞", "N5", "common"),
+    ("親切", "しんせつ", "親切", "な形容詞", "N5", "common"),
+    ("上手", "じょうず", "擅長", "な形容詞", "N5", "common"),
+    ("下手", "へた", "不擅長", "な形容詞", "N5", "common"),
+    ("嫌い", "きらい", "討厭", "な形容詞", "N5", "common"),
+    ("色", "いろ", "顏色", "名詞", "N5", "daily"),
+    ("声", "こえ", "聲音", "名詞", "N4", "common"),
+    ("形", "かたち", "形狀", "名詞", "N4", "common"),
+    ("光", "ひかり", "光", "名詞", "N4", "common"),
+    ("音", "おと", "聲音", "名詞", "N4", "common"),
+    ("空気", "くうき", "空氣、氣氛", "名詞", "N4", "common"),
+    ("文化", "ぶんか", "文化", "名詞", "N4", "common"),
+    ("習慣", "しゅうかん", "習慣", "名詞", "N4", "common"),
+    ("社会", "しゃかい", "社會", "名詞", "N4", "common"),
+    ("歴史", "れきし", "歷史", "名詞", "N4", "common"),
+    ("自然", "しぜん", "自然", "名詞", "N4", "common"),
+    ("理由", "りゆう", "理由", "名詞", "N4", "common"),
+    ("場合", "ばあい", "場合", "名詞", "N4", "common"),
+    ("予定", "よてい", "預定、計畫", "名詞", "N4", "common"),
+    ("用事", "ようじ", "事情、要辦的事", "名詞", "N4", "daily"),
+    ("約束", "やくそく", "約定", "名詞", "N4", "daily"),
+    ("必要", "ひつよう", "必要", "な形容詞", "N4", "common"),
+    ("十分", "じゅうぶん", "充分", "な形容詞", "N4", "common"),
+    ("全部", "ぜんぶ", "全部", "副詞", "N4", "common"),
+    ("特に", "とくに", "特別、尤其", "副詞", "N4", "common"),
+    ("最近", "さいきん", "最近", "副詞", "N4", "daily"),
+    ("将来", "しょうらい", "將來", "名詞", "N4", "common"),
+    ("場合", "ばあい", "情況、場合", "名詞", "N4", "common"),
+    ("気持ち", "きもち", "心情", "名詞", "N4", "common"),
+    ("気分", "きぶん", "心情、身體狀況", "名詞", "N4", "common"),
+    ("生活", "せいかつ", "生活", "名詞", "N4", "daily"),
+    ("仕事", "しごと", "工作", "名詞", "N5", "daily"),
+    ("勉強", "べんきょう", "學習", "名詞", "N5", "daily"),
+    ("練習", "れんしゅう", "練習", "名詞", "N4", "daily"),
+    ("説明", "せつめい", "說明", "名詞", "N4", "common"),
+    ("確認", "かくにん", "確認", "名詞", "N4", "common"),
+    ("準備", "じゅんび", "準備", "名詞", "N4", "daily"),
+    ("紹介", "しょうかい", "介紹", "名詞", "N4", "common"),
+    ("経験", "けいけん", "經驗", "名詞", "N4", "common"),
+]
+
+
+def extended_safe_seed_vocab_items():
+    return [
+        {
+            "surface": surface,
+            "base_form": surface,
+            "word": surface,
+            "reading_hiragana": reading,
+            "reading": reading,
+            "meaning_zh": meaning,
+            "meaning": meaning,
+            "part_of_speech": part_of_speech,
+            "jlpt_level": jlpt_level,
+            "category": category,
+            "quality": "core",
+            "source": "seed_basic",
+            "normalized_key": normalize_vocab_key(surface),
+        }
+        for surface, reading, meaning, part_of_speech, jlpt_level, category in EXTENDED_SAFE_SEED_VOCAB_ROWS
+    ]
+
+
+def dedupe_seed_vocab_rows(rows):
+    deduped = []
+    seen = set()
+    for row in rows:
+        key = normalize_vocab_key(row.get("normalized_key") or row.get("base_form") or row.get("surface") or row.get("word"))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
+
+
 def seed_basic_safe_pool(settings=None):
     rows = [row for row in load_basic_seed_vocab_items(settings) if is_safe_mode_seed_vocab_item(row)]
+    rows = dedupe_seed_vocab_rows(rows + extended_safe_seed_vocab_items())
     if local_generation_safe_mode_enabled():
         return rows
-    if len(rows) >= 100:
+    if len(rows) >= 200:
         return rows
     # The checked-in basic seed file normally has 100+ N5-N3 words.  If it is
     # missing in a local environment, fall back to the small built-in examples
     # so local generation still returns JSON instead of failing.
-    return rows + list(sample_material(settings or {}).get("vocab", [])) + LOCAL_SEED_VOCAB
+    return dedupe_seed_vocab_rows(rows + list(sample_material(settings or {}).get("vocab", [])) + LOCAL_SEED_VOCAB)
 
 
 def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_keys_by_days=None):
@@ -7276,22 +7509,51 @@ def natural_seed_verb_items(settings):
     return items
 
 
-def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, recent_keys_by_days=None, return_stats=False):
-    stats = {
-        "candidates_from_seed": 0,
-        "recent_duplicate_rejected_count": 0,
-        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
-    }
-    if limit <= 0:
-        return ([], stats) if return_stats else []
-    seed = (
+def pure_verb_safe_pool(settings):
+    raw_seed = (
         seed_file_verb_items(settings)
         + extended_safe_seed_verb_items()
         + natural_seed_verb_items(settings)
         + list(sample_material(settings).get("verbs", []))
         + LOCAL_SEED_VERBS
     )
+    items = []
+    seen = set()
+    excluded_suru = 0
+    for raw in raw_seed:
+        if should_exclude_suru_compound_verb(raw) or material_verb_is_suru(raw):
+            excluded_suru += 1
+            continue
+        normalized = normalize_material_verb_schema(dict(raw))
+        if should_exclude_suru_compound_verb(normalized) or material_verb_is_suru(normalized):
+            excluded_suru += 1
+            continue
+        key = item_normalized_key(normalized)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        normalized["source"] = normalized.get("source") or "pure_verb_safe_pool"
+        normalized["rule_key"] = f"verb:{normalized.get('jlpt_level') or 'local'}"
+        items.append(normalized)
+    random.shuffle(items)
+    return items, excluded_suru
+
+
+def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, recent_keys_by_days=None, return_stats=False):
+    stats = {
+        "candidates_from_seed": 0,
+        "recent_duplicate_rejected_count": 0,
+        "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
+        "pure_verb_count": 0,
+        "suru_verb_count": 0,
+        "suru_verb_limit": SURU_VERB_LIMIT_PER_MATERIAL,
+        "excluded_suru_compound_count": 0,
+    }
+    if limit <= 0:
+        return ([], stats) if return_stats else []
+    seed, excluded_suru_count = pure_verb_safe_pool(settings)
     random.shuffle(seed)
+    stats["excluded_suru_compound_count"] += excluded_suru_count
     stats["candidates_from_seed"] = len(seed)
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     cooldown_sequence = local_selection_cooldown_sequence()
@@ -7316,12 +7578,19 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
                 stats["recent_duplicate_rejected_count"] += 1
                 continue
             copied = dict(item)
+            if should_exclude_suru_compound_verb(copied):
+                stats["excluded_suru_compound_count"] += 1
+                continue
             copied.setdefault("normalized_key", key)
             copied["source"] = copied.get("source") or "seed_basic_verb_pool"
             copied["rule_key"] = f"verb:{copied.get('jlpt_level') or 'local'}"
             normalized = normalize_material_verb_schema(copied)
+            if material_verb_is_suru(normalized):
+                stats["excluded_suru_compound_count"] += 1
+                continue
             normalized["rule_key"] = copied["rule_key"]
             items.append(normalized)
+            stats["pure_verb_count"] += 1
             selected_keys.add(key)
         if len(items) > before_count:
             stats["cooldown_days_used"] = cooldown_days
@@ -7909,6 +8178,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     verb_duplicate_filtered_count = 0
     verb_source_summary = {"vocabulary_pool": 0, "vocabulary_pool_suru": 0, "verbs": 0, "seed_fallback": 0}
     rejected_fake_suru_count = 0
+    excluded_suru_compound_count = 0
     verb_candidate_count = 0
     verb_recent_duplicate_rejected_count = 0
     verb_cooldown_days_used = LOCAL_SELECTION_COOLDOWN_DAYS
@@ -7931,6 +8201,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         )
         verb_duplicate_filtered_count += verb_pool_stats.get("duplicate_filtered_count", 0)
         rejected_fake_suru_count += verb_pool_stats.get("rejected_fake_suru_count", 0)
+        excluded_suru_compound_count += verb_pool_stats.get("excluded_suru_compound_count", 0)
         verb_candidate_count += verb_pool_stats.get("verb_candidate_count", 0)
         verb_recent_duplicate_rejected_count += verb_pool_stats.get("recent_duplicate_rejected_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, verb_pool_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
@@ -7953,6 +8224,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
         source_counts["seed"] += len(seed_verbs)
         verb_source_summary["seed_fallback"] += len(seed_verbs)
         verb_recent_duplicate_rejected_count += seed_verb_stats.get("recent_duplicate_rejected_count", 0)
+        excluded_suru_compound_count += seed_verb_stats.get("excluded_suru_compound_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, seed_verb_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_seed += seed_verb_stats.get("candidates_from_seed", 0)
         seed_used = bool(seed_verbs)
@@ -7975,7 +8247,20 @@ def build_local_material(settings, force_seed=False, material_date=None):
         if db_verbs:
             print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
     verbs = [normalize_material_verb_schema(item) for item in verbs[:verb_count]]
+    if sum(1 for item in verbs if material_verb_is_suru(item)) > SURU_VERB_LIMIT_PER_MATERIAL:
+        filtered_verbs = []
+        suru_kept = 0
+        for item in verbs:
+            if material_verb_is_suru(item):
+                if suru_kept >= SURU_VERB_LIMIT_PER_MATERIAL:
+                    excluded_suru_compound_count += 1
+                    continue
+                suru_kept += 1
+            filtered_verbs.append(item)
+        verbs = filtered_verbs
     selected_verb_keys = [item_normalized_key(item) for item in verbs if item_normalized_key(item)]
+    suru_verb_count = sum(1 for item in verbs if material_verb_is_suru(item))
+    pure_verb_count = max(0, len(verbs) - suru_verb_count)
 
     wrong_items = due_wrong_answer_summary()
     source_counts["wrong"] = len(wrong_items)
@@ -7993,6 +8278,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     }
     if len(vocab) < vocab_count:
         generation_warnings.append("insufficient_unique_words_after_7_day_cooldown")
+        generation_warnings.append("insufficient_unique_words_after_all_safe_fallbacks")
     if len(verbs) < verb_count:
         generation_warnings.append("insufficient_unique_verbs_after_7_day_cooldown")
     if len(grammar_points) < grammar_count:
@@ -8069,6 +8355,15 @@ def build_local_material(settings, force_seed=False, material_date=None):
             "selected_count": len(vocab),
             "insufficient_unique": len(vocab) < vocab_count,
         },
+        "word_selection": {
+            "requested_count": vocab_count,
+            "selected_count": len(vocab),
+            "selected_by_rule": vocab_selector_stats.get("rule_selection", {}).get("selected_counts", {}),
+            "selected_from_safe_fallback": vocab_seed_fallback_count,
+            "cooldown_days": LOCAL_SELECTION_COOLDOWN_DAYS,
+            "recent_duplicate_rejected_count": vocab_selector_stats.get("rejected_recent_duplicate_count", 0),
+            "insufficient_unique": len(vocab) < vocab_count,
+        },
         "selected_verb_keys": selected_verb_keys,
         "verb_duplicate_filtered_count": verb_duplicate_filtered_count,
         "verb_source_summary": verb_source_summary,
@@ -8083,6 +8378,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "verb_selection": {
             "requested_count": verb_count,
             "selected_count": len(verbs),
+            "pure_verb_count": pure_verb_count,
+            "suru_verb_count": suru_verb_count,
+            "suru_verb_limit": SURU_VERB_LIMIT_PER_MATERIAL,
+            "excluded_suru_compound_count": excluded_suru_compound_count,
+            "cooldown_days": LOCAL_SELECTION_COOLDOWN_DAYS,
             "source_counts": verb_source_summary,
             "recent_duplicate_rejected_count": verb_recent_duplicate_rejected_count,
             "cooldown_days_requested": LOCAL_SELECTION_COOLDOWN_DAYS,
@@ -8092,6 +8392,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
             "candidates_from_seed": verb_candidates_from_seed,
         },
         "rejected_fake_suru_count": rejected_fake_suru_count,
+        "excluded_suru_compound_count": excluded_suru_compound_count,
         "verb_candidate_count": verb_candidate_count,
         "seed_fallback_count": vocab_seed_fallback_count,
         "vocab_seed_fallback_count": vocab_seed_fallback_count,
@@ -8126,6 +8427,14 @@ def build_local_material(settings, force_seed=False, material_date=None):
         f"candidate_counts={vocab_selector_stats.get('candidate_counts', {})}"
     )
     print(
+        "[word-selector] "
+        f"requested={vocab_count} selected={len(vocab)} "
+        f"selected_from_rules={max(0, len(vocab) - vocab_seed_fallback_count)} "
+        f"selected_from_safe_fallback={vocab_seed_fallback_count} "
+        f"recent_duplicate_rejected={vocab_selector_stats.get('rejected_recent_duplicate_count', 0)} "
+        f"insufficient_unique={str(len(vocab) < vocab_count).lower()}"
+    )
+    print(
         "[material-generator] local verb sources "
         f"vocabulary_pool={verb_source_summary.get('vocabulary_pool', 0)} "
         f"vocabulary_pool_suru={verb_source_summary.get('vocabulary_pool_suru', 0)} "
@@ -8148,6 +8457,13 @@ def build_local_material(settings, force_seed=False, material_date=None):
         f"recent_used_verb_count={len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
         f"selected_verb_count={len(verbs)} "
         f"insufficient_unique={str(len(verbs) < verb_count).lower()}"
+    )
+    print(
+        "[verb-selector] "
+        f"requested={verb_count} selected={len(verbs)} "
+        f"pure_verb_count={pure_verb_count} suru_verb_count={suru_verb_count} "
+        f"excluded_suru_compound_count={excluded_suru_compound_count} "
+        f"cooldown_days={LOCAL_SELECTION_COOLDOWN_DAYS}"
     )
     return {
         "date": material_date_display(material_date or get_today_taipei_date()),
@@ -8618,6 +8934,11 @@ def material_success_message(date, settings, material, telegram_status):
         base = f"{date} 的 {settings['target_level']} 學習材料已經生成並保存。"
     if missing_meaning_count:
         base += " 部分詞彙尚未建立中文意思，建議後續補齊 vocabulary_pool。"
+    word_selection = metadata.get("word_selection") or {}
+    requested_words = int(word_selection.get("requested_count") or 0)
+    selected_words = int(word_selection.get("selected_count") or 0)
+    if requested_words and selected_words < requested_words:
+        base += f" 本次因 7 天不重複與安全詞庫限制，僅生成 {selected_words} / {requested_words} 筆單字。"
     return f"{base} {telegram_status}"
 
 
