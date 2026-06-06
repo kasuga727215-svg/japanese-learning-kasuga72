@@ -9540,16 +9540,165 @@ def answer_reading_hiragana(value):
         return kana_to_hiragana(text)
 
 
-def smart_answer_equal(user_input, correct_answer):
+def smart_answer_equal(user_input, correct_answer, accepted_answers=None):
     user_clean = clean_answer_value(user_input)
     correct_clean = clean_answer_value(correct_answer)
     if not user_clean or not correct_clean:
         return False
     if user_clean == correct_clean:
         return True
+    for accepted in accepted_answers or []:
+        accepted_clean = clean_answer_value(accepted)
+        if accepted_clean and user_clean == accepted_clean:
+            return True
     user_reading = answer_reading_hiragana(user_clean)
     correct_reading = answer_reading_hiragana(correct_clean)
-    return bool(user_reading and correct_reading and user_reading == correct_reading)
+    if user_reading and correct_reading and user_reading == correct_reading:
+        return True
+    for accepted in accepted_answers or []:
+        accepted_reading = answer_reading_hiragana(accepted)
+        if user_reading and accepted_reading and user_reading == accepted_reading:
+            return True
+    return False
+
+
+def practice_verb_group(value):
+    try:
+        group = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return group if group in {1, 2, 3} else 0
+
+
+PRACTICE_GODAN_FORMS = {
+    "う": ("い", "って", "った", "わない", "えば", "わせる", "われる"),
+    "く": ("き", "いて", "いた", "かない", "けば", "かせる", "かれる"),
+    "ぐ": ("ぎ", "いで", "いだ", "がない", "げば", "がせる", "がれる"),
+    "す": ("し", "して", "した", "さない", "せば", "させる", "される"),
+    "つ": ("ち", "って", "った", "たない", "てば", "たせる", "たれる"),
+    "ぬ": ("に", "んで", "んだ", "なない", "ねば", "なせる", "なれる"),
+    "ぶ": ("び", "んで", "んだ", "ばない", "べば", "ばせる", "ばれる"),
+    "む": ("み", "んで", "んだ", "まない", "めば", "ませる", "まれる"),
+    "る": ("り", "って", "った", "らない", "れば", "らせる", "られる"),
+}
+
+
+def conjugate_practice_verb_base(base_form, verb_group):
+    base = clean_answer_value(base_form)
+    group = practice_verb_group(verb_group)
+    if not base:
+        return {}
+    if group == 3:
+        if base in {"来る", "くる"} or base.endswith("来る"):
+            stem = base[:-1]
+            if base == "くる":
+                return {
+                    "renyou_form": "き",
+                    "te_form": "きて",
+                    "ta_form": "きた",
+                    "nai_form": "こない",
+                    "ba_form": "くれば",
+                    "shieki_form": "こさせる",
+                    "ukemi_form": "こられる",
+                }
+            return {
+                "renyou_form": f"{stem}",
+                "te_form": f"{stem}て",
+                "ta_form": f"{stem}た",
+                "nai_form": f"{stem}ない",
+                "ba_form": f"{stem}れば",
+                "shieki_form": f"{stem}させる",
+                "ukemi_form": f"{stem}られる",
+            }
+        if base == "する" or base.endswith("する"):
+            stem = base[:-2]
+            return {
+                "renyou_form": f"{stem}し",
+                "te_form": f"{stem}して",
+                "ta_form": f"{stem}した",
+                "nai_form": f"{stem}しない",
+                "ba_form": f"{stem}すれば",
+                "shieki_form": f"{stem}させる",
+                "ukemi_form": f"{stem}される",
+            }
+    if group == 2 and base.endswith("る"):
+        stem = base[:-1]
+        return {
+            "renyou_form": stem,
+            "te_form": f"{stem}て",
+            "ta_form": f"{stem}た",
+            "nai_form": f"{stem}ない",
+            "ba_form": f"{stem}れば",
+            "shieki_form": f"{stem}させる",
+            "ukemi_form": f"{stem}られる",
+        }
+    if group == 1:
+        if base in {"行く", "いく"}:
+            stem = base[:-1]
+            return {
+                "renyou_form": f"{stem}き",
+                "te_form": f"{stem}って",
+                "ta_form": f"{stem}った",
+                "nai_form": f"{stem}かない",
+                "ba_form": f"{stem}けば",
+                "shieki_form": f"{stem}かせる",
+                "ukemi_form": f"{stem}かれる",
+            }
+        ending = base[-1:]
+        forms = PRACTICE_GODAN_FORMS.get(ending)
+        if forms:
+            stem = base[:-1]
+            renyou, te, ta, nai, ba, shieki, ukemi = forms
+            return {
+                "renyou_form": f"{stem}{renyou}",
+                "te_form": f"{stem}{te}",
+                "ta_form": f"{stem}{ta}",
+                "nai_form": f"{stem}{nai}",
+                "ba_form": f"{stem}{ba}",
+                "shieki_form": f"{stem}{shieki}",
+                "ukemi_form": f"{stem}{ukemi}",
+            }
+    return {}
+
+
+def surface_variant_from_reading_answer(correct_answer, base_surface, base_reading):
+    correct = clean_answer_value(correct_answer)
+    surface = clean_answer_value(base_surface)
+    reading = clean_answer_value(base_reading)
+    if not correct or not surface or not reading or surface == reading:
+        return ""
+    stems = []
+    if reading.endswith("する") and surface.endswith("する"):
+        stems.append((reading[:-2], surface[:-2]))
+    if reading.endswith("る") and surface.endswith("る"):
+        stems.append((reading[:-1], surface[:-1]))
+    if len(reading) >= 2 and len(surface) >= 2:
+        stems.append((reading[:-1], surface[:-1]))
+    stems.append((reading, surface))
+    for reading_stem, surface_stem in stems:
+        if reading_stem and correct.startswith(reading_stem):
+            return clean_answer_value(f"{surface_stem}{correct[len(reading_stem):]}")
+    return ""
+
+
+def accepted_verb_form_answers(verb, question_type, correct_answer):
+    answers = set()
+
+    def add(value):
+        clean = clean_answer_value(value)
+        if clean:
+            answers.add(clean)
+
+    add(correct_answer)
+    base_surface = clean_answer_value((verb or {}).get("dictionary_form", ""))
+    base_reading = clean_answer_value((verb or {}).get("reading", ""))
+    group = practice_verb_group((verb or {}).get("verb_group"))
+    generated_surface = conjugate_practice_verb_base(base_surface, group)
+    generated_reading = conjugate_practice_verb_base(base_reading, group)
+    add(generated_surface.get(question_type, ""))
+    add(generated_reading.get(question_type, ""))
+    add(surface_variant_from_reading_answer(correct_answer, base_surface, base_reading))
+    return sorted(answers)
 
 
 def answer_display_value(correct_answer, preferred_answer=None):
@@ -10794,7 +10943,8 @@ def api_verb_check():
     if not verb:
         return jsonify({"error": "找不到動詞題目。"}), 404
     correct = verb[question_type]
-    is_correct = smart_answer_equal(answer, correct)
+    accepted_answers = accepted_verb_form_answers(verb, question_type, correct)
+    is_correct = smart_answer_equal(answer, correct, accepted_answers)
     debug_report = None
     if not is_correct:
         add_mistake(int(verb_id), question_type, answer)
@@ -10812,6 +10962,7 @@ def api_verb_check():
         {
             "correct": is_correct,
             "correct_answer": answer_display_value(correct, answer if is_correct else None),
+            "accepted_answers": accepted_answers,
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
             "mistake_added": not is_correct,
@@ -10947,7 +11098,8 @@ def api_retry_mistake(mistake_id):
     if not row:
         return jsonify({"error": "找不到錯題紀錄。"}), 404
     correct = row[row["question_type"]]
-    is_correct = smart_answer_equal(answer, correct)
+    accepted_answers = accepted_verb_form_answers(row, row["question_type"], correct)
+    is_correct = smart_answer_equal(answer, correct, accepted_answers)
     report = make_debug_report_payload(
         question_type=row["question_type"],
         prompt=f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(row['question_type'], row['question_type'])}。",
@@ -10997,6 +11149,7 @@ def api_retry_mistake(mistake_id):
         {
             "correct": is_correct,
             "correct_answer": answer_display_value(correct, answer if is_correct else None),
+            "accepted_answers": accepted_answers,
             "rule": form_rule_explanation(row, row["question_type"]),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
