@@ -141,6 +141,31 @@ VERB_FORM_LABELS = {
     "ukemi_form": "受身形",
 }
 QUESTION_TYPES = list(VERB_FORM_LABELS.keys())
+PRACTICE_QUESTION_TYPE_ALIASES = {
+    "masu_stem": "renyou_form",
+    "renyou": "renyou_form",
+    "te": "te_form",
+    "ta": "ta_form",
+    "nai": "nai_form",
+    "ba": "ba_form",
+    "causative": "shieki_form",
+    "causative_form": "shieki_form",
+    "passive": "ukemi_form",
+    "passive_form": "ukemi_form",
+}
+PRACTICE_CANONICAL_FORM_ALIASES = {
+    "renyou_form": ("renyou_form", "masu_stem", "renyou"),
+    "te_form": ("te_form", "te"),
+    "ta_form": ("ta_form", "ta"),
+    "nai_form": ("nai_form", "nai"),
+    "ba_form": ("ba_form", "ba"),
+    "tara_form": ("tara_form", "tara"),
+    "volitional_form": ("volitional_form", "volitional"),
+    "potential_form": ("potential_form", "potential"),
+    "shieki_form": ("shieki_form", "causative_form", "causative"),
+    "ukemi_form": ("ukemi_form", "passive_form", "passive"),
+    "causative_passive_form": ("causative_passive_form", "causative_passive", "causativePassive"),
+}
 ERROR_CATEGORIES = [
     "動詞變化錯",
     "助詞錯",
@@ -2380,6 +2405,13 @@ def migrate_mistake_logs(conn):
         "mastered": "ALTER TABLE mistake_logs ADD COLUMN mastered INTEGER NOT NULL DEFAULT 0",
         "error_category": "ALTER TABLE mistake_logs ADD COLUMN error_category TEXT",
         "debug_report_json": "ALTER TABLE mistake_logs ADD COLUMN debug_report_json TEXT",
+        "question_text": "ALTER TABLE mistake_logs ADD COLUMN question_text TEXT",
+        "base_surface": "ALTER TABLE mistake_logs ADD COLUMN base_surface TEXT",
+        "base_reading": "ALTER TABLE mistake_logs ADD COLUMN base_reading TEXT",
+        "conjugation_type": "ALTER TABLE mistake_logs ADD COLUMN conjugation_type TEXT",
+        "primary_answer": "ALTER TABLE mistake_logs ADD COLUMN primary_answer TEXT",
+        "accepted_answers_json": "ALTER TABLE mistake_logs ADD COLUMN accepted_answers_json TEXT",
+        "explanation": "ALTER TABLE mistake_logs ADD COLUMN explanation TEXT",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -9570,6 +9602,34 @@ def practice_verb_group(value):
     return group if group in {1, 2, 3} else 0
 
 
+def normalize_practice_question_type(question_type):
+    key = str(question_type or "").strip()
+    return PRACTICE_QUESTION_TYPE_ALIASES.get(key, key)
+
+
+def practice_form_aliases(question_type):
+    key = normalize_practice_question_type(question_type)
+    return PRACTICE_CANONICAL_FORM_ALIASES.get(key, (key,))
+
+
+def infer_practice_verb_group(base_form, base_reading=""):
+    base = clean_answer_value(base_form)
+    reading = clean_answer_value(base_reading)
+    if not base:
+        return 0
+    if base in {"する", "来る", "くる"} or base.endswith("する"):
+        return 3
+    if base.endswith("る"):
+        reading_or_base = reading if reading.endswith("る") else base
+        if base in MATERIAL_GODAN_RU_EXCEPTIONS:
+            return 1
+        if base in MATERIAL_ICHIDAN_RU_VERBS:
+            return 2
+        previous = reading_or_base[-2] if len(reading_or_base) >= 2 else ""
+        return 2 if previous in MATERIAL_ICHIDAN_PRECEDING_KANA else 1
+    return 1 if base[-1:] in MATERIAL_GODAN_FORMS else 0
+
+
 PRACTICE_GODAN_FORMS = {
     "う": ("い", "って", "った", "わない", "えば", "わせる", "われる"),
     "く": ("き", "いて", "いた", "かない", "けば", "かせる", "かれる"),
@@ -9583,82 +9643,28 @@ PRACTICE_GODAN_FORMS = {
 }
 
 
-def conjugate_practice_verb_base(base_form, verb_group):
+def conjugate_practice_verb_base(base_form, verb_group, base_reading=""):
     base = clean_answer_value(base_form)
-    group = practice_verb_group(verb_group)
+    group = practice_verb_group(verb_group) or infer_practice_verb_group(base, base_reading)
     if not base:
         return {}
-    if group == 3:
-        if base in {"来る", "くる"} or base.endswith("来る"):
-            stem = base[:-1]
-            if base == "くる":
-                return {
-                    "renyou_form": "き",
-                    "te_form": "きて",
-                    "ta_form": "きた",
-                    "nai_form": "こない",
-                    "ba_form": "くれば",
-                    "shieki_form": "こさせる",
-                    "ukemi_form": "こられる",
-                }
-            return {
-                "renyou_form": f"{stem}",
-                "te_form": f"{stem}て",
-                "ta_form": f"{stem}た",
-                "nai_form": f"{stem}ない",
-                "ba_form": f"{stem}れば",
-                "shieki_form": f"{stem}させる",
-                "ukemi_form": f"{stem}られる",
-            }
-        if base == "する" or base.endswith("する"):
-            stem = base[:-2]
-            return {
-                "renyou_form": f"{stem}し",
-                "te_form": f"{stem}して",
-                "ta_form": f"{stem}した",
-                "nai_form": f"{stem}しない",
-                "ba_form": f"{stem}すれば",
-                "shieki_form": f"{stem}させる",
-                "ukemi_form": f"{stem}される",
-            }
-    if group == 2 and base.endswith("る"):
-        stem = base[:-1]
-        return {
-            "renyou_form": stem,
-            "te_form": f"{stem}て",
-            "ta_form": f"{stem}た",
-            "nai_form": f"{stem}ない",
-            "ba_form": f"{stem}れば",
-            "shieki_form": f"{stem}させる",
-            "ukemi_form": f"{stem}られる",
-        }
-    if group == 1:
-        if base in {"行く", "いく"}:
-            stem = base[:-1]
-            return {
-                "renyou_form": f"{stem}き",
-                "te_form": f"{stem}って",
-                "ta_form": f"{stem}った",
-                "nai_form": f"{stem}かない",
-                "ba_form": f"{stem}けば",
-                "shieki_form": f"{stem}かせる",
-                "ukemi_form": f"{stem}かれる",
-            }
-        ending = base[-1:]
-        forms = PRACTICE_GODAN_FORMS.get(ending)
-        if forms:
-            stem = base[:-1]
-            renyou, te, ta, nai, ba, shieki, ukemi = forms
-            return {
-                "renyou_form": f"{stem}{renyou}",
-                "te_form": f"{stem}{te}",
-                "ta_form": f"{stem}{ta}",
-                "nai_form": f"{stem}{nai}",
-                "ba_form": f"{stem}{ba}",
-                "shieki_form": f"{stem}{shieki}",
-                "ukemi_form": f"{stem}{ukemi}",
-            }
-    return {}
+    generated = conjugate_material_verb(base, group) if group else None
+    if not isinstance(generated, dict):
+        return {}
+    forms = {}
+    for key, value in generated.items():
+        clean = clean_answer_value(value)
+        if clean and clean != NO_VERB_FORM:
+            forms[key] = clean
+    alias_pairs = {
+        "masu_stem": "renyou_form",
+        "causative_form": "shieki_form",
+        "passive_form": "ukemi_form",
+    }
+    for source_key, target_key in alias_pairs.items():
+        if source_key in forms:
+            forms[target_key] = forms[source_key]
+    return forms
 
 
 def surface_variant_from_reading_answer(correct_answer, base_surface, base_reading):
@@ -9681,30 +9687,93 @@ def surface_variant_from_reading_answer(correct_answer, base_surface, base_readi
     return ""
 
 
-def accepted_verb_form_answers(verb, question_type, correct_answer):
-    answers = set()
+def unique_answer_list(values):
+    answers = []
+    seen = set()
+    for value in values or []:
+        clean = clean_answer_value(value)
+        if clean and clean != NO_VERB_FORM and clean not in seen:
+            answers.append(clean)
+            seen.add(clean)
+    return answers
+
+
+def build_accepted_verb_answers(base_surface, base_reading, conjugation_type, verb_group=None, stored_answer=None, source=None):
+    answers = []
+    source = source or {}
+    key = normalize_practice_question_type(conjugation_type)
+    aliases = practice_form_aliases(key)
 
     def add(value):
         clean = clean_answer_value(value)
-        if clean:
-            answers.add(clean)
+        if clean and clean != NO_VERB_FORM:
+            answers.append(clean)
 
-    add(correct_answer)
-    base_surface = clean_answer_value((verb or {}).get("dictionary_form", ""))
-    base_reading = clean_answer_value((verb or {}).get("reading", ""))
-    group = practice_verb_group((verb or {}).get("verb_group"))
-    generated_surface = conjugate_practice_verb_base(base_surface, group)
+    add(stored_answer)
+    for alias in aliases:
+        add(source.get(alias))
+
+    base_surface = clean_answer_value(base_surface)
+    base_reading = clean_answer_value(base_reading)
+    group = practice_verb_group(verb_group) or infer_practice_verb_group(base_surface, base_reading)
+    generated_surface = conjugate_practice_verb_base(base_surface, group, base_reading)
     generated_reading = conjugate_practice_verb_base(base_reading, group)
-    add(generated_surface.get(question_type, ""))
-    add(generated_reading.get(question_type, ""))
-    add(surface_variant_from_reading_answer(correct_answer, base_surface, base_reading))
-    return sorted(answers)
+    for alias in aliases:
+        add(generated_surface.get(alias))
+        add(generated_reading.get(alias))
+
+    for answer in list(answers):
+        add(surface_variant_from_reading_answer(answer, base_surface, base_reading))
+    return unique_answer_list(answers)
 
 
-def answer_display_value(correct_answer, preferred_answer=None):
+def accepted_verb_form_answers(verb, question_type, correct_answer):
+    verb = verb or {}
+    return build_accepted_verb_answers(
+        verb.get("dictionary_form", ""),
+        verb.get("reading", ""),
+        question_type,
+        verb_group=verb.get("verb_group"),
+        stored_answer=correct_answer,
+        source=verb,
+    )
+
+
+def primary_accepted_answer(accepted_answers, correct_answer=""):
+    answers = unique_answer_list(accepted_answers)
+    for answer in answers:
+        if contains_kanji(answer):
+            return answer
+    return answers[0] if answers else clean_answer_value(correct_answer)
+
+
+def accepted_answer_display(accepted_answers, correct_answer=""):
+    answers = unique_answer_list(accepted_answers)
+    primary = primary_accepted_answer(answers, correct_answer)
+    kana = next((answer for answer in answers if is_kana_reading(answer)), "")
+    if primary and contains_kanji(primary):
+        if kana and kana != primary:
+            return f"{primary}（{kana}）"
+        reading = answer_reading_hiragana(primary)
+        if reading and reading != primary:
+            return f"{primary}（{reading}）"
+    return answer_display_value(correct_answer or primary, primary, answers)
+
+
+def verb_answer_context(verb, question_type, correct_answer):
+    accepted_answers = accepted_verb_form_answers(verb, question_type, correct_answer)
+    primary = primary_accepted_answer(accepted_answers, correct_answer)
+    return {
+        "accepted_answers": accepted_answers,
+        "primary_answer": primary,
+        "display_answer": accepted_answer_display(accepted_answers, correct_answer),
+    }
+
+
+def answer_display_value(correct_answer, preferred_answer=None, accepted_answers=None):
     clean = clean_answer_value(correct_answer)
     preferred = clean_answer_value(preferred_answer)
-    if preferred and contains_kanji(preferred) and smart_answer_equal(preferred, clean):
+    if preferred and contains_kanji(preferred) and smart_answer_equal(preferred, clean, accepted_answers):
         preferred_reading = answer_reading_hiragana(preferred)
         if preferred_reading and preferred_reading != preferred:
             return f"{preferred}（{preferred_reading}）"
@@ -9755,19 +9824,34 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
     target = sqlite_one("SELECT * FROM verbs WHERE id = ?", (verb_id,)) if int(verb_id or 0) > 0 else None
     correct_answer = target.get(question_type, "") if target and question_type in target else ""
     prompt = ""
+    accepted_answers = []
+    primary_answer = clean_answer_value(correct_answer)
     if target:
         prompt = f"請寫出「{target['dictionary_form']}（{target['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。"
+        context = verb_answer_context(target, question_type, correct_answer)
+        accepted_answers = context["accepted_answers"]
+        primary_answer = context["primary_answer"]
+    accepted_answers_json = json.dumps(accepted_answers, ensure_ascii=False)
     report = make_debug_report_payload(
         question_type=question_type,
         prompt=prompt,
         user_answer=wrong_answer,
-        correct_answer=correct_answer,
+        correct_answer=primary_answer or correct_answer,
         target_text=target.get("dictionary_form", "") if target else "",
         target_reading=target.get("reading", "") if target else "",
         target_form=question_type,
         error_category=category,
+        extra={
+            "question_text": prompt,
+            "base_surface": target.get("dictionary_form", "") if target else "",
+            "base_reading": target.get("reading", "") if target else "",
+            "conjugation_type": question_type,
+            "primary_answer": primary_answer,
+            "accepted_answers": accepted_answers,
+        },
     )
     report_json = debug_report_to_json(report)
+    explanation = " ".join(filter(None, [report.get("diagnosis", ""), report.get("rule", "")]))
     existing = sqlite_one(
         """
         SELECT id, mistake_count, user_wrong_answer
@@ -9792,10 +9876,32 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     mastered = 0,
                     status = 'learning',
                     error_category = ?,
-                    debug_report_json = ?
+                    debug_report_json = ?,
+                    question_text = ?,
+                    base_surface = ?,
+                    base_reading = ?,
+                    conjugation_type = ?,
+                    primary_answer = ?,
+                    accepted_answers_json = ?,
+                    explanation = ?
                 WHERE id = ?
                 """,
-                (" / ".join(answers), int(existing["mistake_count"]) + 1, now, iso_date_after(1), category, report_json, existing["id"]),
+                (
+                    " / ".join(answers),
+                    int(existing["mistake_count"]) + 1,
+                    now,
+                    iso_date_after(1),
+                    category,
+                    report_json,
+                    prompt,
+                    target.get("dictionary_form", "") if target else "",
+                    target.get("reading", "") if target else "",
+                    question_type,
+                    primary_answer,
+                    accepted_answers_json,
+                    explanation,
+                    existing["id"],
+                ),
             )
         else:
             conn.execute(
@@ -9804,11 +9910,28 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                 (
                     verb_id, question_type, user_wrong_answer, mistake_count,
                     status, last_reviewed_at, next_review_date, review_interval,
-                    review_count, mastered, error_category, debug_report_json
+                    review_count, mastered, error_category, debug_report_json,
+                    question_text, base_surface, base_reading, conjugation_type,
+                    primary_answer, accepted_answers_json, explanation
                 )
-                VALUES (?, ?, ?, 1, 'learning', ?, ?, 1, 0, 0, ?, ?)
+                VALUES (?, ?, ?, 1, 'learning', ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (verb_id, question_type, wrong_answer, now, iso_date_after(1), category, report_json),
+                (
+                    verb_id,
+                    question_type,
+                    wrong_answer,
+                    now,
+                    iso_date_after(1),
+                    category,
+                    report_json,
+                    prompt,
+                    target.get("dictionary_form", "") if target else "",
+                    target.get("reading", "") if target else "",
+                    question_type,
+                    primary_answer,
+                    accepted_answers_json,
+                    explanation,
+                ),
             )
         conn.commit()
     invalidate_dashboard_cache("mistake added")
@@ -10910,6 +11033,7 @@ def api_test_telegram():
 def api_verb_question():
     ensure_settings_store()
     question_type = request.args.get("type", "random")
+    question_type = normalize_practice_question_type(question_type)
     if question_type == "random" or question_type not in QUESTION_TYPES:
         question_type = random.choice(QUESTION_TYPES)
     verbs = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT 1")
@@ -10935,7 +11059,7 @@ def api_verb_question():
 def api_verb_check():
     data = request.get_json(silent=True) or {}
     verb_id = data.get("verb_id")
-    question_type = data.get("question_type")
+    question_type = normalize_practice_question_type(data.get("question_type"))
     answer = clean_answer_value(data.get("answer", ""))
     if not verb_id or question_type not in QUESTION_TYPES or not answer:
         return jsonify({"error": "題目或答案不完整。"}), 400
@@ -10943,7 +11067,8 @@ def api_verb_check():
     if not verb:
         return jsonify({"error": "找不到動詞題目。"}), 404
     correct = verb[question_type]
-    accepted_answers = accepted_verb_form_answers(verb, question_type, correct)
+    answer_context = verb_answer_context(verb, question_type, correct)
+    accepted_answers = answer_context["accepted_answers"]
     is_correct = smart_answer_equal(answer, correct, accepted_answers)
     debug_report = None
     if not is_correct:
@@ -10952,16 +11077,24 @@ def api_verb_check():
             question_type=question_type,
             prompt=f"請寫出「{verb['dictionary_form']}（{verb['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
             user_answer=answer,
-            correct_answer=correct,
+            correct_answer=answer_context["primary_answer"] or correct,
             target_text=verb["dictionary_form"],
             target_reading=verb["reading"],
             target_form=question_type,
             error_category="動詞變化錯",
+            extra={
+                "base_surface": verb["dictionary_form"],
+                "base_reading": verb["reading"],
+                "conjugation_type": question_type,
+                "primary_answer": answer_context["primary_answer"],
+                "accepted_answers": accepted_answers,
+            },
         )
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": answer_display_value(correct, answer if is_correct else None),
+            "correct_answer": answer_context["display_answer"],
+            "primary_answer": answer_context["primary_answer"],
             "accepted_answers": accepted_answers,
             "verb_group": group_label(verb["verb_group"]),
             "rule": form_rule_explanation(verb, question_type),
@@ -10977,6 +11110,7 @@ def api_mistakes():
 
 
 def query_mistakes(args=None, limit=None):
+    ensure_settings_store()
     args = args or {}
     question_type = args.get("question_type", "all")
     error_category = args.get("error_category", "all")
@@ -10998,6 +11132,8 @@ def query_mistakes(args=None, limit=None):
         m.mistake_count, m.status, m.last_reviewed_at,
         m.next_review_date, m.review_interval, m.review_count,
         m.mastered, m.error_category, m.debug_report_json,
+        m.question_text, m.base_surface, m.base_reading, m.conjugation_type,
+        m.primary_answer, m.accepted_answers_json, m.explanation,
         v.dictionary_form, v.reading, v.meaning, v.verb_group,
         v.te_form, v.ta_form, v.nai_form, v.renyou_form,
         v.shieki_form, v.ukemi_form, v.ba_form
@@ -11017,7 +11153,19 @@ def query_mistakes(args=None, limit=None):
     )
     for row in rows:
         row["question_label"] = VERB_FORM_LABELS.get(row["question_type"], row["question_type"])
-        row["correct_answer"] = answer_display_value(row[row["question_type"]]) if row["question_type"] in QUESTION_TYPES else ""
+        if row["question_type"] in QUESTION_TYPES:
+            stored_accepted = []
+            if row.get("accepted_answers_json"):
+                try:
+                    stored_accepted = json.loads(row["accepted_answers_json"]) or []
+                except (TypeError, json.JSONDecodeError):
+                    stored_accepted = []
+            accepted = stored_accepted or accepted_verb_form_answers(row, row["question_type"], row[row["question_type"]])
+            row["accepted_answers"] = accepted
+            row["correct_answer"] = accepted_answer_display(accepted, row[row["question_type"]])
+        else:
+            row["accepted_answers"] = []
+            row["correct_answer"] = ""
         row["verb_group_label"] = group_label(row["verb_group"])
     return rows
 
@@ -11097,20 +11245,31 @@ def api_retry_mistake(mistake_id):
     )
     if not row:
         return jsonify({"error": "找不到錯題紀錄。"}), 404
-    correct = row[row["question_type"]]
-    accepted_answers = accepted_verb_form_answers(row, row["question_type"], correct)
+    question_type = normalize_practice_question_type(row["question_type"])
+    correct = row[question_type]
+    answer_context = verb_answer_context(row, question_type, correct)
+    accepted_answers = answer_context["accepted_answers"]
     is_correct = smart_answer_equal(answer, correct, accepted_answers)
     report = make_debug_report_payload(
-        question_type=row["question_type"],
-        prompt=f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(row['question_type'], row['question_type'])}。",
+        question_type=question_type,
+        prompt=f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
         user_answer=answer,
-        correct_answer=correct,
+        correct_answer=answer_context["primary_answer"] or correct,
         target_text=row["dictionary_form"],
         target_reading=row["reading"],
-        target_form=row["question_type"],
+        target_form=question_type,
         error_category=error_category,
+        extra={
+            "base_surface": row["dictionary_form"],
+            "base_reading": row["reading"],
+            "conjugation_type": question_type,
+            "primary_answer": answer_context["primary_answer"],
+            "accepted_answers": accepted_answers,
+        },
     )
     report_json = debug_report_to_json(report)
+    accepted_answers_json = json.dumps(accepted_answers, ensure_ascii=False)
+    explanation = " ".join(filter(None, [report.get("diagnosis", ""), report.get("rule", "")]))
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         if is_correct:
@@ -11122,10 +11281,12 @@ def api_retry_mistake(mistake_id):
                     review_interval = ?,
                     review_count = COALESCE(review_count, 0) + 1,
                     next_review_date = ?,
-                    error_category = COALESCE(NULLIF(error_category, ''), ?)
+                    error_category = COALESCE(NULLIF(error_category, ''), ?),
+                    primary_answer = ?,
+                    accepted_answers_json = ?
                 WHERE id = ?
                 """,
-                (now, next_interval, iso_date_after(next_interval), error_category, mistake_id),
+                (now, next_interval, iso_date_after(next_interval), error_category, answer_context["primary_answer"], accepted_answers_json, mistake_id),
             )
         else:
             conn.execute(
@@ -11139,18 +11300,40 @@ def api_retry_mistake(mistake_id):
                     mastered = 0,
                     status = 'learning',
                     error_category = ?,
-                    debug_report_json = ?
+                    debug_report_json = ?,
+                    question_text = ?,
+                    base_surface = ?,
+                    base_reading = ?,
+                    conjugation_type = ?,
+                    primary_answer = ?,
+                    accepted_answers_json = ?,
+                    explanation = ?
                 WHERE id = ?
                 """,
-                (f"{row['user_wrong_answer']} / {answer}", now, iso_date_after(1), error_category, report_json, mistake_id),
+                (
+                    f"{row['user_wrong_answer']} / {answer}",
+                    now,
+                    iso_date_after(1),
+                    error_category,
+                    report_json,
+                    f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
+                    row["dictionary_form"],
+                    row["reading"],
+                    question_type,
+                    answer_context["primary_answer"],
+                    accepted_answers_json,
+                    explanation,
+                    mistake_id,
+                ),
             )
         conn.commit()
     return jsonify(
         {
             "correct": is_correct,
-            "correct_answer": answer_display_value(correct, answer if is_correct else None),
+            "correct_answer": answer_context["display_answer"],
+            "primary_answer": answer_context["primary_answer"],
             "accepted_answers": accepted_answers,
-            "rule": form_rule_explanation(row, row["question_type"]),
+            "rule": form_rule_explanation(row, question_type),
             "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
             "review_interval": next_interval if is_correct else 1,
             "debug_report": None if is_correct else report,
@@ -11178,16 +11361,26 @@ def api_mistake_debug(mistake_id):
             return jsonify(json.loads(row["debug_report_json"]))
         except json.JSONDecodeError:
             pass
-    correct = row[row["question_type"]] if row.get("question_type") in QUESTION_TYPES else ""
+    question_type = normalize_practice_question_type(row.get("question_type", ""))
+    correct = row[question_type] if question_type in QUESTION_TYPES else ""
+    accepted_answers = accepted_verb_form_answers(row, question_type, correct) if question_type in QUESTION_TYPES else []
+    primary_answer = primary_accepted_answer(accepted_answers, correct)
     report = make_debug_report_payload(
-        question_type=row.get("question_type", ""),
-        prompt=f"請寫出「{row.get('dictionary_form') or row.get('question_type')}」的{VERB_FORM_LABELS.get(row.get('question_type'), row.get('question_type'))}。",
+        question_type=question_type,
+        prompt=f"請寫出「{row.get('dictionary_form') or question_type}」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
         user_answer=row.get("user_wrong_answer", ""),
-        correct_answer=correct,
+        correct_answer=primary_answer or correct,
         target_text=row.get("dictionary_form", ""),
         target_reading=row.get("reading", ""),
-        target_form=row.get("question_type", ""),
+        target_form=question_type,
         error_category=row.get("error_category", ""),
+        extra={
+            "base_surface": row.get("dictionary_form", ""),
+            "base_reading": row.get("reading", ""),
+            "conjugation_type": question_type,
+            "primary_answer": primary_answer,
+            "accepted_answers": accepted_answers,
+        },
     )
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         conn.execute("UPDATE mistake_logs SET debug_report_json = ? WHERE id = ?", (debug_report_to_json(report), mistake_id))
@@ -11205,7 +11398,7 @@ def api_generate_similar_mistakes():
     if not mistake:
         return jsonify({"error": "找不到錯題紀錄。"}), 404
 
-    question_type = mistake.get("question_type", "")
+    question_type = normalize_practice_question_type(mistake.get("question_type", ""))
     category = mistake.get("error_category", "")
     if question_type in QUESTION_TYPES and int(mistake.get("verb_id") or 0) > 0:
         source_verb = sqlite_one("SELECT * FROM verbs WHERE id = ?", (mistake["verb_id"],))
@@ -11222,14 +11415,15 @@ def api_generate_similar_mistakes():
             (source_verb["verb_group"], source_verb["id"]),
         )
         items = [
-            {
+            (lambda context: {
                 "type": "verb",
                 "verb_id": row["id"],
                 "question_type": question_type,
                 "prompt": f"請寫出「{row['dictionary_form']}（{row['reading']}）・{row['meaning']}」的{VERB_FORM_LABELS[question_type]}。",
-                "answer": clean_answer_value(row[question_type]),
-                "display_answer": answer_display_value(row[question_type]),
-            }
+                "answer": context["primary_answer"] or clean_answer_value(row[question_type]),
+                "display_answer": context["display_answer"],
+                "accepted_answers": context["accepted_answers"],
+            })(verb_answer_context(row, question_type, row[question_type]))
             for row in rows
         ]
         return jsonify({"message": "已生成類似題。", "items": items})
