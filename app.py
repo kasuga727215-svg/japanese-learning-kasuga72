@@ -899,6 +899,9 @@ def _ensure_settings_store_uncached():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_records_created_at ON quiz_records(created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_last_reviewed_at ON mistake_logs(last_reviewed_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_next_review_date ON mistake_logs(next_review_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_status_due ON mistake_logs(status, next_review_date)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_review_due_at ON mistake_logs(review_due_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_first_wrong_at ON mistake_logs(first_wrong_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_sns_practice_logs_created_at ON sns_practice_logs(created_at)")
         ensure_optional_sqlite_activity_indexes(conn)
         conn.commit()
@@ -2412,6 +2415,18 @@ def migrate_mistake_logs(conn):
         "primary_answer": "ALTER TABLE mistake_logs ADD COLUMN primary_answer TEXT",
         "accepted_answers_json": "ALTER TABLE mistake_logs ADD COLUMN accepted_answers_json TEXT",
         "explanation": "ALTER TABLE mistake_logs ADD COLUMN explanation TEXT",
+        "created_at": "ALTER TABLE mistake_logs ADD COLUMN created_at TEXT",
+        "updated_at": "ALTER TABLE mistake_logs ADD COLUMN updated_at TEXT",
+        "first_wrong_at": "ALTER TABLE mistake_logs ADD COLUMN first_wrong_at TEXT",
+        "last_wrong_at": "ALTER TABLE mistake_logs ADD COLUMN last_wrong_at TEXT",
+        "review_due_at": "ALTER TABLE mistake_logs ADD COLUMN review_due_at TEXT",
+        "mastered_at": "ALTER TABLE mistake_logs ADD COLUMN mastered_at TEXT",
+        "correct_count": "ALTER TABLE mistake_logs ADD COLUMN correct_count INTEGER NOT NULL DEFAULT 0",
+        "material_key": "ALTER TABLE mistake_logs ADD COLUMN material_key TEXT",
+        "material_date": "ALTER TABLE mistake_logs ADD COLUMN material_date TEXT",
+        "question_id": "ALTER TABLE mistake_logs ADD COLUMN question_id TEXT",
+        "error_type": "ALTER TABLE mistake_logs ADD COLUMN error_type TEXT",
+        "prompt": "ALTER TABLE mistake_logs ADD COLUMN prompt TEXT",
     }
     for column, statement in migrations.items():
         if column not in columns:
@@ -2430,6 +2445,31 @@ def migrate_mistake_logs(conn):
             error_category = COALESCE(NULLIF(error_category, ''), '動詞變化錯')
         """,
         (now, today),
+    )
+    conn.execute(
+        """
+        UPDATE mistake_logs
+        SET review_due_at = COALESCE(NULLIF(review_due_at, ''), NULLIF(next_review_date, ''), NULLIF(last_reviewed_at, ''), ?),
+            created_at = COALESCE(NULLIF(created_at, ''), NULLIF(first_wrong_at, ''), NULLIF(last_reviewed_at, ''), ?),
+            updated_at = COALESCE(NULLIF(updated_at, ''), NULLIF(last_reviewed_at, ''), ?),
+            first_wrong_at = COALESCE(NULLIF(first_wrong_at, ''), NULLIF(created_at, ''), NULLIF(last_reviewed_at, ''), ?),
+            last_wrong_at = COALESCE(NULLIF(last_wrong_at, ''), NULLIF(last_reviewed_at, ''), ?),
+            correct_count = COALESCE(correct_count, 0),
+            mastered_at = CASE
+                WHEN (status = 'mastered' OR COALESCE(mastered, 0) = 1) AND COALESCE(NULLIF(mastered_at, ''), '') = '' THEN ?
+                ELSE mastered_at
+            END,
+            status = CASE
+                WHEN status = 'mastered' OR COALESCE(mastered, 0) = 1 THEN 'mastered'
+                WHEN COALESCE(NULLIF(status, ''), '') = '' THEN 'review_due'
+                ELSE status
+            END,
+            material_date = COALESCE(NULLIF(material_date, ''), substr(COALESCE(NULLIF(created_at, ''), NULLIF(last_reviewed_at, ''), ?), 1, 10)),
+            question_id = COALESCE(NULLIF(question_id, ''), CASE WHEN COALESCE(verb_id, 0) > 0 THEN 'verb:' || verb_id || ':' || question_type ELSE question_type END),
+            error_type = COALESCE(NULLIF(error_type, ''), CASE WHEN COALESCE(verb_id, 0) > 0 THEN 'verb_conjugation_wrong' ELSE 'unknown' END),
+            prompt = COALESCE(NULLIF(prompt, ''), question_text)
+        """,
+        (now, now, now, now, now, now, now),
     )
 
 
@@ -10054,8 +10094,34 @@ def next_interval_after_success(current_interval):
     return REVIEW_INTERVAL_STEPS[-1]
 
 
+MISTAKE_MASTERY_CORRECT_THRESHOLD = 2
+
+
+def mistake_due_where(alias="m"):
+    return (
+        f"COALESCE({alias}.mastered, 0) = 0 "
+        f"AND COALESCE(NULLIF({alias}.status, ''), 'review_due') IN ('review_due', 'learning') "
+        f"AND COALESCE(NULLIF({alias}.review_due_at, ''), NULLIF({alias}.next_review_date, ''), "
+        f"NULLIF({alias}.last_reviewed_at, ''), ?) <= ?"
+    )
+
+
+def mistake_due_params():
+    now = taipei_iso_now()
+    return (now, now)
+
+
+def mistake_created_date_expr(alias="m"):
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"substr(COALESCE(NULLIF({prefix}first_wrong_at, ''), NULLIF({prefix}created_at, ''), "
+        f"NULLIF({prefix}last_reviewed_at, '')), 1, 10)"
+    )
+
+
 def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變化錯"):
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    due_date = today_iso_date()
     category = normalize_error_category(error_category)
     target = sqlite_one("SELECT * FROM verbs WHERE id = ?", (verb_id,)) if int(verb_id or 0) > 0 else None
     correct_answer = target.get(question_type, "") if target and question_type in target else ""
@@ -10108,12 +10174,18 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     mistake_count = ?,
                     last_reviewed_at = ?,
                     next_review_date = ?,
+                    review_due_at = ?,
                     review_interval = 1,
                     mastered = 0,
-                    status = 'learning',
+                    status = 'review_due',
+                    last_wrong_at = ?,
+                    updated_at = ?,
+                    correct_count = COALESCE(correct_count, 0),
                     error_category = ?,
+                    error_type = 'verb_conjugation_wrong',
                     debug_report_json = ?,
                     question_text = ?,
+                    prompt = ?,
                     base_surface = ?,
                     base_reading = ?,
                     conjugation_type = ?,
@@ -10126,9 +10198,13 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     " / ".join(answers),
                     int(existing["mistake_count"]) + 1,
                     now,
-                    iso_date_after(1),
+                    due_date,
+                    now,
+                    now,
+                    now,
                     category,
                     report_json,
+                    prompt,
                     prompt,
                     target.get("dictionary_form", "") if target else "",
                     target.get("reading", "") if target else "",
@@ -10148,16 +10224,19 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     status, last_reviewed_at, next_review_date, review_interval,
                     review_count, mastered, error_category, debug_report_json,
                     question_text, base_surface, base_reading, conjugation_type,
-                    primary_answer, accepted_answers_json, explanation
+                    primary_answer, accepted_answers_json, explanation,
+                    created_at, updated_at, first_wrong_at, last_wrong_at,
+                    review_due_at, correct_count, question_id, error_type, prompt
                 )
-                VALUES (?, ?, ?, 1, 'learning', ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, 1, 'review_due', ?, ?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, 0, ?, 'verb_conjugation_wrong', ?)
                 """,
                 (
                     verb_id,
                     question_type,
                     wrong_answer,
                     now,
-                    iso_date_after(1),
+                    due_date,
                     category,
                     report_json,
                     prompt,
@@ -10167,6 +10246,13 @@ def add_mistake(verb_id, question_type, wrong_answer, error_category="動詞變�
                     primary_answer,
                     accepted_answers_json,
                     explanation,
+                    now,
+                    now,
+                    now,
+                    now,
+                    now,
+                    f"verb:{verb_id}:{question_type}",
+                    prompt,
                 ),
             )
         conn.commit()
@@ -11352,16 +11438,17 @@ def query_mistakes(args=None, limit=None):
     error_category = args.get("error_category", "all")
     scope = args.get("scope", "due")
     params = []
-    where = "m.mastered = 0"
+    where_parts = ["COALESCE(m.mastered, 0) = 0"]
     if question_type in QUESTION_TYPES:
-        where += " AND m.question_type = ?"
+        where_parts.append("m.question_type = ?")
         params.append(question_type)
     if error_category in ERROR_CATEGORIES:
-        where += " AND m.error_category = ?"
+        where_parts.append("m.error_category = ?")
         params.append(error_category)
     if scope != "all":
-        where += " AND COALESCE(m.next_review_date, date(m.last_reviewed_at), ?) <= ?"
-        params.extend([today_iso_date(), today_iso_date()])
+        where_parts.append(mistake_due_where("m"))
+        params.extend(mistake_due_params())
+    where = " AND ".join(where_parts)
     sql = f"""
     SELECT
         m.id, m.verb_id, m.question_type, m.user_wrong_answer,
@@ -11370,13 +11457,16 @@ def query_mistakes(args=None, limit=None):
         m.mastered, m.error_category, m.debug_report_json,
         m.question_text, m.base_surface, m.base_reading, m.conjugation_type,
         m.primary_answer, m.accepted_answers_json, m.explanation,
+        m.created_at, m.updated_at, m.first_wrong_at, m.last_wrong_at,
+        m.review_due_at, m.mastered_at, m.correct_count,
+        m.material_key, m.material_date, m.question_id, m.error_type, m.prompt,
         v.dictionary_form, v.reading, v.meaning, v.verb_group,
         v.te_form, v.ta_form, v.nai_form, v.renyou_form,
         v.shieki_form, v.ukemi_form, v.ba_form
     FROM mistake_logs m
-    JOIN verbs v ON v.id = m.verb_id
+    LEFT JOIN verbs v ON v.id = m.verb_id
     WHERE {where}
-    ORDER BY COALESCE(m.next_review_date, date(m.last_reviewed_at)) ASC,
+    ORDER BY COALESCE(m.review_due_at, m.next_review_date, date(m.last_reviewed_at)) ASC,
              m.mistake_count DESC,
              m.last_reviewed_at DESC
     """
@@ -11396,26 +11486,44 @@ def query_mistakes(args=None, limit=None):
                     stored_accepted = json.loads(row["accepted_answers_json"]) or []
                 except (TypeError, json.JSONDecodeError):
                     stored_accepted = []
-            accepted = stored_accepted or accepted_verb_form_answers(row, row["question_type"], row[row["question_type"]])
+            correct_source = row.get(row["question_type"]) or row.get("primary_answer") or ""
+            accepted = stored_accepted or accepted_verb_form_answers(row, row["question_type"], correct_source)
             row["accepted_answers"] = accepted
-            row["correct_answer"] = accepted_answer_display(accepted, row[row["question_type"]])
+            row["correct_answer"] = accepted_answer_display(accepted, correct_source)
         else:
-            row["accepted_answers"] = []
-            row["correct_answer"] = ""
-        row["verb_group_label"] = group_label(row["verb_group"])
+            stored_accepted = []
+            if row.get("accepted_answers_json"):
+                try:
+                    stored_accepted = json.loads(row["accepted_answers_json"]) or []
+                except (TypeError, json.JSONDecodeError):
+                    stored_accepted = []
+            row["accepted_answers"] = stored_accepted
+            row["correct_answer"] = row.get("primary_answer") or ""
+        row["prompt"] = row.get("prompt") or row.get("question_text") or ""
+        row["question_text"] = row.get("question_text") or row["prompt"]
+        row["base_surface"] = row.get("base_surface") or row.get("dictionary_form") or ""
+        row["base_reading"] = row.get("base_reading") or row.get("reading") or ""
+        row["conjugation_type"] = row.get("conjugation_type") or row.get("question_type") or ""
+        row["wrong_count"] = int(row.get("mistake_count") or 0)
+        row["correct_count"] = int(row.get("correct_count") or 0)
+        row["review_due_at"] = row.get("review_due_at") or row.get("next_review_date") or ""
+        row["error_type"] = row.get("error_type") or ("verb_conjugation_wrong" if row.get("question_type") in QUESTION_TYPES else "unknown")
+        try:
+            row["verb_group_label"] = group_label(row["verb_group"]) if row.get("verb_group") is not None else ""
+        except (TypeError, ValueError):
+            row["verb_group_label"] = ""
     return rows
 
 
 @app.get("/api/mistakes/stats")
 def api_mistake_stats():
-    today = today_iso_date()
     due_count = sqlite_one(
-        """
+        f"""
         SELECT COUNT(*) AS count
-        FROM mistake_logs
-        WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
+        FROM mistake_logs m
+        WHERE {mistake_due_where("m")}
         """,
-        (today, today),
+        mistake_due_params(),
     )
     mastered_count = sqlite_one("SELECT COUNT(*) AS count FROM mistake_logs WHERE mastered = 1 OR status = 'mastered'")
     category_rows = sqlite_dicts(
@@ -11450,10 +11558,13 @@ def api_mark_mistake_mastered(mistake_id):
             SET status = 'mastered',
                 mastered = 1,
                 last_reviewed_at = ?,
-                next_review_date = NULL
+                next_review_date = NULL,
+                review_due_at = NULL,
+                mastered_at = ?,
+                updated_at = ?
             WHERE id = ?
             """,
-            (now, mistake_id),
+            (now, now, now, mistake_id),
         )
         conn.commit()
     if cur.rowcount == 0:
@@ -11507,9 +11618,13 @@ def api_retry_mistake(mistake_id):
     accepted_answers_json = json.dumps(accepted_answers, ensure_ascii=False)
     explanation = " ".join(filter(None, [report.get("diagnosis", ""), report.get("rule", "")]))
     now = datetime.now(ZoneInfo("Asia/Taipei")).isoformat(timespec="seconds")
+    due_date = today_iso_date()
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         if is_correct:
             next_interval = next_interval_after_success(row.get("review_interval"))
+            new_correct_count = int(row.get("correct_count") or 0) + 1
+            mastered_now = new_correct_count >= MISTAKE_MASTERY_CORRECT_THRESHOLD
+            next_due = None if mastered_now else iso_date_after(next_interval)
             conn.execute(
                 """
                 UPDATE mistake_logs
@@ -11517,12 +11632,32 @@ def api_retry_mistake(mistake_id):
                     review_interval = ?,
                     review_count = COALESCE(review_count, 0) + 1,
                     next_review_date = ?,
+                    review_due_at = ?,
+                    correct_count = ?,
+                    mastered = ?,
+                    mastered_at = ?,
+                    status = ?,
+                    updated_at = ?,
                     error_category = COALESCE(NULLIF(error_category, ''), ?),
                     primary_answer = ?,
                     accepted_answers_json = ?
                 WHERE id = ?
                 """,
-                (now, next_interval, iso_date_after(next_interval), error_category, answer_context["primary_answer"], accepted_answers_json, mistake_id),
+                (
+                    now,
+                    next_interval,
+                    next_due,
+                    next_due,
+                    new_correct_count,
+                    1 if mastered_now else 0,
+                    now if mastered_now else row.get("mastered_at"),
+                    "mastered" if mastered_now else "learning",
+                    now,
+                    error_category,
+                    answer_context["primary_answer"],
+                    accepted_answers_json,
+                    mistake_id,
+                ),
             )
         else:
             conn.execute(
@@ -11532,12 +11667,17 @@ def api_retry_mistake(mistake_id):
                     mistake_count = mistake_count + 1,
                     last_reviewed_at = ?,
                     next_review_date = ?,
+                    review_due_at = ?,
                     review_interval = 1,
                     mastered = 0,
-                    status = 'learning',
+                    status = 'review_due',
+                    last_wrong_at = ?,
+                    updated_at = ?,
                     error_category = ?,
+                    error_type = 'verb_conjugation_wrong',
                     debug_report_json = ?,
                     question_text = ?,
+                    prompt = ?,
                     base_surface = ?,
                     base_reading = ?,
                     conjugation_type = ?,
@@ -11549,9 +11689,13 @@ def api_retry_mistake(mistake_id):
                 (
                     f"{row['user_wrong_answer']} / {answer}",
                     now,
-                    iso_date_after(1),
+                    due_date,
+                    now,
+                    now,
+                    now,
                     error_category,
                     report_json,
+                    f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
                     f"請寫出「{row['dictionary_form']}（{row['reading']}）」的{VERB_FORM_LABELS.get(question_type, question_type)}。",
                     row["dictionary_form"],
                     row["reading"],
@@ -11570,8 +11714,11 @@ def api_retry_mistake(mistake_id):
             "primary_answer": answer_context["primary_answer"],
             "accepted_answers": accepted_answers,
             "rule": form_rule_explanation(row, question_type),
-            "next_review_date": iso_date_after(next_interval) if is_correct else iso_date_after(1),
+            "next_review_date": next_due if is_correct else due_date,
             "review_interval": next_interval if is_correct else 1,
+            "status": ("mastered" if mastered_now else "learning") if is_correct else "review_due",
+            "mastered": bool(mastered_now) if is_correct else False,
+            "correct_count": new_correct_count if is_correct else int(row.get("correct_count") or 0),
             "debug_report": None if is_correct else report,
         }
     )
@@ -12163,19 +12310,19 @@ def build_dashboard_payload():
 
     try:
         today_mistakes = sqlite_dicts(
-            """
+            f"""
             SELECT id FROM mistake_logs
-            WHERE mastered = 0 AND substr(last_reviewed_at, 1, 10) = ?
+            WHERE {mistake_created_date_expr("")} = ?
             """,
             (today_iso,),
         )
         due_review = sqlite_one(
-            """
+            f"""
             SELECT COUNT(*) AS count
-            FROM mistake_logs
-            WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
+            FROM mistake_logs m
+            WHERE {mistake_due_where("m")}
             """,
-            (today_iso, today_iso),
+            mistake_due_params(),
         )
         due_count = int(due_review["count"] if due_review else 0)
         payload["today_new_mistakes"] = len(today_mistakes)
@@ -12213,10 +12360,10 @@ def rows_since(table, days):
 def mistake_rows_since(days):
     start = rolling_start(days)
     return sqlite_dicts(
-        """
+        f"""
         SELECT *
         FROM mistake_logs
-        WHERE date(last_reviewed_at) >= date(?)
+        WHERE date({mistake_created_date_expr('')}) >= date(?)
         """,
         (start,),
     )
@@ -12303,16 +12450,16 @@ def api_learning_report():
         (today_iso,),
     )
     today_mistakes = sqlite_one(
-        "SELECT COUNT(*) AS count FROM mistake_logs WHERE date(last_reviewed_at) = date(?)",
+        f"SELECT COUNT(*) AS count FROM mistake_logs WHERE {mistake_created_date_expr('')} = ?",
         (today_iso,),
     )
     due_review = sqlite_one(
-        """
+        f"""
         SELECT COUNT(*) AS count
-        FROM mistake_logs
-        WHERE mastered = 0 AND COALESCE(next_review_date, date(last_reviewed_at), ?) <= ?
+        FROM mistake_logs m
+        WHERE {mistake_due_where("m")}
         """,
-        (today_iso, today_iso),
+        mistake_due_params(),
     )
     completed = int(today_quiz["total"] if today_quiz else 0)
     correct = int(today_quiz["correct"] if today_quiz else 0)
