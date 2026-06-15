@@ -286,12 +286,39 @@ function naturalnessClass(check){
 function renderOverview(data){
   return card("總覽與翻譯", `
     <div class="meta-grid">
-      ${subCard(`<h3>原文</h3><p>${esc(data.original || lastInputText)}</p>`)}
-      ${subCard(`<h3>平假名讀音</h3><p>${esc(data.hiragana_reading || "尚無讀音資料")}</p>`)}
+      ${subCard(`<h3>原文全文</h3><p>${esc(data.original_text || data.original || lastInputText)}</p>`)}
+      ${subCard(`<h3>全文平假名讀音</h3><p>${esc(data.reading_hiragana_full || data.hiragana_reading || "尚無讀音資料")}</p>`)}
       ${subCard(`<h3>自然中文翻譯</h3><p>${esc(data.natural_translation || "尚無翻譯資料")}</p>`)}
-      ${subCard(`<h3>一句話核心意思</h3><p>${esc(data.sentence_summary || "尚無摘要資料")}</p>`)}
+      ${subCard(`<h3>整段核心意思</h3><p>${esc(data.overall_core_meaning || data.sentence_summary || "尚無摘要資料")}</p>`)}
     </div>
   `);
+}
+
+function renderSentenceBreakdown(data){
+  const items = arr(data.sentence_breakdown || obj(data.result).sentence_breakdown);
+  if (!items.length) return "";
+  const body = `<div class="grid">${items.map((item, index) => {
+    const grammar = arr(item.grammar_points).map(point => {
+      if (typeof point === "string") return point;
+      return point.name || point.title || point.explanation || "";
+    }).filter(Boolean);
+    const vocab = arr(item.vocabulary_notes).map(note => {
+      if (typeof note === "string") return note;
+      const term = note.term || note.word || note.surface || "";
+      const meaning = note.meaning_zh || note.meaning || note.note || "";
+      return [term, meaning].filter(Boolean).join("：");
+    }).filter(Boolean);
+    return subCard(`
+      <h3>第 ${esc(item.sentence_index || index + 1)} 句</h3>
+      <p>${esc(item.original || "")}</p>
+      ${hasText(item.reading_hiragana) ? `<p class="muted">${esc(item.reading_hiragana)}</p>` : ""}
+      ${hasText(item.translation_zh) ? `<p><strong>翻譯：</strong>${esc(item.translation_zh)}</p>` : ""}
+      ${hasText(item.core_meaning) ? `<p><strong>重點：</strong>${esc(item.core_meaning)}</p>` : ""}
+      ${grammar.length ? `<p><strong>文法：</strong>${esc(grammar.join("、"))}</p>` : ""}
+      ${vocab.length ? `<p><strong>詞彙：</strong>${esc(vocab.join("、"))}</p>` : ""}
+    `);
+  }).join("")}</div>`;
+  return card("逐句解析", body);
 }
 
 function renderNaturalness(data){
@@ -419,6 +446,7 @@ function renderAnalysis(data){
   }
   result.innerHTML = [
     renderOverview(data),
+    renderSentenceBreakdown(data),
     renderNaturalness(data),
     renderTone(data),
     renderStructure(data),
@@ -437,6 +465,9 @@ analyzeBtn.addEventListener("click", async () => {
     return;
   }
   lastInputText = text;
+  console.debug("[grammar-ui] input_chars=", text.length);
+  console.debug("[grammar-ui] input_preview=", text.slice(0, 100));
+  console.debug("[grammar-ui] input_tail=", text.slice(-100));
   statusBox.innerText = "";
   result.innerHTML = "";
   loading.classList.add("show");

@@ -10760,8 +10760,11 @@ def common_misunderstandings_for(text, patterns):
 def grammar_response_template(input_type="japanese"):
     return {
         "input_type": input_type,
+        "original_text": "",
+        "reading_hiragana_full": "",
         "natural_translation": "",
         "sentence_summary": "",
+        "overall_core_meaning": "",
         "naturalness_check": {
             "is_natural": False,
             "level": "",
@@ -10770,8 +10773,10 @@ def grammar_response_template(input_type="japanese"):
         },
         "hiragana_reading": "",
         "tone": {"label": "", "explanation": ""},
+        "sentence_breakdown": [],
         "sentence_structure": [],
         "grammar_points": [],
+        "vocabulary_notes": [],
         "natural_alternatives": [],
         "learning_focus": {"summary": "", "tips": []},
         "slang_terms": [],
@@ -10826,10 +10831,14 @@ def annotate_grammar_payload(payload, ok, source, reason="", model="", diagnosti
     payload["reason"] = reason or ""
     if ok:
         payload["result"] = {
+            "original_text": payload.get("original_text") or payload.get("original", ""),
+            "reading_hiragana_full": payload.get("reading_hiragana_full") or payload.get("hiragana_reading", ""),
             "natural_translation_zh": payload.get("natural_translation", ""),
+            "overall_core_meaning": payload.get("overall_core_meaning") or payload.get("sentence_summary", ""),
+            "sentence_breakdown": payload.get("sentence_breakdown", []),
             "sentence_structure": payload.get("sentence_structure", []),
             "grammar_points": payload.get("grammar_points", []),
-            "vocabulary_notes": payload.get("slang_terms", []),
+            "vocabulary_notes": payload.get("vocabulary_notes", []) or payload.get("slang_terms", []),
             "nuance": (payload.get("tone") or {}).get("explanation", "") if isinstance(payload.get("tone"), dict) else "",
             "learning_tips": (payload.get("learning_focus") or {}).get("tips", []) if isinstance(payload.get("learning_focus"), dict) else [],
         }
@@ -10871,6 +10880,10 @@ def grammar_fallback_response(text, hiragana_reading="", advanced_mecab=None):
             "slang_terms": merge_slang_terms([], detect_known_slang_terms(text)),
             "error_message": message,
             "original": text,
+            "original_text": text,
+            "reading_hiragana_full": hiragana_reading or "",
+            "overall_core_meaning": "Gemini 解析暫時失敗，目前僅回傳本地規則偵測結果。",
+            "sentence_breakdown": [],
             "advanced_mecab": advanced_mecab or {},
         }
     )
@@ -10879,6 +10892,19 @@ def grammar_fallback_response(text, hiragana_reading="", advanced_mecab=None):
 
 def is_probably_japanese_text(text):
     return bool(re.search(r"[ぁ-ゖァ-ヺー]", text or ""))
+
+
+def split_japanese_sentences(text):
+    text = str(text or "").strip()
+    if not text:
+        return []
+    parts = re.findall(r"[^。！？!?\n]+[。！？!?]?", text)
+    sentences = [part.strip() for part in parts if part.strip()]
+    return sentences or ([text] if text else [])
+
+
+def count_japanese_sentences(text):
+    return len(split_japanese_sentences(text))
 
 
 def has_latin_letters(text):
@@ -10913,13 +10939,38 @@ def normalize_string(value):
 
 def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_mecab=None):
     source = raw if isinstance(raw, dict) else {}
+    if isinstance(source.get("result"), dict):
+        source = {**source, **source["result"]}
     payload = grammar_response_template(normalize_string(source.get("input_type")) or "japanese")
-    payload["natural_translation"] = normalize_string(source.get("natural_translation"))
-    payload["sentence_summary"] = normalize_string(source.get("sentence_summary"))
-    payload["hiragana_reading"] = enforce_hiragana_reading(
-        source.get("hiragana_reading") or fallback_reading,
+    payload["natural_translation"] = normalize_string(source.get("natural_translation") or source.get("natural_translation_zh"))
+    payload["original_text"] = normalize_string(source.get("original_text")) or original_text
+    payload["overall_core_meaning"] = normalize_string(source.get("overall_core_meaning")) or normalize_string(source.get("sentence_summary"))
+    payload["sentence_summary"] = payload["overall_core_meaning"]
+    payload["reading_hiragana_full"] = enforce_hiragana_reading(
+        source.get("reading_hiragana_full") or source.get("hiragana_reading") or fallback_reading,
         original_text,
     )
+    payload["hiragana_reading"] = payload["reading_hiragana_full"]
+
+    sentence_breakdown = source.get("sentence_breakdown") if isinstance(source.get("sentence_breakdown"), list) else []
+    payload["sentence_breakdown"] = []
+    for index, item in enumerate(sentence_breakdown, start=1):
+        if not isinstance(item, dict):
+            continue
+        original_sentence = normalize_string(item.get("original"))
+        grammar_items = item.get("grammar_points") if isinstance(item.get("grammar_points"), list) else []
+        vocab_items = item.get("vocabulary_notes") if isinstance(item.get("vocabulary_notes"), list) else []
+        payload["sentence_breakdown"].append(
+            {
+                "sentence_index": int(item.get("sentence_index") or index),
+                "original": original_sentence,
+                "reading_hiragana": enforce_hiragana_reading(item.get("reading_hiragana"), original_sentence),
+                "translation_zh": normalize_string(item.get("translation_zh") or item.get("translation")),
+                "core_meaning": normalize_string(item.get("core_meaning") or item.get("meaning")),
+                "grammar_points": grammar_items,
+                "vocabulary_notes": vocab_items,
+            }
+        )
 
     naturalness = source.get("naturalness_check") if isinstance(source.get("naturalness_check"), dict) else {}
     payload["naturalness_check"] = {
@@ -10988,6 +11039,8 @@ def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_me
         "summary": normalize_string(focus.get("summary")),
         "tips": [normalize_string(tip) for tip in tips if normalize_string(tip)],
     }
+    vocabulary_notes = source.get("vocabulary_notes") if isinstance(source.get("vocabulary_notes"), list) else []
+    payload["vocabulary_notes"] = vocabulary_notes
     slang_terms = source.get("slang_terms") if isinstance(source.get("slang_terms"), list) else []
     payload["slang_terms"] = merge_slang_terms(slang_terms, detect_known_slang_terms(original_text))
     payload["error_message"] = normalize_string(source.get("error_message"))
@@ -10997,7 +11050,7 @@ def normalize_grammar_analysis(raw, original_text, fallback_reading, advanced_me
 
 
 def build_grammar_coach_prompt(text, hiragana_reading):
-    return f"""
+    base_prompt = f"""
 你是一位專門教台灣學習者理解日文語感的「日文句子理解教練」。
 請分析使用者輸入的日文句子，並只回傳一個合法 JSON 物件。
 
@@ -11139,6 +11192,41 @@ Gemini 必須回傳的 JSON 結構：
 系統參考平假名讀音：
 {hiragana_reading}
 """.strip()
+    full_passage_requirements = """
+【整段解析硬性要求】
+你是一位日文句子理解教練。請完整分析使用者輸入的「整段日文」，不可只分析最後一句。
+請保留前後文、人物關係、語氣、情境脈絡。若內容包含多個句子，必須同時提供：
+1. 原文全文 original_text。
+2. 全文平假名讀音 reading_hiragana_full。
+3. 整段自然中文翻譯 natural_translation。
+4. 整段核心意思 overall_core_meaning；sentence_summary 也請填入同一個整段核心意思。
+5. 逐句解析 sentence_breakdown。每一句都必須包含 sentence_index、original、reading_hiragana、translation_zh、core_meaning、grammar_points、vocabulary_notes。
+6. 全文層級的 grammar_points、vocabulary_notes、tone、learning_focus。
+如果輸入有多句，sentence_breakdown 不可以只回最後一句。
+
+請在 JSON 中加入並填滿以下欄位：
+{
+  "original_text": "完整原文，必須包含使用者輸入的所有句子",
+  "reading_hiragana_full": "完整全文平假名讀音，不可只讀最後一句",
+  "natural_translation": "整段自然中文翻譯",
+  "sentence_summary": "整段核心意思，不可只摘要最後一句",
+  "overall_core_meaning": "整段核心意思，包含前後文與人物關係",
+  "sentence_breakdown": [
+    {
+      "sentence_index": 1,
+      "original": "第 1 句原文",
+      "reading_hiragana": "第 1 句平假名",
+      "translation_zh": "第 1 句自然中文翻譯",
+      "core_meaning": "第 1 句重點說明",
+      "grammar_points": [],
+      "vocabulary_notes": []
+    }
+  ],
+  "vocabulary_notes": [],
+  "error_message": ""
+}
+""".strip()
+    return f"{full_passage_requirements}\n\n{base_prompt}"
 
 
 def persist_analysis_slang_terms(payload, source_context, source):
@@ -11166,6 +11254,7 @@ def analyze_grammar_with_gemini(text):
         "exception_message": "",
         "failures": [],
     }
+    sentence_count = count_japanese_sentences(text)
     billing_snapshot = gemini_billing_snapshot()
     diagnostic.update(
         {
@@ -11177,6 +11266,8 @@ def analyze_grammar_with_gemini(text):
     )
     print("[grammar-analyzer] request received")
     print(f"[grammar-analyzer] input length={len(text or '')}")
+    print(f"[grammar-analyzer] sentence_count={sentence_count}")
+    print("[grammar-analyzer] using_full_text=true")
     print(f"[grammar-analyzer] gemini api key present={str(bool(GEMINI_API_KEY)).lower()}")
     print(f"[grammar-analyzer] model candidates={','.join(candidates)}")
     print(f"[grammar-analyzer] selected model={diagnostic['selected_model']}")
@@ -11216,6 +11307,7 @@ def analyze_grammar_with_gemini(text):
         return payload, 200
 
     prompt = build_grammar_coach_prompt(text, fallback_reading)
+    print(f"[grammar-analyzer] prompt_chars={len(prompt)}")
     failures = []
     if not GEMINI_API_KEY:
         failures.append({"model": diagnostic["selected_model"], "error_type": "missing_api_key", "message": "尚未設定 Gemini API Key。"})
@@ -11239,6 +11331,10 @@ def analyze_grammar_with_gemini(text):
                 print(f"[grammar-analyzer] json parse error；model={model_name}；message={parse_error}；raw={raw_response[:500]}")
                 raise
             payload = normalize_grammar_analysis(ai_payload, text, fallback_reading, advanced_mecab)
+            breakdown_count = len(payload.get("sentence_breakdown") or [])
+            print(f"[grammar-analyzer] result_sentence_breakdown_count={breakdown_count}")
+            if sentence_count > 1 and breakdown_count <= 1:
+                print("[grammar-analyzer] warning=multi_sentence_input_but_single_sentence_output")
             print(f"[grammar-analyzer] Gemini 解析成功；model={model_name}")
             diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
             if grammar_debug_enabled():
@@ -11299,6 +11395,10 @@ def handle_grammar_analyzer_api():
             payload = grammar_not_japanese_response()
             payload.update({"ok": False, "error": "grammar_analysis_failed", "reason": "empty_input", "message": "\u8acb\u8f38\u5165\u8981\u89e3\u6790\u7684\u65e5\u6587\u3002"})
             return jsonify(payload), 400
+        sentence_count = count_japanese_sentences(text)
+        print(f"[grammar-analyzer] input_chars={len(text)}")
+        print(f"[grammar-analyzer] sentence_count={sentence_count}")
+        print("[grammar-analyzer] using_full_text=true")
         if len(text) > 6000:
             payload = annotate_grammar_payload(
                 grammar_response_template("japanese"),
