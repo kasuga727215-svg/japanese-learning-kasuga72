@@ -1096,6 +1096,8 @@ def migrate_vocabulary_pool_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_quality ON vocabulary_pool(quality)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_pool_level_category ON vocabulary_pool(jlpt_level, category)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_pool_normalized ON vocabulary_pool(normalized_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
@@ -1166,6 +1168,8 @@ def migrate_vocab_rules_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_date_key ON vocab_selection_logs(selected_for, material_date, normalized_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_key_date ON vocab_selection_logs(selected_for, normalized_key, material_date)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_created ON vocab_selection_logs(selected_for, created_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
 
@@ -3731,6 +3735,8 @@ def migrate_vocabulary_pool_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_category ON vocabulary_pool(category)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_quality ON vocabulary_pool(quality)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level ON vocabulary_pool(jlpt_level)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_pool_level_category ON vocabulary_pool(jlpt_level, category)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_pool_normalized ON vocabulary_pool(normalized_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_active ON vocabulary_pool(is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_level_active ON vocabulary_pool(jlpt_level, is_active)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
@@ -3826,6 +3832,8 @@ def migrate_vocab_rules_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_key_date ON vocab_selection_logs(normalized_key, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_material_key ON vocab_selection_logs(material_key)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_date_key ON vocab_selection_logs(selected_for, material_date, normalized_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_key_date ON vocab_selection_logs(selected_for, normalized_key, material_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_logs_selected_created ON vocab_selection_logs(selected_for, created_at)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_group_date ON vocab_selection_logs(group_key, match_value, material_date)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocab_selection_logs_source_date ON vocab_selection_logs(source_type, match_value, material_date)")
         conn.commit()
@@ -4861,6 +4869,95 @@ def get_recent_used_verb_keys(material_date=None, days=None, include_all_version
         return set()
 
 
+def get_selection_usage_stats(selected_for):
+    selected_for = str(selected_for or "").strip() or "word"
+    stats = {}
+    try:
+        if DATABASE_URL and not vocab_pool_db_query_allowed():
+            return stats
+        ensure_vocab_rules_store()
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT normalized_key,
+                               COUNT(*) AS used_count,
+                               MAX(COALESCE(created_at::TEXT, material_date::TEXT)) AS last_used_at
+                        FROM vocab_selection_logs
+                        WHERE selected_for = %s
+                          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                        GROUP BY normalized_key
+                        """,
+                        (selected_for,),
+                    )
+                    rows = cur.fetchall()
+        else:
+            rows = sqlite_dicts(
+                """
+                SELECT normalized_key,
+                       COUNT(*) AS used_count,
+                       MAX(COALESCE(created_at, material_date)) AS last_used_at
+                FROM vocab_selection_logs
+                WHERE selected_for = ?
+                  AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                GROUP BY normalized_key
+                """,
+                (selected_for,),
+            )
+        for row in rows:
+            if isinstance(row, dict):
+                raw_key = row.get("normalized_key")
+                used_count = row.get("used_count")
+                last_used_at = row.get("last_used_at")
+            else:
+                raw_key, used_count, last_used_at = row
+            key = normalize_vocab_key(raw_key)
+            if not key:
+                continue
+            try:
+                count_value = int(used_count or 0)
+            except (TypeError, ValueError):
+                count_value = 0
+            stats[key] = {"used_count": count_value, "last_used_at": str(last_used_at or "")}
+    except Exception as exc:
+        print(f"[local-generate] selection usage lookup failed selected_for={selected_for}; reason={exc}")
+        mark_vocab_pool_db_unavailable(exc)
+    return stats
+
+
+def rotation_item_key(item):
+    key = item_normalized_key(item)
+    if key:
+        return key
+    if isinstance(item, dict):
+        return normalize_vocab_key(first_text(item, ["dictionary_form", "base", "surface", "word", "term"]))
+    return ""
+
+
+def rotation_usage_sort_key(item, usage_stats):
+    key = rotation_item_key(item)
+    usage = usage_stats.get(key, {}) if key else {}
+    try:
+        used_count = int(usage.get("used_count") or 0)
+    except (TypeError, ValueError):
+        used_count = 0
+    last_used_at = str(usage.get("last_used_at") or "")
+    return (used_count, 0 if not last_used_at else 1, last_used_at, random.random())
+
+
+def sort_candidates_for_rotation(items, usage_stats):
+    return sorted([item for item in items if item], key=lambda item: rotation_usage_sort_key(item, usage_stats))
+
+
+def count_never_used_candidates(items, usage_stats):
+    return sum(1 for item in items if not usage_stats.get(rotation_item_key(item), {}).get("used_count"))
+
+
+def is_never_used_candidate(item, usage_stats):
+    return not bool(usage_stats.get(rotation_item_key(item), {}).get("used_count"))
+
+
 def jlpt_level_rank(level):
     try:
         return int(str(level or "").upper().replace("N", ""))
@@ -5170,8 +5267,7 @@ def fetch_vocabulary_pool_rows():
                           AND COALESCE(category, 'general') NOT IN ('named_entity', 'sensitive', 'typo_or_noise', 'unknown')
                         ORDER BY COALESCE(used_in_material_count, 0) ASC,
                                  last_used_at ASC NULLS FIRST,
-                                 priority DESC,
-                                 id DESC
+                                 RANDOM()
                         LIMIT 1200
                         """
                     )
@@ -5195,8 +5291,7 @@ def fetch_vocabulary_pool_rows():
                   AND COALESCE(category, 'general') NOT IN ('named_entity', 'sensitive', 'typo_or_noise', 'unknown')
                 ORDER BY COALESCE(used_in_material_count, 0) ASC,
                          COALESCE(last_used_at, '') ASC,
-                         priority DESC,
-                         id DESC
+                         RANDOM()
                 LIMIT 1200
                 """
             ).fetchall()
@@ -5766,8 +5861,7 @@ def fetch_vocabulary_pool_candidates(
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(used_in_material_count, 0) ASC,
                  {'last_used_at ASC NULLS FIRST' if DATABASE_URL else "COALESCE(last_used_at, '') ASC"},
-                 priority DESC,
-                 id DESC
+                 RANDOM()
         LIMIT {'%s' if DATABASE_URL else '?'}
     """
     params.append(limit)
@@ -5910,7 +6004,7 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     started = time.perf_counter()
     material_date = canonical_material_date(material_date or get_today_taipei_date())
     stats = {
-        "selection_strategy": "period_first_balanced_slot_allocation",
+        "selection_strategy": "rotation_until_exhausted",
         "run_migrations_on_request": RUN_MIGRATIONS_ON_REQUEST,
         "db_pool_used": False,
         "seed_fallback_used": False,
@@ -5936,6 +6030,12 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         "skipped_empty_jlpt_count": 0,
         "safe_jlpt_candidates": 0,
         "recent_used_word_count": 0,
+        "pool_total_count": 0,
+        "eligible_pool_count": 0,
+        "never_used_candidates": 0,
+        "selected_from_never_used_count": 0,
+        "selected_from_oldest_used_count": 0,
+        "repeated_within_14_days_count": 0,
         "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "generation_elapsed_ms": 0,
         "rule_selection": {
@@ -5968,6 +6068,7 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         for days in cooldown_sequence
         if days > 0
     }
+    word_usage_stats = get_selection_usage_stats("word")
     stats["recent_used_word_count"] = len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))
     sns_slang_ids = []
 
@@ -5980,6 +6081,10 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         item["rule_key"] = rule_key
         item["_matched_rule_keys"] = [rule_key]
         selected.append(item)
+        if is_never_used_candidate(item, word_usage_stats):
+            stats["selected_from_never_used_count"] += 1
+        else:
+            stats["selected_from_oldest_used_count"] += 1
         stats["selected_rule_counts"][rule_key] = stats["selected_rule_counts"].get(rule_key, 0) + 1
         stats["rule_selection"]["selected_counts"][rule_key] = stats["rule_selection"]["selected_counts"].get(rule_key, 0) + 1
         if rule_key.startswith("jlpt:"):
@@ -6013,7 +6118,11 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
             stats["safe_jlpt_candidates"] += len(rows)
             if rows:
                 stats["db_pool_used"] = True
-            return [build_vocab_item_from_pool_row(row) for row in rows]
+            items = [item for item in (build_vocab_item_from_pool_row(row) for row in rows) if item]
+            stats["pool_total_count"] += len(rows)
+            stats["eligible_pool_count"] += len(items)
+            stats["never_used_candidates"] += count_never_used_candidates(items, word_usage_stats)
+            return sort_candidates_for_rotation(items, word_usage_stats)
         if rule_key == "category:SNS":
             vocab_rows = fetch_vocabulary_pool_candidates(
                 categories=sorted(SNS_RULE_CATEGORIES),
@@ -6025,9 +6134,13 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
             )
             if vocab_rows:
                 stats["db_pool_used"] = True
-            vocab_items = [build_vocab_item_from_pool_row(row) for row in vocab_rows]
+            vocab_items = [item for item in (build_vocab_item_from_pool_row(row) for row in vocab_rows) if item]
             slang_items = approved_slang_vocab_items_for_rule(query_limit)
-            return vocab_items + slang_items
+            items = vocab_items + slang_items
+            stats["pool_total_count"] += len(vocab_rows) + len(slang_items)
+            stats["eligible_pool_count"] += len(items)
+            stats["never_used_candidates"] += count_never_used_candidates(items, word_usage_stats)
+            return sort_candidates_for_rotation(items, word_usage_stats)
         return []
 
     def select_with_slot_limits(slot_limits):
@@ -6109,6 +6222,16 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         f"recent_used_word_count={len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
         f"selected_word_count={len(selected)} "
         f"insufficient_unique={str(insufficient_unique).lower()}"
+    )
+    print(
+        "[word-selector] strategy=rotation_until_exhausted "
+        f"requested={limit} pool_total={stats['pool_total_count']} "
+        f"eligible_pool={stats['eligible_pool_count']} "
+        f"recent_7_days_used={stats['recent_used_word_count']} "
+        f"never_used_candidates={stats['never_used_candidates']} "
+        f"selected_from_never_used={stats['selected_from_never_used_count']} "
+        f"selected_from_oldest_used={stats['selected_from_oldest_used_count']} "
+        f"final_selected={len(selected)}"
     )
     return (selected, stats) if return_stats else selected
 
@@ -6975,6 +7098,11 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         "verb_candidate_count": 0,
         "recent_duplicate_rejected_count": 0,
         "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
+        "pool_total_count": 0,
+        "eligible_pool_count": 0,
+        "never_used_candidates": 0,
+        "selected_from_never_used_count": 0,
+        "selected_from_oldest_used_count": 0,
     }
     if limit <= 0:
         return [], stats
@@ -6990,9 +7118,11 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         for days in cooldown_sequence
         if days > 0
     }
+    verb_usage_stats = get_selection_usage_stats("verb")
     candidates = []
 
     rejected_log_count = 0
+    stats["pool_total_count"] = len(rows)
     for row in rows:
         is_valid, rejection_reason = is_valid_verb_candidate(row)
         if not is_valid:
@@ -7012,6 +7142,9 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
         if not item:
             continue
         stats["verb_candidate_count"] += 1
+        stats["eligible_pool_count"] += 1
+        if is_never_used_candidate(item, verb_usage_stats):
+            stats["never_used_candidates"] += 1
         key = item_normalized_key(item)
         if not key or key in seen:
             stats["duplicate_filtered_count"] += 1
@@ -7023,12 +7156,15 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
             priority_value = int(float(priority)) if priority else 0
         except ValueError:
             priority_value = 0
+        usage_sort = rotation_usage_sort_key(item, verb_usage_stats)
         item["_sort"] = (
+            usage_sort[0],
+            usage_sort[1],
+            usage_sort[2],
             0 if item.get("source") == "vocabulary_pool" else 1,
             level_distance,
-            int(row.get("used_in_material_count", 0) or 0),
             -priority_value,
-            random.random(),
+            usage_sort[3],
         )
         candidates.append(item)
 
@@ -7051,6 +7187,10 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
             copied["rule_key"] = f"verb:{copied.get('jlpt_level') or 'local'}"
             selected.append(copied)
             selected_keys.add(key)
+            if is_never_used_candidate(copied, verb_usage_stats):
+                stats["selected_from_never_used_count"] += 1
+            else:
+                stats["selected_from_oldest_used_count"] += 1
         if len(selected) > before_count:
             stats["cooldown_days_used"] = cooldown_days
         if len(selected) >= limit:
@@ -7163,6 +7303,7 @@ def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
         for days in cooldown_sequence
         if days > 0
     }
+    word_usage_stats = get_selection_usage_stats("word")
 
     def normalized_seed_item(item):
         word = first_text(item, ["word", "surface", "base_form"]).strip()
@@ -7184,7 +7325,7 @@ def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
         }
 
     seed_items = [item for item in (normalized_seed_item(raw) for raw in seed) if item]
-    random.shuffle(seed_items)
+    seed_items = sort_candidates_for_rotation(seed_items, word_usage_stats)
     for cooldown_days in cooldown_sequence:
         for item in seed_items:
             if len(selected) >= limit:
@@ -7237,6 +7378,12 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
         "rejected_low_quality_count": 0,
         "rejected_recent_duplicate_count": 0,
         "safe_jlpt_candidates": 0,
+        "pool_total_count": 0,
+        "eligible_pool_count": 0,
+        "never_used_candidates": 0,
+        "selected_from_never_used_count": 0,
+        "selected_from_oldest_used_count": 0,
+        "repeated_within_14_days_count": 0,
         "candidate_counts": {stage_name: 0},
         "selected_rule_counts": {},
         "rule_selection": {"available_rules": [], "blocked_by_period": [], "selected_counts": {}},
@@ -7248,6 +7395,7 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
     target = settings.get("target_level", "")
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
+    word_usage_stats = get_selection_usage_stats("word")
     recent_keys = get_recent_used_normalized_keys(LOCAL_SELECTION_COOLDOWN_DAYS, material_date=material_date)
     levels = [level for level in levels if level in LEVELS]
     for level in levels:
@@ -7262,9 +7410,10 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
             exclude_low_quality=True,
             exclude_normalized_keys=exclude_for_sql,
         )
-        random.shuffle(rows)
+        stats["pool_total_count"] += len(rows)
         stats["safe_jlpt_candidates"] += len(rows)
         stats["candidate_counts"][stage_name] = stats["candidate_counts"].get(stage_name, 0) + len(rows)
+        rows = sort_candidates_for_rotation(rows, word_usage_stats)
         rule_key = f"jlpt:{level}"
         if rows and rule_key not in stats["rule_selection"]["available_rules"]:
             stats["rule_selection"]["available_rules"].append(rule_key)
@@ -7278,6 +7427,9 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
             item = build_vocab_item_from_pool_row(row)
             if not item:
                 continue
+            stats["eligible_pool_count"] += 1
+            if is_never_used_candidate(item, word_usage_stats):
+                stats["never_used_candidates"] += 1
             key = item_normalized_key(item)
             if not key or key in selected_keys or key in recent_keys:
                 stats["rejected_recent_duplicate_count"] += 1
@@ -7287,6 +7439,10 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
             item["_matched_rule_keys"] = [rule_key]
             selected.append(item)
             selected_keys.add(key)
+            if is_never_used_candidate(item, word_usage_stats):
+                stats["selected_from_never_used_count"] += 1
+            else:
+                stats["selected_from_oldest_used_count"] += 1
             stats["selected_from_db_count"] += 1
             stats["selected_by_jlpt_count"] += 1
             if level == target:
@@ -7319,6 +7475,12 @@ def merge_vocab_selector_stats(target, source):
     target["safe_jlpt_candidates"] = target.get("safe_jlpt_candidates", 0) + source.get("safe_jlpt_candidates", 0)
     target["selected_from_db_count"] = target.get("selected_from_db_count", 0) + source.get("selected_from_db_count", 0)
     target["selected_from_seed_fallback_count"] = target.get("selected_from_seed_fallback_count", 0) + source.get("selected_from_seed_fallback_count", 0)
+    target["pool_total_count"] = target.get("pool_total_count", 0) + source.get("pool_total_count", 0)
+    target["eligible_pool_count"] = target.get("eligible_pool_count", 0) + source.get("eligible_pool_count", 0)
+    target["never_used_candidates"] = target.get("never_used_candidates", 0) + source.get("never_used_candidates", 0)
+    target["selected_from_never_used_count"] = target.get("selected_from_never_used_count", 0) + source.get("selected_from_never_used_count", 0)
+    target["selected_from_oldest_used_count"] = target.get("selected_from_oldest_used_count", 0) + source.get("selected_from_oldest_used_count", 0)
+    target["repeated_within_14_days_count"] = target.get("repeated_within_14_days_count", 0) + source.get("repeated_within_14_days_count", 0)
     target["generation_elapsed_ms"] = target.get("generation_elapsed_ms", 0) + source.get("generation_elapsed_ms", 0)
     if source.get("selection_strategy"):
         target["selection_strategy"] = source["selection_strategy"]
@@ -7582,7 +7744,16 @@ def seed_basic_safe_pool(settings=None):
 
 def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_keys_by_days=None):
     if limit <= 0:
-        return [], {"recent_duplicate_rejected_count": 0, "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS, "candidates_from_db": 0}
+        return [], {
+            "recent_duplicate_rejected_count": 0,
+            "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
+            "candidates_from_db": 0,
+            "pool_total_count": 0,
+            "eligible_pool_count": 0,
+            "never_used_candidates": 0,
+            "selected_from_never_used_count": 0,
+            "selected_from_oldest_used_count": 0,
+        }
     ensure_settings_store()
     rows = sqlite_dicts("SELECT * FROM verbs ORDER BY RANDOM() LIMIT ?", (max(limit * 12, limit, 80),))
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
@@ -7596,7 +7767,13 @@ def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_
         "recent_duplicate_rejected_count": 0,
         "cooldown_days_used": LOCAL_SELECTION_COOLDOWN_DAYS,
         "candidates_from_db": len(rows),
+        "pool_total_count": len(rows),
+        "eligible_pool_count": 0,
+        "never_used_candidates": 0,
+        "selected_from_never_used_count": 0,
+        "selected_from_oldest_used_count": 0,
     }
+    verb_usage_stats = get_selection_usage_stats("verb")
     candidates = []
     for row in rows:
         key = normalize_vocab_key(row.get("dictionary_form", ""))
@@ -7635,7 +7812,12 @@ def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_
             "source": "verbs",
             "rule_key": f"verb:{row.get('jlpt_level') or 'local'}",
         }
-        candidates.append(normalize_material_verb_schema(item))
+        normalized = normalize_material_verb_schema(item)
+        candidates.append(normalized)
+        stats["eligible_pool_count"] += 1
+        if is_never_used_candidate(normalized, verb_usage_stats):
+            stats["never_used_candidates"] += 1
+    candidates = sort_candidates_for_rotation(candidates, verb_usage_stats)
 
     items = []
     selected_keys = set(seen)
@@ -7653,6 +7835,10 @@ def material_verbs_from_db(limit, exclude_keys=None, material_date=None, recent_
                 continue
             items.append(item)
             selected_keys.add(key)
+            if is_never_used_candidate(item, verb_usage_stats):
+                stats["selected_from_never_used_count"] += 1
+            else:
+                stats["selected_from_oldest_used_count"] += 1
         if len(items) > before_count:
             stats["cooldown_days_used"] = cooldown_days
         if len(items) >= limit:
@@ -7896,13 +8082,18 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
         "suru_verb_count": 0,
         "suru_verb_limit": SURU_VERB_LIMIT_PER_MATERIAL,
         "excluded_suru_compound_count": 0,
+        "pool_total_count": 0,
+        "eligible_pool_count": 0,
+        "never_used_candidates": 0,
+        "selected_from_never_used_count": 0,
+        "selected_from_oldest_used_count": 0,
     }
     if limit <= 0:
         return ([], stats) if return_stats else []
     seed, excluded_suru_count = pure_verb_safe_pool(settings)
-    random.shuffle(seed)
     stats["excluded_suru_compound_count"] += excluded_suru_count
     stats["candidates_from_seed"] = len(seed)
+    stats["pool_total_count"] = len(seed)
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     cooldown_sequence = local_selection_cooldown_sequence()
     recent_keys_by_days = recent_keys_by_days or {
@@ -7910,6 +8101,10 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
         for days in cooldown_sequence
         if days > 0
     }
+    verb_usage_stats = get_selection_usage_stats("verb")
+    seed = sort_candidates_for_rotation(seed, verb_usage_stats)
+    stats["eligible_pool_count"] = len(seed)
+    stats["never_used_candidates"] = count_never_used_candidates(seed, verb_usage_stats)
     items = []
     selected_keys = set(seen)
     for cooldown_days in cooldown_sequence:
@@ -7938,6 +8133,10 @@ def material_seed_verbs(settings, limit, exclude_keys=None, material_date=None, 
                 continue
             normalized["rule_key"] = copied["rule_key"]
             items.append(normalized)
+            if is_never_used_candidate(normalized, verb_usage_stats):
+                stats["selected_from_never_used_count"] += 1
+            else:
+                stats["selected_from_oldest_used_count"] += 1
             stats["pure_verb_count"] += 1
             selected_keys.add(key)
         if len(items) > before_count:
@@ -8649,7 +8848,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
-        "selection_strategy": "period_first_balanced_slot_allocation",
+        "selection_strategy": "rotation_until_exhausted",
         "local_generation_safe_mode": safe_mode,
         "allowed_jlpt_levels": sorted(LOCAL_SAFE_MODE_JLPT_LEVELS),
         "allowed_categories": sorted(LOCAL_SAFE_MODE_CATEGORIES),
@@ -8758,6 +8957,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
         vocab_seed_fallback_count = len(seed_items)
         word_stage_counts["seed_basic_safe_pool"] += len(seed_items)
         vocab_selector_stats["selected_from_seed_fallback_count"] = vocab_seed_fallback_count
+        seed_word_usage_stats = get_selection_usage_stats("word")
+        for item in seed_items:
+            if is_never_used_candidate(item, seed_word_usage_stats):
+                vocab_selector_stats["selected_from_never_used_count"] = (
+                    vocab_selector_stats.get("selected_from_never_used_count", 0) + 1
+                )
+            else:
+                vocab_selector_stats["selected_from_oldest_used_count"] = (
+                    vocab_selector_stats.get("selected_from_oldest_used_count", 0) + 1
+                )
         if seed_items:
             vocab_selector_stats["seed_fallback_used"] = True
             if not vocab_selector_stats.get("db_pool_used"):
@@ -8791,6 +9000,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
     verb_cooldown_days_used = LOCAL_SELECTION_COOLDOWN_DAYS
     verb_candidates_from_db = 0
     verb_candidates_from_seed = 0
+    verb_pool_total_count = 0
+    verb_eligible_pool_count = 0
+    verb_never_used_candidates = 0
+    verb_selected_from_never_used_count = 0
+    verb_selected_from_oldest_used_count = 0
     verb_stage_counts = {"db_pure_verbs": 0, "pure_verb_safe_pool": 0, "verbs_table": 0}
     verbs = []
     selected_verb_keys = []
@@ -8815,6 +9029,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         verb_recent_duplicate_rejected_count += verb_pool_stats.get("recent_duplicate_rejected_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, verb_pool_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_db += verb_pool_stats.get("verb_candidate_count", 0)
+        verb_pool_total_count += verb_pool_stats.get("pool_total_count", 0)
+        verb_eligible_pool_count += verb_pool_stats.get("eligible_pool_count", 0)
+        verb_never_used_candidates += verb_pool_stats.get("never_used_candidates", 0)
+        verb_selected_from_never_used_count += verb_pool_stats.get("selected_from_never_used_count", 0)
+        verb_selected_from_oldest_used_count += verb_pool_stats.get("selected_from_oldest_used_count", 0)
         selected_verb_keys.extend(verb_pool_stats.get("selected_keys", []))
         for source, count in verb_pool_stats.get("source_summary", {}).items():
             verb_source_summary[source] = verb_source_summary.get(source, 0) + count
@@ -8837,6 +9056,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         excluded_suru_compound_count += seed_verb_stats.get("excluded_suru_compound_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, seed_verb_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_seed += seed_verb_stats.get("candidates_from_seed", 0)
+        verb_pool_total_count += seed_verb_stats.get("pool_total_count", 0)
+        verb_eligible_pool_count += seed_verb_stats.get("eligible_pool_count", 0)
+        verb_never_used_candidates += seed_verb_stats.get("never_used_candidates", 0)
+        verb_selected_from_never_used_count += seed_verb_stats.get("selected_from_never_used_count", 0)
+        verb_selected_from_oldest_used_count += seed_verb_stats.get("selected_from_oldest_used_count", 0)
         seed_used = bool(seed_verbs)
         if seed_verbs:
             print(f"[verb-selector] seed fallback used count={len(seed_verbs)} source=seed_basic_verb_pool")
@@ -8855,6 +9079,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         verb_recent_duplicate_rejected_count += db_verb_stats.get("recent_duplicate_rejected_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, db_verb_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_db += db_verb_stats.get("candidates_from_db", 0)
+        verb_pool_total_count += db_verb_stats.get("pool_total_count", 0)
+        verb_eligible_pool_count += db_verb_stats.get("eligible_pool_count", 0)
+        verb_never_used_candidates += db_verb_stats.get("never_used_candidates", 0)
+        verb_selected_from_never_used_count += db_verb_stats.get("selected_from_never_used_count", 0)
+        verb_selected_from_oldest_used_count += db_verb_stats.get("selected_from_oldest_used_count", 0)
         if db_verbs:
             print(f"[verb-selector] seed fallback used count={len(db_verbs)} source=verbs_table")
     verbs = [normalize_material_verb_schema(item) for item in verbs]
@@ -8881,6 +9110,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         excluded_suru_compound_count += topup_seed_stats.get("excluded_suru_compound_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, topup_seed_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_seed += topup_seed_stats.get("candidates_from_seed", 0)
+        verb_pool_total_count += topup_seed_stats.get("pool_total_count", 0)
+        verb_eligible_pool_count += topup_seed_stats.get("eligible_pool_count", 0)
+        verb_never_used_candidates += topup_seed_stats.get("never_used_candidates", 0)
+        verb_selected_from_never_used_count += topup_seed_stats.get("selected_from_never_used_count", 0)
+        verb_selected_from_oldest_used_count += topup_seed_stats.get("selected_from_oldest_used_count", 0)
         verbs, suru_limit_excluded = enforce_material_suru_limit(verbs)
         excluded_suru_compound_count += suru_limit_excluded
         if len(verbs) > verb_count:
@@ -8900,6 +9134,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
         verb_recent_duplicate_rejected_count += topup_db_stats.get("recent_duplicate_rejected_count", 0)
         verb_cooldown_days_used = min(verb_cooldown_days_used, topup_db_stats.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS))
         verb_candidates_from_db += topup_db_stats.get("candidates_from_db", 0)
+        verb_pool_total_count += topup_db_stats.get("pool_total_count", 0)
+        verb_eligible_pool_count += topup_db_stats.get("eligible_pool_count", 0)
+        verb_never_used_candidates += topup_db_stats.get("never_used_candidates", 0)
+        verb_selected_from_never_used_count += topup_db_stats.get("selected_from_never_used_count", 0)
+        verb_selected_from_oldest_used_count += topup_db_stats.get("selected_from_oldest_used_count", 0)
         verbs, suru_limit_excluded = enforce_material_suru_limit(verbs)
         excluded_suru_compound_count += suru_limit_excluded
         if len(verbs) > verb_count:
@@ -8951,7 +9190,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
             generation_warnings.append(warning)
     metadata = {
         "generation_mode": "local",
-        "selection_strategy": "period_first_balanced_slot_allocation",
+        "selection_strategy": "rotation_until_exhausted",
         "cooldown_policy": {
             "days": LOCAL_SELECTION_COOLDOWN_DAYS,
             "allow_relax": LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX,
@@ -9012,8 +9251,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
             "insufficient_unique": len(vocab) < vocab_count,
         },
         "word_selection": {
+            "strategy": "rotation_until_exhausted",
             "requested_count": vocab_count,
             "selected_count": len(vocab),
+            "pool_total_count": vocab_selector_stats.get("pool_total_count", 0),
+            "eligible_pool_count": vocab_selector_stats.get("eligible_pool_count", 0),
+            "recent_7_days_used_count": vocab_selector_stats.get("recent_used_word_count", 0),
+            "selected_from_never_used_count": vocab_selector_stats.get("selected_from_never_used_count", 0),
+            "selected_from_oldest_used_count": vocab_selector_stats.get("selected_from_oldest_used_count", 0),
+            "fallback_used": bool(vocab_seed_fallback_count),
+            "repeated_within_14_days_count": vocab_selector_stats.get("repeated_within_14_days_count", 0),
             "selected_by_rule": vocab_selector_stats.get("rule_selection", {}).get("selected_counts", {}),
             "selected_from_safe_fallback": vocab_seed_fallback_count,
             "stage_counts": word_stage_counts,
@@ -9038,8 +9285,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
             "insufficient_unique": len(verbs) < verb_count,
         },
         "verb_selection": {
+            "strategy": "rotation_until_exhausted",
             "requested_count": verb_count,
             "selected_count": len(verbs),
+            "pool_total_count": verb_pool_total_count,
+            "eligible_pool_count": verb_eligible_pool_count,
+            "recent_7_days_used_count": len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set())),
+            "never_used_candidates": verb_never_used_candidates,
+            "selected_from_never_used_count": verb_selected_from_never_used_count,
+            "selected_from_oldest_used_count": verb_selected_from_oldest_used_count,
+            "fallback_used": bool(verb_source_summary.get("seed_fallback", 0) or verb_source_summary.get("verbs", 0)),
             "stage_counts": verb_stage_counts,
             "pure_verb_count": pure_verb_count,
             "suru_verb_count": suru_verb_count,
@@ -9102,6 +9357,16 @@ def build_local_material(settings, force_seed=False, material_date=None):
         f"insufficient_unique={str(len(vocab) < vocab_count).lower()}"
     )
     print(
+        "[word-selector] strategy=rotation_until_exhausted "
+        f"requested={vocab_count} "
+        f"pool_total={vocab_selector_stats.get('pool_total_count', 0)} "
+        f"eligible_pool={vocab_selector_stats.get('eligible_pool_count', 0)} "
+        f"recent_7_days_used={vocab_selector_stats.get('recent_used_word_count', 0)} "
+        f"selected_from_never_used={vocab_selector_stats.get('selected_from_never_used_count', 0)} "
+        f"selected_from_oldest_used={vocab_selector_stats.get('selected_from_oldest_used_count', 0)} "
+        f"final_selected={len(vocab)}"
+    )
+    print(
         "[material-generator] local verb sources "
         f"vocabulary_pool={verb_source_summary.get('vocabulary_pool', 0)} "
         f"vocabulary_pool_suru={verb_source_summary.get('vocabulary_pool_suru', 0)} "
@@ -9136,6 +9401,18 @@ def build_local_material(settings, force_seed=False, material_date=None):
         f"excluded_suru_compound_count={excluded_suru_compound_count} "
         f"cooldown_days={LOCAL_SELECTION_COOLDOWN_DAYS} "
         f"insufficient_unique={str(len(verbs) < verb_count).lower()}"
+    )
+    print(
+        "[verb-selector] strategy=rotation_until_exhausted "
+        f"requested={verb_count} "
+        f"pool_total={verb_pool_total_count} "
+        f"eligible_pool={verb_eligible_pool_count} "
+        f"recent_7_days_used={len(verb_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))} "
+        f"never_used_candidates={verb_never_used_candidates} "
+        f"selected_from_never_used={verb_selected_from_never_used_count} "
+        f"selected_from_oldest_used={verb_selected_from_oldest_used_count} "
+        f"suru_verb_count={suru_verb_count} "
+        f"final_selected={len(verbs)}"
     )
     return {
         "date": material_date_display(material_date or get_today_taipei_date()),
@@ -10526,6 +10803,46 @@ def grammar_ai_error_response(message="解析失敗，請稍後再試，或確�
     return payload
 
 
+def grammar_failure_message(reason):
+    messages = {
+        "quota_exceeded": "\u89e3\u6790\u5931\u6557\uff1aGemini \u984d\u5ea6\u6216\u8acb\u6c42\u914d\u984d\u4e0d\u8db3\u3002",
+        "prepayment_depleted": "\u89e3\u6790\u5931\u6557\uff1aGemini \u9810\u4ed8\u984d\u5ea6\u4e0d\u8db3\u6216\u5e33\u52d9\u4fdd\u8b77\u4e2d\u3002",
+        "missing_api_key": "\u89e3\u6790\u5931\u6557\uff1a\u7cfb\u7d71\u672a\u8b80\u5230 Gemini API key\u3002",
+        "timeout": "\u89e3\u6790\u5931\u6557\uff1aGemini \u56de\u61c9\u903e\u6642\uff0c\u8acb\u7e2e\u77ed\u8f38\u5165\u6216\u7a0d\u5f8c\u518d\u8a66\u3002",
+        "json_parse_error": "\u89e3\u6790\u5931\u6557\uff1aAI \u56de\u50b3\u683c\u5f0f\u7570\u5e38\uff0c\u7cfb\u7d71\u7121\u6cd5\u89e3\u6790 JSON\u3002",
+        "model_error": "\u89e3\u6790\u5931\u6557\uff1aGemini \u6a21\u578b\u56de\u61c9\u7570\u5e38\u3002",
+        "permission_denied": "\u89e3\u6790\u5931\u6557\uff1aGemini API \u6b0a\u9650\u4e0d\u8db3\u3002",
+        "not_found": "\u89e3\u6790\u5931\u6557\uff1a\u6307\u5b9a\u7684 Gemini \u6a21\u578b\u4e0d\u5b58\u5728\u6216\u4e0d\u53ef\u7528\u3002",
+        "input_too_long": "\u8f38\u5165\u6587\u5b57\u904e\u9577\uff0c\u8acb\u7e2e\u77ed\u5f8c\u518d\u8a66\u3002",
+    }
+    return messages.get(reason, "\u89e3\u6790\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002")
+
+
+def annotate_grammar_payload(payload, ok, source, reason="", model="", diagnostic=None):
+    payload = payload if isinstance(payload, dict) else grammar_response_template("japanese")
+    payload["ok"] = bool(ok)
+    payload["source"] = source
+    payload["model"] = model or ""
+    payload["reason"] = reason or ""
+    if ok:
+        payload["result"] = {
+            "natural_translation_zh": payload.get("natural_translation", ""),
+            "sentence_structure": payload.get("sentence_structure", []),
+            "grammar_points": payload.get("grammar_points", []),
+            "vocabulary_notes": payload.get("slang_terms", []),
+            "nuance": (payload.get("tone") or {}).get("explanation", "") if isinstance(payload.get("tone"), dict) else "",
+            "learning_tips": (payload.get("learning_focus") or {}).get("tips", []) if isinstance(payload.get("learning_focus"), dict) else [],
+        }
+    else:
+        message = grammar_failure_message(reason)
+        payload["error"] = "grammar_analysis_failed"
+        payload["message"] = message
+        payload["fallback_reason"] = reason or "unknown_error"
+        payload["error_message"] = payload.get("error_message") or message
+        payload["debug"] = diagnostic or {}
+    return payload
+
+
 def grammar_fallback_response(text, hiragana_reading="", advanced_mecab=None):
     message = "Gemini 解析暫時失敗，已使用本地規則回傳部分結果。"
     payload = grammar_response_template("japanese")
@@ -10894,6 +11211,7 @@ def analyze_grammar_with_gemini(text):
         if grammar_debug_enabled():
             payload["fallback_reason"] = reason
             payload["debug"] = diagnostic
+        payload = annotate_grammar_payload(payload, False, "fallback", reason, diagnostic["selected_model"], diagnostic)
         persist_analysis_slang_terms(payload, text, "grammar_analyzer_billing_block")
         return payload, 200
 
@@ -10925,6 +11243,7 @@ def analyze_grammar_with_gemini(text):
             diagnostic["elapsed_ms"] = round((time.perf_counter() - started) * 1000)
             if grammar_debug_enabled():
                 payload["debug"] = diagnostic
+            payload = annotate_grammar_payload(payload, True, "gemini", "", model_name, diagnostic if grammar_debug_enabled() else None)
             persist_analysis_slang_terms(payload, text, "grammar_analyzer")
             return payload, 200
         except Exception as e:
@@ -10966,22 +11285,51 @@ def analyze_grammar_with_gemini(text):
     if grammar_debug_enabled():
         payload["fallback_reason"] = reason
         payload["debug"] = diagnostic
+    payload = annotate_grammar_payload(payload, False, "fallback", reason, diagnostic.get("selected_model", ""), diagnostic)
     persist_analysis_slang_terms(payload, text, "grammar_analyzer_fallback")
     return payload, 200
 
 
 def handle_grammar_analyzer_api():
     started = time.perf_counter()
-    data = request.get_json(silent=True) or {}
-    text = str(data.get("text", "")).strip()
-    if not text:
-        return jsonify(grammar_not_japanese_response()), 400
-    if not is_probably_japanese_text(text):
-        return jsonify(grammar_not_japanese_response())
-    payload, status = analyze_grammar_with_gemini(text)
-    elapsed_ms = round((time.perf_counter() - started) * 1000)
-    print(f"[perf] grammar_analyzer ms={elapsed_ms}")
-    return jsonify(payload), status
+    try:
+        data = request.get_json(silent=True) or {}
+        text = str(data.get("text", "")).strip()
+        if not text:
+            payload = grammar_not_japanese_response()
+            payload.update({"ok": False, "error": "grammar_analysis_failed", "reason": "empty_input", "message": "\u8acb\u8f38\u5165\u8981\u89e3\u6790\u7684\u65e5\u6587\u3002"})
+            return jsonify(payload), 400
+        if len(text) > 6000:
+            payload = annotate_grammar_payload(
+                grammar_response_template("japanese"),
+                False,
+                "none",
+                "input_too_long",
+                "",
+                {"input_chars": len(text), "limit_chars": 6000},
+            )
+            return jsonify(payload), 400
+        if not is_probably_japanese_text(text):
+            payload = grammar_not_japanese_response()
+            payload.update({"ok": False, "error": "grammar_analysis_failed", "reason": "not_japanese", "message": "\u8acb\u8f38\u5165\u65e5\u6587\u53e5\u5b50\u6216\u6587\u7ae0\u3002"})
+            return jsonify(payload), 400
+        payload, status = analyze_grammar_with_gemini(text)
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[perf] grammar_analyzer ms={elapsed_ms}")
+        return jsonify(payload), status
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[grammar-analyzer] unhandled error elapsed_ms={elapsed_ms}; reason={exc}")
+        print(traceback.format_exc())
+        payload = annotate_grammar_payload(
+            grammar_response_template("japanese"),
+            False,
+            "none",
+            "unknown_error",
+            "",
+            {"elapsed_ms": elapsed_ms, "exception_type": type(exc).__name__, "exception_message": str(exc)[:500]},
+        )
+        return jsonify(payload), 500
 
 
 @app.route("/")
@@ -11905,6 +12253,27 @@ def api_gemini_debug_model_check():
             "candidate_count": len(models),
         }
     )
+
+
+@app.get("/api/grammar/debug/analyze-smoke")
+def api_grammar_debug_analyze_smoke():
+    if not grammar_debug_enabled():
+        return jsonify({"ok": False, "error": "debug_endpoint_disabled", "message": "Debug endpoint is disabled."}), 404
+    started = time.perf_counter()
+    text = request.args.get("text") or "\u4eca\u65e5\u306f\u96e8\u3067\u3059\u304c\u3001\u6563\u6b69\u306b\u884c\u304d\u305f\u3044\u3067\u3059\u3002"
+    payload, status = analyze_grammar_with_gemini(text)
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    return jsonify(
+        {
+            "ok": bool(payload.get("ok")),
+            "api_key_present": bool(GEMINI_API_KEY),
+            "model": payload.get("model") or choose_gemini_model(),
+            "grammar_analyzer_ok": bool(payload.get("ok")),
+            "reason": payload.get("reason", ""),
+            "elapsed_ms": elapsed_ms,
+            "http_status": status,
+        }
+    ), status
 
 
 @app.get("/api/sns/random")
