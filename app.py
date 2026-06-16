@@ -92,7 +92,7 @@ SQLITE_SETTINGS_FILE = os.environ.get("SQLITE_DB_PATH", "").strip() or DEFAULT_S
 SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 VOCABULARY_SEED_BASIC_FILE = os.path.join(BASE_DIR, "data", "vocabulary_seed_n5_n3.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
-GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 20, 5, 55)
+GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 40, 5, 60)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
@@ -4464,6 +4464,8 @@ def call_gemini(prompt, model_name=None, timeout_seconds=None):
             f"AI 服務請求失敗；model={model_name}；http_status={e.code}；detail={compact_detail}"
         ) from e
     except urllib.error.URLError as e:
+        if isinstance(getattr(e, "reason", None), TimeoutError) or "timed out" in str(getattr(e, "reason", "")).lower():
+            raise RuntimeError(f"AI 服務逾時；model={model_name}；timeout={timeout_seconds}s") from e
         raise RuntimeError(f"無法連接 AI 服務；model={model_name}；reason={e.reason}") from e
     except TimeoutError as e:
         raise RuntimeError(f"AI 服務逾時；model={model_name}；timeout={timeout_seconds}s") from e
@@ -5676,7 +5678,7 @@ def vocab_rule_priority(item, rule_context):
 def record_vocab_selection_logs(items, selected_for="word", material_date=None, material_key=None, material_version_no=None):
     rows = []
     material_date = canonical_material_date(material_date or get_today_taipei_date())
-    now = utc_now_iso()
+    now = clean_timestamp(utc_now_iso()) or datetime.now(timezone.utc).isoformat(timespec="seconds")
     for item in items:
         rule_keys = list(item.get("_matched_rule_keys") or [])
         if item.get("rule_key"):
@@ -5711,7 +5713,7 @@ def record_vocab_selection_logs(items, selected_for="word", material_date=None, 
                     "selected_for": selected_for,
                     "material_key": material_key or "",
                     "material_version_no": material_version_no,
-                    "created_at": now,
+                    "created_at": clean_timestamp(now) or datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 }
             )
     if not rows:
@@ -5748,7 +5750,7 @@ def record_vocab_selection_logs(items, selected_for="word", material_date=None, 
                             row["selected_for"],
                             row["material_key"],
                             row["material_version_no"],
-                            row["created_at"],
+                            clean_timestamp(row["created_at"]) or datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         )
                         for row in rows
                     ],
@@ -11201,6 +11203,7 @@ Gemini 必須回傳的 JSON 結構：
 3. 整段自然中文翻譯 natural_translation。
 4. 整段核心意思 overall_core_meaning；sentence_summary 也請填入同一個整段核心意思。
 5. 逐句解析 sentence_breakdown。每一句都必須包含 sentence_index、original、reading_hiragana、translation_zh、core_meaning、grammar_points、vocabulary_notes。
+   為避免輸出過長，每句的文法與詞彙說明請精簡扼要，單一說明限制在 50 字內。
 6. 全文層級的 grammar_points、vocabulary_notes、tone、learning_focus。
 如果輸入有多句，sentence_breakdown 不可以只回最後一句。
 
@@ -11399,14 +11402,14 @@ def handle_grammar_analyzer_api():
         print(f"[grammar-analyzer] input_chars={len(text)}")
         print(f"[grammar-analyzer] sentence_count={sentence_count}")
         print("[grammar-analyzer] using_full_text=true")
-        if len(text) > 6000:
+        if len(text) > 1000:
             payload = annotate_grammar_payload(
                 grammar_response_template("japanese"),
                 False,
                 "none",
                 "input_too_long",
                 "",
-                {"input_chars": len(text), "limit_chars": 6000},
+                {"input_chars": len(text), "limit_chars": 1000},
             )
             return jsonify(payload), 400
         if not is_probably_japanese_text(text):
