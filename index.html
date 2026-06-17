@@ -605,16 +605,29 @@
       .replace(/[\s　\u200b\u200c\u200d\ufeff]+/g, "");
   }
 
-  function currentSettings() {
+  function collectControlCenterSettings() {
+    const targetLevel = document.getElementById("setting-level").value;
+    const wordCount = Number(document.getElementById("setting-vocab").value);
+    const verbCount = Number(document.getElementById("setting-verb").value);
+    const choiceCount = Number(document.getElementById("setting-mcq").value);
+    const fillCount = Number(document.getElementById("setting-fill").value);
+    const grammarLevel = document.getElementById("setting-grammar-level").value;
+    const grammarCount = Number(document.getElementById("setting-grammar").value);
     return {
-      target_level: document.getElementById("setting-level").value,
-      vocab_count: document.getElementById("setting-vocab").value,
-      verb_count: document.getElementById("setting-verb").value,
-      mcq_count: document.getElementById("setting-mcq").value,
-      fill_count: document.getElementById("setting-fill").value,
-      grammar_level: document.getElementById("setting-grammar-level").value,
-      grammar_count: document.getElementById("setting-grammar").value
+      target_level: targetLevel,
+      vocab_count: wordCount,
+      word_count: wordCount,
+      verb_count: verbCount,
+      mcq_count: choiceCount,
+      choice_count: choiceCount,
+      fill_count: fillCount,
+      grammar_level: grammarLevel,
+      grammar_count: grammarCount
     };
+  }
+
+  function currentSettings() {
+    return collectControlCenterSettings();
   }
 
   function syncRangeLabels() {
@@ -924,15 +937,31 @@
     const generationMode = useSample ? "local" : (mode || "local");
     const btn = useSample ? document.getElementById("sample-btn") : document.getElementById("trigger-btn");
     const msg = document.getElementById("save-msg");
+    const settingsPayload = collectControlCenterSettings();
     btn.disabled = true;
     btn.innerText = useSample ? "生成範例中..." : "本地教材生成中...";
     msg.className = "mt-3 text-muted";
     msg.innerText = "正在從本地題庫生成教材，並發送 Telegram 通知...";
     try {
+      console.debug("[control-center] generate clicked settings=", settingsPayload);
+      console.log(
+        `[control-center] generate payload target_level=${settingsPayload.target_level} ` +
+        `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
+        `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
+      );
+      await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
       const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
-      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify({...currentSettings(), mode: generationMode}) });
+      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify({...settingsPayload, mode: generationMode}) });
+      const validation = result.count_validation || {};
+      const requestedWords = validation.word_count_requested ?? settingsPayload.word_count;
+      const actualWords = validation.word_count_actual ?? requestedWords;
+      const requestedVerbs = validation.verb_count_requested ?? settingsPayload.verb_count;
+      const actualVerbs = validation.verb_count_actual ?? requestedVerbs;
+      const matched = validation.word_count_matched !== false && validation.verb_count_matched !== false;
       msg.className = "mt-3 success-text";
-      msg.innerText = result.message;
+      msg.innerText = matched
+        ? `今日教材已成功從本地詞庫建立。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。`
+        : `今日教材已建立，但內容未補滿：單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。請查看 Render Logs。`;
       await loadMaterialByDate(result.material_key || result.date || result.material_date);
       invalidateArchiveDatesCache();
       await loadArchiveList(true);

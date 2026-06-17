@@ -604,8 +604,10 @@ GRAMMAR_ADJACENT_FALLBACKS = {
 SETTING_ALIASES = {
     "targetLevel": "target_level",
     "vocabCount": "vocab_count",
+    "word_count": "vocab_count",
     "verbCount": "verb_count",
     "quizMcqCount": "mcq_count",
+    "choice_count": "mcq_count",
     "quizFillCount": "fill_count",
     "grammarLevel": "grammar_level",
     "grammarCount": "grammar_count",
@@ -799,6 +801,27 @@ def normalize_settings(raw):
         settings[key] = str(max(min_value, min(value, max_value)))
 
     return settings
+
+
+def request_settings_overrides(raw):
+    overrides = {}
+    for key, value in (raw or {}).items():
+        normalized_key = SETTING_ALIASES.get(key, key)
+        if normalized_key in DEFAULT_SETTINGS and str(value) != "":
+            overrides[normalized_key] = value
+    return overrides
+
+
+def resolve_generation_settings(posted_settings=None, persist=False):
+    overrides = request_settings_overrides(posted_settings or {})
+    if overrides:
+        merged = load_settings()
+        merged.update(overrides)
+        settings = normalize_settings(merged)
+        if persist:
+            settings = save_settings_file(settings)
+        return settings, "request_payload"
+    return load_settings(), "db_settings"
 
 
 def ensure_settings_store():
@@ -9910,9 +9933,18 @@ def generate_daily_material(
     notify_telegram=True,
     generation_source="manual_local",
 ):
-    settings = save_settings_file(posted_settings) if posted_settings else load_settings()
+    settings, settings_source = resolve_generation_settings(posted_settings, persist=bool(posted_settings))
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
+    print(
+        "[material-generator] requested "
+        f"target_level={settings.get('target_level')} "
+        f"word_count={settings.get('vocab_count')} "
+        f"verb_count={settings.get('verb_count')} "
+        f"grammar_level={settings.get('grammar_level')} "
+        f"grammar_count={settings.get('grammar_count')} "
+        f"settings_source={settings_source}"
+    )
 
     if mode == "local":
         print("[feature-boundary] daily_material mode=local skip gemini")
@@ -9943,6 +9975,32 @@ def generate_daily_material(
 
     if mode == "local" and raw_material.get("metadata", {}).get("ai_used"):
         print("[material-generator] ERROR local mode attempted to call Gemini")
+
+    requested_words = int(settings.get("vocab_count") or 0)
+    requested_verbs = int(settings.get("verb_count") or 0)
+    actual_words = len(raw_material.get("vocab") or raw_material.get("words") or [])
+    actual_verbs = len(raw_material.get("verbs") or [])
+    count_warnings = []
+    if actual_words < requested_words:
+        count_warnings.append("word_count_not_matched")
+    if actual_verbs < requested_verbs:
+        count_warnings.append("verb_count_not_matched")
+    count_validation = {
+        "target_level_requested": settings.get("target_level", ""),
+        "target_level_actual": raw_material.get("level") or settings.get("target_level", ""),
+        "word_count_requested": requested_words,
+        "word_count_actual": actual_words,
+        "verb_count_requested": requested_verbs,
+        "verb_count_actual": actual_verbs,
+        "word_count_matched": actual_words >= requested_words,
+        "verb_count_matched": actual_verbs >= requested_verbs,
+        "warnings": count_warnings,
+    }
+    raw_material.setdefault("metadata", {})
+    raw_material["metadata"]["settings_source"] = settings_source
+    raw_material["metadata"]["count_validation"] = count_validation
+    print(f"[count-validation] requested_words={requested_words} actual_words={actual_words} word_count_matched={str(actual_words >= requested_words).lower()}")
+    print(f"[count-validation] requested_verbs={requested_verbs} actual_verbs={actual_verbs} verb_count_matched={str(actual_verbs >= requested_verbs).lower()}")
 
     save_info = save_material_for_date(
         material_date or get_today_taipei_date(),
@@ -9980,6 +10038,8 @@ def generate_daily_material(
         "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
         "fallback_used": bool(raw_material.get("metadata", {}).get("fallback_used", False)),
         "source_summary": raw_material.get("metadata", {}).get("source_summary", {}),
+        "settings_source": settings_source,
+        "count_validation": count_validation,
     }
 
 
@@ -11711,18 +11771,35 @@ def api_generate():
             print(f"[local-generate] primary local generation failed; trying seed fallback; reason={e}")
             print(traceback.format_exc())
             try:
-                settings = save_settings_file(data) if data else load_settings()
+                settings, settings_source = resolve_generation_settings(data, persist=bool(data))
                 fallback_material = build_local_material(
                     settings,
                     force_seed=True,
                     material_date=get_today_taipei_date(),
                 )
+                requested_words = int(settings.get("vocab_count") or 0)
+                requested_verbs = int(settings.get("verb_count") or 0)
+                actual_words = len(fallback_material.get("vocab") or fallback_material.get("words") or [])
+                actual_verbs = len(fallback_material.get("verbs") or [])
+                count_validation = {
+                    "target_level_requested": settings.get("target_level", ""),
+                    "target_level_actual": fallback_material.get("level") or settings.get("target_level", ""),
+                    "word_count_requested": requested_words,
+                    "word_count_actual": actual_words,
+                    "verb_count_requested": requested_verbs,
+                    "verb_count_actual": actual_verbs,
+                    "word_count_matched": actual_words >= requested_words,
+                    "verb_count_matched": actual_verbs >= requested_verbs,
+                    "warnings": [],
+                }
                 fallback_material.setdefault("metadata", {})
                 fallback_material["metadata"].update(
                     {
                         "generation_mode": "local_fallback",
                         "fallback_used": True,
                         "ai_used": False,
+                        "settings_source": settings_source,
+                        "count_validation": count_validation,
                     }
                 )
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
@@ -11751,6 +11828,8 @@ def api_generate():
                         "generation_source": save_info.get("generation_source"),
                         "generation_mode": "local_fallback",
                         "ai_used": False,
+                        "settings_source": settings_source,
+                        "count_validation": count_validation,
                     }
                 )
             except Exception as fallback_exc:
