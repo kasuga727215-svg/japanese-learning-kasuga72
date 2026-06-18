@@ -947,6 +947,7 @@
       console.log(
         `[control-center] generate payload target_level=${settingsPayload.target_level} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
+        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
         `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
       );
       await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });

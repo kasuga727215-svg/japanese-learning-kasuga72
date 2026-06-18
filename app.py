@@ -9941,6 +9941,8 @@ def generate_daily_material(
         f"target_level={settings.get('target_level')} "
         f"word_count={settings.get('vocab_count')} "
         f"verb_count={settings.get('verb_count')} "
+        f"choice_count={settings.get('mcq_count')} "
+        f"fill_count={settings.get('fill_count')} "
         f"grammar_level={settings.get('grammar_level')} "
         f"grammar_count={settings.get('grammar_count')} "
         f"settings_source={settings_source}"
@@ -11781,6 +11783,11 @@ def api_generate():
                 requested_verbs = int(settings.get("verb_count") or 0)
                 actual_words = len(fallback_material.get("vocab") or fallback_material.get("words") or [])
                 actual_verbs = len(fallback_material.get("verbs") or [])
+                count_warnings = []
+                if actual_words < requested_words:
+                    count_warnings.append("word_count_not_matched")
+                if actual_verbs < requested_verbs:
+                    count_warnings.append("verb_count_not_matched")
                 count_validation = {
                     "target_level_requested": settings.get("target_level", ""),
                     "target_level_actual": fallback_material.get("level") or settings.get("target_level", ""),
@@ -11790,7 +11797,7 @@ def api_generate():
                     "verb_count_actual": actual_verbs,
                     "word_count_matched": actual_words >= requested_words,
                     "verb_count_matched": actual_verbs >= requested_verbs,
-                    "warnings": [],
+                    "warnings": count_warnings,
                 }
                 fallback_material.setdefault("metadata", {})
                 fallback_material["metadata"].update(
