@@ -113,6 +113,7 @@ LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX = os.environ.get("LOCAL_SELECTION_ALLOW_COO
 LOCAL_GRAMMAR_COOLDOWN_DAYS = read_int_env("LOCAL_GRAMMAR_COOLDOWN_DAYS", 7, 0, 30)
 GRAMMAR_FALLBACK_ADJACENT_LEVELS = os.environ.get("GRAMMAR_FALLBACK_ADJACENT_LEVELS", "true").strip().lower() != "false"
 RUN_MIGRATIONS_ON_REQUEST = os.environ.get("RUN_MIGRATIONS_ON_REQUEST", "false").strip().lower() == "true"
+RUN_MIGRATIONS_ON_STARTUP = os.environ.get("RUN_MIGRATIONS_ON_STARTUP", "false").strip().lower() == "true"
 DB_CONNECT_TIMEOUT_SECONDS = read_int_env("DB_CONNECT_TIMEOUT_SECONDS", 5, 1, 20)
 _DASHBOARD_CACHE = {"expires_at": None, "payload": None}
 _ARCHIVE_DATES_CACHE = {"expires_at": None, "payload": None}
@@ -13305,8 +13306,11 @@ def api_quiz_submit():
 
 def initialize_runtime_schema():
     try:
-        ensure_database()
         ensure_settings_store()
+        if not RUN_MIGRATIONS_ON_STARTUP:
+            print("[startup] database schema initialization skipped; RUN_MIGRATIONS_ON_STARTUP=false")
+            return
+        ensure_database()
     except Exception as e:
         print(f"[startup] schema initialization failed; will retry on demand; reason={e}")
         print(traceback.format_exc())
