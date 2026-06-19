@@ -945,6 +945,12 @@
     try {
       console.debug("[control-center] generate clicked settings=", settingsPayload);
       console.log(
+        `[control-center] generate clicked settings target_level=${settingsPayload.target_level} ` +
+        `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
+        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
+        `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
+      );
+      console.log(
         `[control-center] generate payload target_level=${settingsPayload.target_level} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
         `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
@@ -963,10 +969,11 @@
       msg.innerText = matched
         ? `今日教材已成功從本地詞庫建立。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。`
         : `今日教材已建立，但內容未補滿：單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。請查看 Render Logs。`;
+      currentMaterialData = null;
       await loadMaterialByDate(result.material_key || result.date || result.material_date);
       invalidateArchiveDatesCache();
       await loadArchiveList(true);
-      await loadDashboard();
+      await loadDashboard(true);
       await loadVocabRules();
     } catch (error) {
       msg.className = "mt-3 error-text";
@@ -1040,11 +1047,12 @@
     }
   }
 
-  async function loadDashboard() {
+  async function loadDashboard(forceRefresh = false) {
     const started = performance.now();
     let data;
     try {
-      data = await apiWithTimeout("/api/dashboard/summary", 5000);
+      const url = forceRefresh ? `/api/dashboard/summary?_=${Date.now()}` : "/api/dashboard/summary";
+      data = await apiWithTimeout(url, 5000);
     } catch (error) {
       data = fallbackDashboardData("統計資料暫時無法取得。");
     }

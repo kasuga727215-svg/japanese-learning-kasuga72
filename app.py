@@ -604,11 +604,14 @@ GRAMMAR_ADJACENT_FALLBACKS = {
 SETTING_ALIASES = {
     "targetLevel": "target_level",
     "vocabCount": "vocab_count",
+    "wordCount": "vocab_count",
     "word_count": "vocab_count",
     "verbCount": "verb_count",
     "quizMcqCount": "mcq_count",
+    "choiceCount": "mcq_count",
     "choice_count": "mcq_count",
     "quizFillCount": "fill_count",
+    "fillCount": "fill_count",
     "grammarLevel": "grammar_level",
     "grammarCount": "grammar_count",
 }
@@ -812,16 +815,61 @@ def request_settings_overrides(raw):
     return overrides
 
 
-def resolve_generation_settings(posted_settings=None, persist=False):
+def trace_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def settings_trace_snapshot(mapping, settings_source=None):
+    normalized = {}
+    for key, value in (mapping or {}).items():
+        normalized[SETTING_ALIASES.get(key, key)] = value
+    snapshot = {
+        "target_level": normalized.get("target_level", ""),
+        "word_count": trace_int(normalized.get("vocab_count")),
+        "verb_count": trace_int(normalized.get("verb_count")),
+        "choice_count": trace_int(normalized.get("mcq_count")),
+        "fill_count": trace_int(normalized.get("fill_count")),
+        "grammar_level": normalized.get("grammar_level", ""),
+        "grammar_count": trace_int(normalized.get("grammar_count")),
+    }
+    if settings_source:
+        snapshot["settings_source"] = settings_source
+    return snapshot
+
+
+def build_settings_trace(frontend_payload, db_settings, resolved_settings, settings_source, selector_actual=None):
+    resolved_snapshot = settings_trace_snapshot(resolved_settings, settings_source=settings_source)
+    return {
+        "frontend_payload": settings_trace_snapshot(frontend_payload),
+        "db_settings": settings_trace_snapshot(db_settings),
+        "resolved_settings": resolved_snapshot,
+        "selector_requested": {
+            "word_count": resolved_snapshot.get("word_count"),
+            "verb_count": resolved_snapshot.get("verb_count"),
+        },
+        "selector_actual": selector_actual or {"word_count": None, "verb_count": None},
+    }
+
+
+def resolve_generation_settings_with_trace(posted_settings=None, persist=False):
     overrides = request_settings_overrides(posted_settings or {})
+    db_settings = load_settings()
     if overrides:
-        merged = load_settings()
+        merged = db_settings.copy()
         merged.update(overrides)
         settings = normalize_settings(merged)
         if persist:
             settings = save_settings_file(settings)
-        return settings, "request_payload"
-    return load_settings(), "db_settings"
+        return settings, "request_payload", db_settings
+    return db_settings, "db_settings", db_settings
+
+
+def resolve_generation_settings(posted_settings=None, persist=False):
+    settings, settings_source, _db_settings = resolve_generation_settings_with_trace(posted_settings, persist=persist)
+    return settings, settings_source
 
 
 def ensure_settings_store():
@@ -9933,7 +9981,7 @@ def generate_daily_material(
     notify_telegram=True,
     generation_source="manual_local",
 ):
-    settings, settings_source = resolve_generation_settings(posted_settings, persist=bool(posted_settings))
+    settings, settings_source, db_settings = resolve_generation_settings_with_trace(posted_settings, persist=bool(posted_settings))
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
     print(
@@ -9998,9 +10046,17 @@ def generate_daily_material(
         "verb_count_matched": actual_verbs >= requested_verbs,
         "warnings": count_warnings,
     }
+    settings_trace = build_settings_trace(
+        posted_settings or {},
+        db_settings,
+        settings,
+        settings_source,
+        selector_actual={"word_count": actual_words, "verb_count": actual_verbs},
+    )
     raw_material.setdefault("metadata", {})
     raw_material["metadata"]["settings_source"] = settings_source
     raw_material["metadata"]["count_validation"] = count_validation
+    raw_material["metadata"]["settings_trace"] = settings_trace
     print(f"[count-validation] requested_words={requested_words} actual_words={actual_words} word_count_matched={str(actual_words >= requested_words).lower()}")
     print(f"[count-validation] requested_verbs={requested_verbs} actual_verbs={actual_verbs} verb_count_matched={str(actual_verbs >= requested_verbs).lower()}")
 
@@ -10042,6 +10098,7 @@ def generate_daily_material(
         "source_summary": raw_material.get("metadata", {}).get("source_summary", {}),
         "settings_source": settings_source,
         "count_validation": count_validation,
+        "settings_trace": settings_trace,
     }
 
 
@@ -11773,7 +11830,7 @@ def api_generate():
             print(f"[local-generate] primary local generation failed; trying seed fallback; reason={e}")
             print(traceback.format_exc())
             try:
-                settings, settings_source = resolve_generation_settings(data, persist=bool(data))
+                settings, settings_source, db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
                 fallback_material = build_local_material(
                     settings,
                     force_seed=True,
@@ -11799,6 +11856,13 @@ def api_generate():
                     "verb_count_matched": actual_verbs >= requested_verbs,
                     "warnings": count_warnings,
                 }
+                settings_trace = build_settings_trace(
+                    data or {},
+                    db_settings,
+                    settings,
+                    settings_source,
+                    selector_actual={"word_count": actual_words, "verb_count": actual_verbs},
+                )
                 fallback_material.setdefault("metadata", {})
                 fallback_material["metadata"].update(
                     {
@@ -11807,6 +11871,7 @@ def api_generate():
                         "ai_used": False,
                         "settings_source": settings_source,
                         "count_validation": count_validation,
+                        "settings_trace": settings_trace,
                     }
                 )
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
@@ -11837,6 +11902,7 @@ def api_generate():
                         "ai_used": False,
                         "settings_source": settings_source,
                         "count_validation": count_validation,
+                        "settings_trace": settings_trace,
                     }
                 )
             except Exception as fallback_exc:
