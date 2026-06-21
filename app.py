@@ -132,6 +132,7 @@ _GEMINI_BILLING_STATE = {
 }
 
 LEVELS = ["N5", "N4", "N3", "N2", "N1"]
+TARGET_LEVEL_CHOICES = LEVELS + ["SNS"]
 VERB_FORM_LABELS = {
     "renyou_form": "連用形（ます形去ます）",
     "te_form": "て形",
@@ -450,6 +451,7 @@ COLUMNS = [
 
 DEFAULT_SETTINGS = {
     "target_level": "N3",
+    "target_levels": "[\"N3\"]",
     "vocab_count": "8",
     "verb_count": "4",
     "mcq_count": "5",
@@ -604,6 +606,7 @@ GRAMMAR_ADJACENT_FALLBACKS = {
 
 SETTING_ALIASES = {
     "targetLevel": "target_level",
+    "targetLevels": "target_levels",
     "vocabCount": "vocab_count",
     "wordCount": "vocab_count",
     "word_count": "vocab_count",
@@ -778,16 +781,89 @@ def invalidate_archive_dates_cache(reason=""):
         print(f"[archive-dates-cache] invalidated: {reason}")
 
 
+def normalize_target_levels(value, fallback_level=None):
+    raw_items = []
+    if isinstance(value, (list, tuple, set)):
+        raw_items = list(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if text:
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                    raw_items = parsed if isinstance(parsed, list) else []
+                except (TypeError, ValueError):
+                    raw_items = []
+            if not raw_items:
+                raw_items = re.split(r"[,，\s]+", text)
+    elif value:
+        raw_items = [value]
+
+    selected = []
+    for item in raw_items:
+        token = str(item or "").strip().upper()
+        if token in TARGET_LEVEL_CHOICES and token not in selected:
+            selected.append(token)
+
+    fallback = str(fallback_level or "").strip().upper()
+    if not selected and fallback in LEVELS:
+        selected.append(fallback)
+    if not selected:
+        selected.append("N5")
+    return selected
+
+
+def primary_target_level(target_levels, fallback_level=None):
+    for level in normalize_target_levels(target_levels, fallback_level):
+        if level in LEVELS:
+            return level
+    fallback = str(fallback_level or "").strip().upper()
+    return fallback if fallback in LEVELS else "N5"
+
+
+def target_levels_json(target_levels):
+    return json.dumps(normalize_target_levels(target_levels), ensure_ascii=False)
+
+
+def settings_target_levels(settings):
+    return normalize_target_levels((settings or {}).get("target_levels"), (settings or {}).get("target_level"))
+
+
+def target_level_rule_keys(settings):
+    keys = []
+    for level in settings_target_levels(settings):
+        if level in LEVELS:
+            keys.append(f"jlpt:{level}")
+        elif level == "SNS":
+            keys.append("category:SNS")
+    if not keys:
+        keys.append(f"jlpt:{primary_target_level([], (settings or {}).get('target_level'))}")
+    return set(keys)
+
+
 def normalize_settings(raw):
     normalized = {}
     for key, value in (raw or {}).items():
         normalized[SETTING_ALIASES.get(key, key)] = value
 
+    target_levels_provided = "target_levels" in normalized and str(normalized.get("target_levels") or "") != ""
     settings = DEFAULT_SETTINGS.copy()
-    settings.update({k: str(v) for k, v in normalized.items() if k in settings and str(v) != ""})
+    for key, value in normalized.items():
+        if key not in settings or str(value) == "":
+            continue
+        if key == "target_levels":
+            settings[key] = target_levels_json(value)
+        else:
+            settings[key] = str(value)
 
     if settings["target_level"] not in LEVELS:
         settings["target_level"] = DEFAULT_SETTINGS["target_level"]
+    selected_target_levels = normalize_target_levels(
+        settings.get("target_levels") if target_levels_provided else None,
+        settings.get("target_level"),
+    )
+    settings["target_levels"] = target_levels_json(selected_target_levels)
+    settings["target_level"] = primary_target_level(selected_target_levels, settings.get("target_level"))
     if settings["grammar_level"] not in LEVELS:
         settings["grammar_level"] = DEFAULT_SETTINGS["grammar_level"]
 
@@ -827,8 +903,10 @@ def settings_trace_snapshot(mapping, settings_source=None):
     normalized = {}
     for key, value in (mapping or {}).items():
         normalized[SETTING_ALIASES.get(key, key)] = value
+    target_levels = normalize_target_levels(normalized.get("target_levels"), normalized.get("target_level"))
     snapshot = {
-        "target_level": normalized.get("target_level", ""),
+        "target_level": primary_target_level(target_levels, normalized.get("target_level")),
+        "target_levels": target_levels,
         "word_count": trace_int(normalized.get("vocab_count")),
         "verb_count": trace_int(normalized.get("verb_count")),
         "choice_count": trace_int(normalized.get("mcq_count")),
@@ -839,6 +917,14 @@ def settings_trace_snapshot(mapping, settings_source=None):
     if settings_source:
         snapshot["settings_source"] = settings_source
     return snapshot
+
+
+def public_settings(settings):
+    data = dict(settings or {})
+    levels = settings_target_levels(data)
+    data["target_levels"] = levels
+    data["target_level"] = primary_target_level(levels, data.get("target_level"))
+    return data
 
 
 def build_settings_trace(frontend_payload, db_settings, resolved_settings, settings_source, selector_actual=None):
@@ -864,7 +950,21 @@ def resolve_generation_settings_with_trace(posted_settings=None, persist=False):
         settings = normalize_settings(merged)
         if persist:
             settings = save_settings_file(settings)
+        print(
+            "[settings-resolver] "
+            f"source=request_payload target_levels={','.join(settings_target_levels(settings))} "
+            f"target_level={settings.get('target_level')} word_count={settings.get('vocab_count')} "
+            f"verb_count={settings.get('verb_count')} grammar_level={settings.get('grammar_level')} "
+            f"grammar_count={settings.get('grammar_count')}"
+        )
         return settings, "request_payload", db_settings
+    print(
+        "[settings-resolver] "
+        f"source=db_settings target_levels={','.join(settings_target_levels(db_settings))} "
+        f"target_level={db_settings.get('target_level')} word_count={db_settings.get('vocab_count')} "
+        f"verb_count={db_settings.get('verb_count')} grammar_level={db_settings.get('grammar_level')} "
+        f"grammar_count={db_settings.get('grammar_count')}"
+    )
     return db_settings, "db_settings", db_settings
 
 
@@ -6121,7 +6221,11 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     if limit <= 0:
         return ([], stats) if return_stats else []
 
-    rules = [rule for rule in load_six_main_vocab_rules() if boolish(rule.get("enabled"))]
+    allowed_rule_keys = target_level_rule_keys(settings)
+    rules = [
+        rule for rule in load_six_main_vocab_rules()
+        if boolish(rule.get("enabled")) and rule.get("rule_key") in allowed_rule_keys
+    ]
     available_rules = []
     for rule in rules:
         rule_key = rule["rule_key"]
@@ -6131,6 +6235,11 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         else:
             stats["rule_selection"]["blocked_by_period"].append(rule_key)
     available_rules.sort(key=lambda rule: (-int(rule.get("priority", 0) or 0), SIX_MAIN_VOCAB_RULE_ORDER.index(rule["rule_key"])))
+    print(
+        "[word-distribution] "
+        f"target_levels={','.join(settings_target_levels(settings))} "
+        f"enabled_rules={','.join(rule['rule_key'] for rule in available_rules)}"
+    )
     planned_slots = allocate_vocab_slots(settings, available_rules, limit)
     stats["slot_allocation"] = dict(planned_slots)
 
@@ -6163,7 +6272,7 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         stats["rule_selection"]["selected_counts"][rule_key] = stats["rule_selection"]["selected_counts"].get(rule_key, 0) + 1
         if rule_key.startswith("jlpt:"):
             stats["selected_by_jlpt_count"] += 1
-            if item.get("jlpt_level") == settings.get("target_level"):
+            if item.get("jlpt_level") in [level for level in settings_target_levels(settings) if level in LEVELS]:
                 stats["selected_target_jlpt_count"] += 1
             else:
                 stats["selected_adjacent_jlpt_count"] += 1
@@ -8986,6 +9095,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "seed_basic_safe_pool": 0,
     }
     target_level = settings.get("target_level", "")
+    selected_target_levels = settings_target_levels(settings)
+    selected_jlpt_levels = [level for level in selected_target_levels if level in LEVELS]
 
     def add_vocab_supplement(stage_key, levels):
         nonlocal vocab, selected_keys, duplicate_filtered_count
@@ -9009,16 +9120,14 @@ def build_local_material(settings, force_seed=False, material_date=None):
         merge_vocab_selector_stats(vocab_selector_stats, supplement_stats)
         return items
 
-    if not force_seed and len(vocab) < vocab_count and target_level in LEVELS:
-        add_vocab_supplement("target_level_safe_pool", [target_level])
+    if not force_seed and len(vocab) < vocab_count and selected_jlpt_levels:
+        add_vocab_supplement("target_level_safe_pool", selected_jlpt_levels)
 
-    adjacent_levels = [level for level in JLPT_ADJACENCY.get(target_level, []) if level != target_level]
-    if not force_seed and len(vocab) < vocab_count and adjacent_levels:
-        add_vocab_supplement("adjacent_level_safe_pool", adjacent_levels)
-
-    tried_levels = {target_level, *adjacent_levels}
+    adjacent_levels = []
+    tried_levels = {*selected_jlpt_levels, target_level}
     if not force_seed and len(vocab) < vocab_count:
-        enabled_levels = [level for level in enabled_jlpt_levels_for_vocab_supplement() if level not in tried_levels]
+        allowed_supplement_levels = selected_jlpt_levels
+        enabled_levels = [level for level in allowed_supplement_levels if level not in tried_levels]
         if enabled_levels:
             add_vocab_supplement("enabled_levels_safe_pool", enabled_levels)
 
@@ -9265,6 +9374,15 @@ def build_local_material(settings, force_seed=False, material_date=None):
     metadata = {
         "generation_mode": "local",
         "selection_strategy": "rotation_until_exhausted",
+        "resolved_settings": {
+            "target_level": settings.get("target_level", ""),
+            "target_levels": selected_target_levels,
+            "word_count": vocab_count,
+            "verb_count": verb_count,
+            "grammar_level": grammar_level,
+            "grammar_count": grammar_count,
+        },
+        "target_levels": selected_target_levels,
         "cooldown_policy": {
             "days": LOCAL_SELECTION_COOLDOWN_DAYS,
             "allow_relax": LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX,
@@ -9515,6 +9633,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     return {
         "date": material_date_display(material_date or get_today_taipei_date()),
         "level": settings.get("target_level", ""),
+        "target_levels": selected_target_levels,
         "grammar_level": grammar_level,
         "vocab": vocab,
         "verbs": verbs,
@@ -10011,6 +10130,7 @@ def generate_daily_material(
     print(f"[material-generator] mode={mode} start")
     print(
         "[material-generator] requested "
+        f"target_levels={','.join(settings_target_levels(settings))} "
         f"target_level={settings.get('target_level')} "
         f"word_count={settings.get('vocab_count')} "
         f"verb_count={settings.get('verb_count')} "
@@ -11715,12 +11835,12 @@ def api_reset_vocab_rules():
 
 @app.get("/api/settings")
 def api_get_settings():
-    return jsonify(load_settings())
+    return jsonify(public_settings(load_settings()))
 
 
 @app.post("/api/settings")
 def api_save_settings():
-    return jsonify(save_settings_file(request.get_json(silent=True) or {}))
+    return jsonify(public_settings(save_settings_file(request.get_json(silent=True) or {})))
 
 
 @app.get("/api/archive-dates")

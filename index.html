@@ -402,9 +402,14 @@
       <div class="row g-4">
         <div class="col-md-4">
           <label class="form-label">目標等級</label>
-          <select id="setting-level" class="form-select">
-            <option>N5</option><option>N4</option><option>N3</option><option>N2</option><option>N1</option>
-          </select>
+          <div id="setting-target-levels" class="d-flex flex-wrap gap-2">
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N5">N5</label>
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N4">N4</label>
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N3">N3</label>
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N2">N2</label>
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N1">N1</label>
+            <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="SNS">SNS 詞類</label>
+          </div>
         </div>
         <div class="col-md-4">
           <label class="control-label">單字數量 <span class="range-value" id="vocab-value">8</span></label>
@@ -557,7 +562,7 @@
     const hasMaterial = Boolean(currentMaterialData);
     const wordCount = hasMaterial ? (currentMaterialData.vocabulary || []).length : 0;
     const verbCount = hasMaterial ? (currentMaterialData.verbs || []).length : 0;
-    const targetLevel = hasMaterial ? (currentMaterialData.targetLevel || "") : (document.getElementById("setting-level")?.value || "");
+    const targetLevel = hasMaterial ? (currentMaterialData.targetLevel || "") : (selectedTargetLevelsFromDom()[0] || "N5");
     const quizTotal = Number(document.getElementById("setting-mcq")?.value || 5) + Number(document.getElementById("setting-fill")?.value || 5);
     const days = recentSevenDaysFallback();
     if (hasMaterial) days[days.length - 1].active = days[days.length - 1].studied = true;
@@ -605,8 +610,23 @@
       .replace(/[\s　\u200b\u200c\u200d\ufeff]+/g, "");
   }
 
+  function selectedTargetLevelsFromDom() {
+    const values = Array.from(document.querySelectorAll("#setting-target-levels input[type='checkbox']:checked"))
+      .map(input => input.value)
+      .filter(Boolean);
+    return values.length ? values : ["N5"];
+  }
+
+  function setTargetLevelCheckboxes(levels) {
+    const selected = Array.isArray(levels) && levels.length ? levels : ["N5"];
+    document.querySelectorAll("#setting-target-levels input[type='checkbox']").forEach(input => {
+      input.checked = selected.includes(input.value);
+    });
+  }
+
   function collectControlCenterSettings() {
-    const targetLevel = document.getElementById("setting-level").value;
+    const targetLevels = selectedTargetLevelsFromDom();
+    const targetLevel = targetLevels.find(level => level !== "SNS") || "N5";
     const wordCount = Number(document.getElementById("setting-vocab").value);
     const verbCount = Number(document.getElementById("setting-verb").value);
     const choiceCount = Number(document.getElementById("setting-mcq").value);
@@ -615,6 +635,7 @@
     const grammarCount = Number(document.getElementById("setting-grammar").value);
     return {
       target_level: targetLevel,
+      target_levels: targetLevels,
       vocab_count: wordCount,
       word_count: wordCount,
       verb_count: verbCount,
@@ -676,7 +697,7 @@
   async function loadSettings() {
     const started = performance.now();
     const settings = await api("/api/settings");
-    document.getElementById("setting-level").value = settings.target_level;
+    setTargetLevelCheckboxes(settings.target_levels || [settings.target_level || "N5"]);
     document.getElementById("setting-vocab").value = settings.vocab_count;
     document.getElementById("setting-verb").value = settings.verb_count;
     document.getElementById("setting-mcq").value = settings.mcq_count;
@@ -946,12 +967,14 @@
       console.debug("[control-center] generate clicked settings=", settingsPayload);
       console.log(
         `[control-center] generate clicked settings target_level=${settingsPayload.target_level} ` +
+        `target_levels=${settingsPayload.target_levels.join(",")} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
         `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
         `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
       );
       console.log(
         `[control-center] generate payload target_level=${settingsPayload.target_level} ` +
+        `target_levels=${settingsPayload.target_levels.join(",")} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
         `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
         `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
