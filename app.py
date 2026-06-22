@@ -89,6 +89,7 @@ def read_int_env(name, default, min_value=None, max_value=None):
 DATABASE_FILE = os.path.join(BASE_DIR, "database.csv")
 DEFAULT_SQLITE_SETTINGS_FILE = os.path.join(BASE_DIR, "state.sqlite3")
 SQLITE_SETTINGS_FILE = os.environ.get("SQLITE_DB_PATH", "").strip() or DEFAULT_SQLITE_SETTINGS_FILE
+POSTGRES_SETTINGS_TABLE = "app_settings"
 SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 VOCABULARY_SEED_BASIC_FILE = os.path.join(BASE_DIR, "data", "vocabulary_seed_n5_n3.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
@@ -939,6 +940,28 @@ def build_settings_trace(frontend_payload, db_settings, resolved_settings, setti
         },
         "selector_actual": selector_actual or {"word_count": None, "verb_count": None},
     }
+
+
+def material_matches_generation_settings(material, settings):
+    metadata = (material or {}).get("metadata") or {}
+    resolved = metadata.get("resolved_settings") or {}
+    count_validation = metadata.get("count_validation") or {}
+    if not resolved:
+        return False
+    resolved_levels = normalize_target_levels(resolved.get("target_levels"), resolved.get("target_level"))
+    expected_levels = settings_target_levels(settings)
+    checks = {
+        "target_levels": resolved_levels == expected_levels,
+        "target_level": (resolved.get("target_level") or "") == (settings.get("target_level") or ""),
+        "word_count": trace_int(resolved.get("word_count") or count_validation.get("word_count_requested")) == trace_int(settings.get("vocab_count")),
+        "verb_count": trace_int(resolved.get("verb_count") or count_validation.get("verb_count_requested")) == trace_int(settings.get("verb_count")),
+        "grammar_level": (resolved.get("grammar_level") or "") == (settings.get("grammar_level") or ""),
+        "grammar_count": trace_int(resolved.get("grammar_count")) == trace_int(settings.get("grammar_count")),
+    }
+    if not all(checks.values()):
+        print(f"[scheduled-material-generator] existing_material_settings_mismatch checks={checks}")
+        return False
+    return True
 
 
 def resolve_generation_settings_with_trace(posted_settings=None, persist=False):
@@ -3724,7 +3747,60 @@ def load_settings():
     ensure_settings_store()
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    return normalize_settings(dict(rows))
+    sqlite_settings = normalize_settings(dict(rows))
+    postgres_settings = load_postgres_settings()
+    if postgres_settings:
+        return normalize_settings(sqlite_settings | postgres_settings)
+    return sqlite_settings
+
+
+def load_postgres_settings():
+    if not DATABASE_URL:
+        return {}
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT key, value FROM {POSTGRES_SETTINGS_TABLE}")
+                rows = cur.fetchall()
+        if rows:
+            print(f"[settings-store] loaded postgres_settings count={len(rows)}")
+        return dict(rows)
+    except Exception as exc:
+        print(f"[settings-store] postgres_settings_unavailable fallback=sqlite reason={exc}")
+        return {}
+
+
+def save_postgres_settings(settings):
+    if not DATABASE_URL:
+        return False
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {POSTGRES_SETTINGS_TABLE} (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                cur.executemany(
+                    f"""
+                    INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value, updated_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT(key) DO UPDATE SET
+                        value = EXCLUDED.value,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    [(key, str(value)) for key, value in settings.items()],
+                )
+            conn.commit()
+        print(f"[settings-store] saved postgres_settings count={len(settings)}")
+        return True
+    except Exception as exc:
+        print(f"[settings-store] postgres_settings_save_failed fallback=sqlite reason={exc}")
+        return False
 
 
 def save_settings_file(settings):
@@ -3740,6 +3816,7 @@ def save_settings_file(settings):
             list(current.items()),
         )
         conn.commit()
+    save_postgres_settings(current)
     invalidate_dashboard_cache("mistake retry")
     return current
 
@@ -10124,12 +10201,14 @@ def generate_daily_material(
     material_date=None,
     notify_telegram=True,
     generation_source="manual_local",
+    generation_trigger="manual",
 ):
     settings, settings_source, db_settings = resolve_generation_settings_with_trace(posted_settings, persist=bool(posted_settings))
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
     print(
         "[material-generator] requested "
+        f"generation_trigger={generation_trigger} "
         f"target_levels={','.join(settings_target_levels(settings))} "
         f"target_level={settings.get('target_level')} "
         f"word_count={settings.get('vocab_count')} "
@@ -10177,9 +10256,9 @@ def generate_daily_material(
     actual_verbs = len(raw_material.get("verbs") or [])
     count_warnings = []
     if actual_words < requested_words:
-        count_warnings.append("word_count_not_matched")
+        count_warnings.append("scheduled_word_count_not_matched" if generation_trigger == "cron" else "word_count_not_matched")
     if actual_verbs < requested_verbs:
-        count_warnings.append("verb_count_not_matched")
+        count_warnings.append("scheduled_verb_count_not_matched" if generation_trigger == "cron" else "verb_count_not_matched")
     count_validation = {
         "target_level_requested": settings.get("target_level", ""),
         "target_level_actual": raw_material.get("level") or settings.get("target_level", ""),
@@ -10199,7 +10278,22 @@ def generate_daily_material(
         selector_actual={"word_count": actual_words, "verb_count": actual_verbs},
     )
     raw_material.setdefault("metadata", {})
+    raw_material["metadata"]["generation_trigger"] = generation_trigger
     raw_material["metadata"]["settings_source"] = settings_source
+    raw_material["metadata"].setdefault("resolved_settings", {}).update(
+        {
+            "generation_trigger": generation_trigger,
+            "settings_source": settings_source,
+            "target_level": settings.get("target_level", ""),
+            "target_levels": settings_target_levels(settings),
+            "word_count": requested_words,
+            "verb_count": requested_verbs,
+            "choice_count": int(settings.get("mcq_count") or 0),
+            "fill_count": int(settings.get("fill_count") or 0),
+            "grammar_level": settings.get("grammar_level", ""),
+            "grammar_count": int(settings.get("grammar_count") or 0),
+        }
+    )
     raw_material["metadata"]["count_validation"] = count_validation
     raw_material["metadata"]["settings_trace"] = settings_trace
     print(f"[count-validation] requested_words={requested_words} actual_words={actual_words} word_count_matched={str(actual_words >= requested_words).lower()}")
@@ -10236,12 +10330,14 @@ def generate_daily_material(
         "material_key": save_info["material_key"],
         "version_no": save_info["version_no"],
         "generation_source": save_info["generation_source"],
+        "generation_trigger": generation_trigger,
         "telegram": telegram_status,
         "generation_mode": raw_material.get("metadata", {}).get("generation_mode", mode),
         "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
         "fallback_used": bool(raw_material.get("metadata", {}).get("fallback_used", False)),
         "source_summary": raw_material.get("metadata", {}).get("source_summary", {}),
         "settings_source": settings_source,
+        "resolved_settings": raw_material["metadata"].get("resolved_settings", {}),
         "count_validation": count_validation,
         "settings_trace": settings_trace,
     }
@@ -10251,12 +10347,36 @@ def run_daily_schedule(app_url=None, mode="local"):
     date = get_today_taipei_date()
     print(f"[daily-schedule] start date={date}")
     try:
+        schedule_settings = load_settings()
+        print(
+            "[scheduled-material-generator] db_settings "
+            f"target_level={schedule_settings.get('target_level')} "
+            f"target_levels={','.join(settings_target_levels(schedule_settings))} "
+            f"word_count={schedule_settings.get('vocab_count')} "
+            f"verb_count={schedule_settings.get('verb_count')} "
+            f"choice_count={schedule_settings.get('mcq_count')} "
+            f"fill_count={schedule_settings.get('fill_count')} "
+            f"grammar_level={schedule_settings.get('grammar_level')} "
+            f"grammar_count={schedule_settings.get('grammar_count')}"
+        )
         scheduled_key = latest_material_key_for_date(date, generation_source="scheduled")
         material = material_by_key(scheduled_key) if scheduled_key else None
         print(f"[daily-schedule] material exists={str(bool(material)).lower()} generation_source=scheduled")
+        if material and not material_matches_generation_settings(material, schedule_settings):
+            print(
+                "[scheduled-material-generator] existing scheduled material does not match current settings; "
+                f"will create new version old_material_key={material.get('material_key')}"
+            )
+            material = None
         if not material:
             print(f"[daily-schedule] generating local material date={date}")
-            result = generate_daily_material(app_url=app_url, mode=mode, material_date=date, generation_source="scheduled")
+            result = generate_daily_material(
+                app_url=app_url,
+                mode=mode,
+                material_date=date,
+                generation_source="scheduled",
+                generation_trigger="cron",
+            )
             print(f"[daily-schedule] save material success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] reload material from db success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] telegram push success date={date}")
@@ -12085,7 +12205,7 @@ def api_cron_daily_push():
     try:
         return jsonify(run_daily_schedule(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
     except Exception as e:
-        return jsonify({"ok": False, "error": "daily_schedule_failed", **material_generation_error_payload(e)}), 500
+        return jsonify({"ok": False, "error": "scheduled_generate_failed", **material_generation_error_payload(e)}), 500
 
 
 @app.post("/api/test-telegram")

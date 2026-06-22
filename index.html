@@ -23,6 +23,39 @@
     .form-control, .form-select { background: #0b0c13; border: 1px solid var(--border-color); color: var(--text-color); min-height: 44px; }
     .form-control:focus, .form-select:focus { background: #0b0c13; color: var(--text-color); border-color: var(--primary); box-shadow: 0 0 8px rgba(0,255,204,.45); }
     .form-label, .control-label { color: var(--primary); font-weight: 700; }
+    #setting-target-levels { gap: 8px 12px !important; }
+    #setting-target-levels .form-check-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 38px;
+      padding: 7px 12px;
+      color: #e6f7ff;
+      background: rgba(255,255,255,.055);
+      border: 1px solid rgba(94,234,212,.32);
+      border-radius: 999px;
+      font-weight: 800;
+      cursor: pointer;
+      user-select: none;
+    }
+    #setting-target-levels .form-check-label:has(input:checked) {
+      color: #00110d;
+      background: rgba(0,255,204,.92);
+      border-color: var(--primary);
+      box-shadow: 0 0 12px rgba(0,255,204,.35);
+    }
+    #setting-target-levels .form-check-input {
+      margin: 0 !important;
+      accent-color: var(--primary);
+      border-color: rgba(94,234,212,.75);
+    }
+    .setting-help {
+      color: #dffcff;
+      font-size: .86rem;
+      line-height: 1.55;
+      margin-top: 8px;
+      overflow-wrap: anywhere;
+    }
     .neon-btn { min-height: 44px; background: transparent; color: var(--primary); border: 1px solid var(--primary); border-radius: 5px; padding: 10px 22px; }
     .neon-btn:hover:not(:disabled) { background: var(--primary); color: #000; box-shadow: 0 0 10px var(--primary); }
     .accent-btn { color: var(--secondary); border-color: var(--secondary); }
@@ -410,6 +443,7 @@
             <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N1">N1</label>
             <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="SNS">SNS 詞類</label>
           </div>
+          <div class="setting-help">可複選 JLPT 等級與 SNS 詞類；本地教材只會從已勾選且已啟用的單字類型中抽選。文法等級在下方獨立設定。</div>
         </div>
         <div class="col-md-4">
           <label class="control-label">單字數量 <span class="range-value" id="vocab-value">8</span></label>
@@ -451,7 +485,7 @@
     </div>
     <div class="card p-4">
       <h4 class="mb-2" style="color:var(--primary);">單字出現設置</h4>
-      <p class="text-muted mb-3">可設定各類單字在本地教材中的出現週期與次數，避免某類詞彙過度出現。</p>
+      <p class="text-muted mb-3">先用出現週期判斷該類是否可進候選池，再用單份教材筆數上限控制本次最多抽幾筆。</p>
       <div class="rules-toolbar">
         <input id="vocab-rule-search" class="form-control" placeholder="搜尋 JLPT 等級或 SNS 詞類..." oninput="renderVocabRules()">
         <button class="neon-btn" onclick="saveAllVocabRules()" id="rules-save-all-btn">儲存設定</button>
