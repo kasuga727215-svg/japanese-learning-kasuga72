@@ -1,9 +1,13 @@
 import json
 import os
 import sys
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
+
+
+TRANSIENT_HTTP_STATUSES = {502, 503, 504}
 
 
 def build_cron_url():
@@ -18,25 +22,72 @@ def build_cron_url():
     return f"{app_url}/api/cron/daily-push?{urlencode(params)}"
 
 
-def main():
-    url = build_cron_url()
-    print(f"[cron-generate] calling {url.split('secret=', 1)[0]}secret=***" if "secret=" in url else f"[cron-generate] calling {url}")
+def safe_url(url):
+    return f"{url.split('secret=', 1)[0]}secret=***" if "secret=" in url else url
+
+
+def summarize_body(body):
+    text = (body or "").strip()
+    lowered = text[:300].lower()
+    if "<!doctype html" in lowered or "<html" in lowered:
+        return "Render returned an HTML error page instead of JSON."
+    return text[:1200].replace("\n", " ")
+
+
+def call_cron_endpoint(url):
+    request = Request(
+        url,
+        data=b"{}",
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "japanese-learning-cron/1.0",
+        },
+    )
     try:
-        with urlopen(url, timeout=120) as response:
+        with urlopen(request, timeout=120) as response:
             body = response.read().decode("utf-8", errors="replace")
-            status = response.status
+            return response.status, body, None
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        print(f"[cron-generate] http_error status={exc.code} body={body[:4000]}")
-        return 1
-    except URLError as exc:
-        print(f"[cron-generate] request_failed reason={exc}")
-        return 1
+        return exc.code, body, exc
+
+
+def main():
+    url = build_cron_url()
+    retries = max(1, int(os.environ.get("CRON_HTTP_RETRIES", "4") or 4))
+    retry_delay = max(1, int(os.environ.get("CRON_HTTP_RETRY_DELAY_SECONDS", "12") or 12))
+    print(f"[cron-generate] calling POST {safe_url(url)}")
+
+    body = ""
+    status = 0
+    for attempt in range(1, retries + 1):
+        try:
+            status, body, error = call_cron_endpoint(url)
+        except URLError as exc:
+            print(f"[cron-generate] request_failed attempt={attempt}/{retries} reason={exc}")
+            if attempt < retries:
+                time.sleep(retry_delay)
+                continue
+            return 1
+
+        if status in TRANSIENT_HTTP_STATUSES and attempt < retries:
+            print(
+                "[cron-generate] transient_upstream_error "
+                f"code={status} attempt={attempt}/{retries} body_summary={summarize_body(body)}"
+            )
+            time.sleep(retry_delay)
+            continue
+        if error:
+            print(f"[cron-generate] api_error code={status} body_summary={summarize_body(body)}")
+            return 1
+        break
 
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        print(f"[cron-generate] non_json_response status={status} body={body[:4000]}")
+        print(f"[cron-generate] non_json_response code={status} body_summary={summarize_body(body)}")
         return 1
 
     print(json.dumps(payload, ensure_ascii=False))

@@ -12215,7 +12215,7 @@ def api_generate():
         return jsonify(payload), 200 if mode == "local" else 500
 
 
-@app.get("/api/cron/daily-push")
+@app.route("/api/cron/daily-push", methods=["GET", "POST"])
 def api_cron_daily_push():
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
         return jsonify({"ok": False, "error": "unauthorized", "message": "unauthorized"}), 401
