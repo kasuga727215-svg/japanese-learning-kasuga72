@@ -27,7 +27,7 @@ def main():
             status = response.status
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
-        print(f"[cron-generate] http_error status={exc.code} body={body[:1000]}")
+        print(f"[cron-generate] http_error status={exc.code} body={body[:4000]}")
         return 1
     except URLError as exc:
         print(f"[cron-generate] request_failed reason={exc}")
@@ -36,7 +36,7 @@ def main():
     try:
         payload = json.loads(body)
     except json.JSONDecodeError:
-        print(f"[cron-generate] non_json_response status={status} body={body[:1000]}")
+        print(f"[cron-generate] non_json_response status={status} body={body[:4000]}")
         return 1
 
     print(json.dumps(payload, ensure_ascii=False))

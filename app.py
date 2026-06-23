@@ -10370,13 +10370,30 @@ def run_daily_schedule(app_url=None, mode="local"):
             material = None
         if not material:
             print(f"[daily-schedule] generating local material date={date}")
-            result = generate_daily_material(
-                app_url=app_url,
-                mode=mode,
-                material_date=date,
-                generation_source="scheduled",
-                generation_trigger="cron",
-            )
+            try:
+                result = generate_daily_material(
+                    app_url=app_url,
+                    mode=mode,
+                    material_date=date,
+                    generation_source="scheduled",
+                    generation_trigger="cron",
+                )
+            except Exception as generation_exc:
+                print(
+                    "[scheduled-material-generator] primary generation failed; "
+                    f"trying seed fallback reason={generation_exc}"
+                )
+                print(traceback.format_exc())
+                result = generate_daily_material(
+                    use_sample=True,
+                    app_url=app_url,
+                    mode="local",
+                    material_date=date,
+                    generation_source="scheduled",
+                    generation_trigger="cron",
+                )
+                result["fallback_used"] = True
+                result["primary_error"] = str(generation_exc)
             print(f"[daily-schedule] save material success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] reload material from db success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] telegram push success date={date}")
@@ -12205,7 +12222,19 @@ def api_cron_daily_push():
     try:
         return jsonify(run_daily_schedule(app_url=APP_URL, mode=request.args.get("mode", "local"))), 200
     except Exception as e:
-        return jsonify({"ok": False, "error": "scheduled_generate_failed", **material_generation_error_payload(e)}), 500
+        payload = material_generation_error_payload(e)
+        payload.update(
+            {
+                "ok": False,
+                "error": "scheduled_generate_failed",
+                "debug": {
+                    "stage": "api_cron_daily_push",
+                    "reason": str(e),
+                    "exception_type": e.__class__.__name__,
+                },
+            }
+        )
+        return jsonify(payload), 500
 
 
 @app.post("/api/test-telegram")
