@@ -5554,6 +5554,98 @@ def fetch_vocabulary_pool_rows():
         return []
 
 
+VERB_POOL_POS_VALUES = {
+    "verb",
+    "verb_godan",
+    "verb_ichidan",
+    "godan",
+    "ichidan",
+    "suru_verb",
+    "kuru_verb",
+    "動詞",
+    "動詞-自立",
+    "五段動詞",
+    "一段動詞",
+    "不規則動詞",
+}
+VERB_POOL_POS_LIKE = ("動詞", "五段", "一段")
+VERB_POOL_BLOCKED_CATEGORIES = {
+    "business",
+    "advanced",
+    "generated_compound",
+    "unknown",
+    "named_entity",
+    "sensitive",
+    "typo_or_noise",
+}
+VERB_POOL_BLOCKED_SOURCES = {
+    "synthetic",
+    "seed_advanced",
+    "seed_advanced_synthetic",
+    "auto_generated",
+    "generated",
+}
+
+
+def fetch_vocabulary_pool_verb_rows(limit=300):
+    limit = max(1, min(int(limit or 300), 500))
+    pos_values = sorted(VERB_POOL_POS_VALUES)
+    blocked_categories = sorted(VERB_POOL_BLOCKED_CATEGORIES)
+    blocked_sources = sorted(VERB_POOL_BLOCKED_SOURCES)
+    pos_like_clauses = ["part_of_speech LIKE ?" for _ in VERB_POOL_POS_LIKE]
+    if DATABASE_URL:
+        pos_like_clauses = [clause.replace("?", "%s") for clause in pos_like_clauses]
+    where = [
+        "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1",
+        "COALESCE(NULLIF(meaning_zh, ''), '') <> ''",
+        "COALESCE(NULLIF(reading_hiragana, ''), '') <> ''",
+        "LOWER(COALESCE(quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
+        f"LOWER(COALESCE(NULLIF(category, ''), 'general')) NOT IN ({sql_placeholders(len(blocked_categories))})",
+        f"LOWER(COALESCE(NULLIF(source, ''), 'manual')) NOT IN ({sql_placeholders(len(blocked_sources))})",
+        "("
+        f"LOWER(COALESCE(NULLIF(part_of_speech, ''), '')) IN ({sql_placeholders(len(pos_values))}) "
+        f"OR {' OR '.join(pos_like_clauses)} "
+        "OR COALESCE(verb_group, 0) IN (1, 2, 3) "
+        "OR LOWER(COALESCE(NULLIF(conjugation_type, ''), '')) LIKE '%verb%'"
+        ")",
+    ]
+    params = []
+    params.extend(blocked_categories)
+    params.extend(blocked_sources)
+    params.extend([value.lower() for value in pos_values])
+    params.extend([f"%{marker}%" for marker in VERB_POOL_POS_LIKE])
+    sql = f"""
+        SELECT *
+        FROM vocabulary_pool
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(used_in_material_count, 0) ASC,
+                 {'last_used_at ASC NULLS FIRST' if DATABASE_URL else "COALESCE(last_used_at, '') ASC"},
+                 RANDOM()
+        LIMIT {'%s' if DATABASE_URL else '?'}
+    """
+    params.append(limit)
+    try:
+        if DATABASE_URL:
+            if not vocab_pool_db_query_allowed():
+                return []
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    columns = [desc[0] for desc in cur.description]
+                    return [dict(zip(columns, row)) for row in cur.fetchall()]
+        ensure_settings_store()
+        with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(sql, params).fetchall()
+            return [dict(row) for row in rows]
+    except Exception as e:
+        db_type = "postgres" if DATABASE_URL else "sqlite"
+        print(f"[local-generate] db_verb_pool_fetch_failed db={db_type}; reason={e}")
+        if DATABASE_URL:
+            mark_vocab_pool_db_unavailable(e)
+        return []
+
+
 def mark_vocabulary_pool_used(items):
     ids = [item.get("_pool_id") for item in items if item.get("_pool_id")]
     if not ids:
@@ -7368,7 +7460,7 @@ def material_verbs_from_vocabulary_pool(settings, limit, exclude_keys=None, mate
     }
     if limit <= 0:
         return [], stats
-    rows = fetch_vocabulary_pool_rows()
+    rows = fetch_vocabulary_pool_verb_rows(limit=max(limit * 20, 120))
     if not rows:
         return [], stats
 
@@ -9114,6 +9206,7 @@ def select_fixed_quota_grammar_points(material_date=None):
     selected_from_unused_count = 0
     selected_from_oldest_used_count = 0
     cooldown_relaxed_levels = []
+    pool_total_by_level = {}
 
     for level, requested_count in quota.items():
         if requested_count <= 0:
@@ -9136,6 +9229,7 @@ def select_fixed_quota_grammar_points(material_date=None):
         level_stats[level] = stats
         grammar_selection = stats.get("grammar_selection") or {}
         duplicate_filter = stats.get("grammar_duplicate_filter") or {}
+        pool_total_by_level[level] = int(grammar_selection.get("pool_total_count") or 0)
         recent_duplicate_rejected_count += int(grammar_selection.get("recent_duplicate_rejected_count") or 0)
         recent_used_count += int(duplicate_filter.get("recent_used_count") or 0)
         selected_from_unused_count += int(grammar_selection.get("selected_from_unused_count") or 0)
@@ -9156,32 +9250,11 @@ def select_fixed_quota_grammar_points(material_date=None):
             selected_keys.add(key)
             selected_counts[level] += 1
 
-        if selected_counts[level] < requested_count:
-            try:
-                relaxed_items, relaxed_stats = select_grammar_points(
-                    level,
-                    requested_count,
-                    material_date=material_date,
-                    allow_level_fallback=False,
-                    ignore_recent=True,
-                )
-                level_stats[f"{level}:cooldown_relaxed"] = relaxed_stats
-                for item in relaxed_items:
-                    if selected_counts[level] >= requested_count:
-                        break
-                    key = grammar_item_dedupe_key(item)
-                    if not key or key in selected_keys:
-                        continue
-                    selected.append(item)
-                    selected_keys.add(key)
-                    selected_counts[level] += 1
-                if selected_counts[level] >= requested_count:
-                    cooldown_relaxed_levels.append(level)
-                    warning = f"grammar_{level}_cooldown_relaxed"
-                    if warning not in warnings:
-                        warnings.append(warning)
-            except Exception as exc:
-                print(f"[grammar-selector] fixed quota relaxed level={level} failed; reason={exc}")
+        if pool_total_by_level[level] <= 0:
+            warning = f"grammar_{level}_pool_empty"
+            if warning not in warnings:
+                warnings.append(warning)
+            continue
 
         if selected_counts[level] < requested_count:
             warning = f"insufficient_grammar_{level}_quota"
@@ -9205,6 +9278,7 @@ def select_fixed_quota_grammar_points(material_date=None):
         "grammar_selected_counts": selected_counts,
         "grammar_total_target": total_target,
         "grammar_total_actual": total_actual,
+        "grammar_pool_total_by_level": pool_total_by_level,
         "grammar_fallback_warnings": warnings,
         "grammar_selection": {
             "strategy": "fixed_quota_rotation",
@@ -9214,6 +9288,7 @@ def select_fixed_quota_grammar_points(material_date=None):
             "grammar_selected_counts": selected_counts,
             "grammar_total_target": total_target,
             "grammar_total_actual": total_actual,
+            "level_pool_counts": pool_total_by_level,
             "grammar_fallback_warnings": warnings,
             "cooldown_relaxed_levels": cooldown_relaxed_levels,
             "source_counts": source_counts,
@@ -9307,11 +9382,17 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "target_level_safe_pool": 0,
         "adjacent_level_safe_pool": 0,
         "enabled_levels_safe_pool": 0,
+        "reallocation_safe_pool": 0,
         "seed_basic_safe_pool": 0,
     }
     target_level = settings.get("target_level", "")
     selected_target_levels = settings_target_levels(settings)
     selected_jlpt_levels = [level for level in selected_target_levels if level in LEVELS]
+    word_unfilled_slots = max(0, vocab_count - len(vocab))
+    word_reallocated_slots = 0
+    word_fallback_used = False
+    word_fallback_reason = ""
+    word_warnings = []
 
     def add_vocab_supplement(stage_key, levels):
         nonlocal vocab, selected_keys, duplicate_filtered_count
@@ -9335,25 +9416,28 @@ def build_local_material(settings, force_seed=False, material_date=None):
         merge_vocab_selector_stats(vocab_selector_stats, supplement_stats)
         return items
 
-    if not force_seed and len(vocab) < vocab_count and selected_jlpt_levels:
-        add_vocab_supplement("target_level_safe_pool", selected_jlpt_levels)
+    def one_time_reallocation_levels():
+        ordered = []
+        for level in selected_jlpt_levels + [target_level] + ["N5", "N4", "N3"] + enabled_jlpt_levels_for_vocab_supplement():
+            if level in LEVELS and level not in ordered:
+                ordered.append(level)
+        return ordered
 
-    adjacent_levels = []
-    tried_levels = {*selected_jlpt_levels, target_level}
     if not force_seed and len(vocab) < vocab_count:
-        allowed_supplement_levels = selected_jlpt_levels
-        enabled_levels = [level for level in allowed_supplement_levels if level not in tried_levels]
-        if enabled_levels:
-            add_vocab_supplement("enabled_levels_safe_pool", enabled_levels)
+        before_reallocation = len(vocab)
+        add_vocab_supplement("reallocation_safe_pool", one_time_reallocation_levels())
+        word_reallocated_slots += max(0, len(vocab) - before_reallocation)
 
     vocab_seed_fallback_count = 0
     if len(vocab) < vocab_count:
+        before_seed_reallocation = len(vocab)
         seed_items = material_seed_vocab(settings, vocab_count - len(vocab), exclude_keys=selected_keys, material_date=material_date or get_today_taipei_date())
         seed_items, duplicates, selected_keys = dedupe_vocab_items(seed_items, selected_keys)
         duplicate_filtered_count += duplicates
         vocab.extend(seed_items)
         vocab_seed_fallback_count = len(seed_items)
         word_stage_counts["seed_basic_safe_pool"] += len(seed_items)
+        word_reallocated_slots += max(0, len(vocab) - before_seed_reallocation)
         vocab_selector_stats["selected_from_seed_fallback_count"] = vocab_seed_fallback_count
         seed_word_usage_stats = get_selection_usage_stats("word")
         for item in seed_items:
@@ -9367,6 +9451,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
                 )
         if seed_items:
             vocab_selector_stats["seed_fallback_used"] = True
+            word_fallback_used = True
+            word_fallback_reason = "clean_seed_basic_safe_pool"
             if not vocab_selector_stats.get("db_pool_used"):
                 generation_warnings.append("vocabulary_pool_unavailable_used_seed_fallback")
         vocab_selector_stats.setdefault("rule_selection", {"available_rules": [], "blocked_by_period": [], "selected_counts": {}})
@@ -9381,6 +9467,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
                 vocab_selector_stats["selected_rule_counts"][rule_key] = vocab_selector_stats["selected_rule_counts"].get(rule_key, 0) + 1
         source_counts["seed"] += len(seed_items)
         seed_used = bool(seed_items)
+    if len(vocab) < vocab_count:
+        word_warnings.append("insufficient_words_after_one_time_reallocation")
+        for warning in word_warnings:
+            if warning not in generation_warnings:
+                generation_warnings.append(warning)
     vocab = vocab[:vocab_count]
     selected_normalized_keys = [item_normalized_key(item) for item in vocab if item_normalized_key(item)]
     category_counts = Counter(vocab_category_group(item) for item in vocab)
@@ -9773,6 +9864,51 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "seed_used": seed_used,
         "generated_at": utc_now_iso(),
     }
+    metadata.update(
+        {
+            "word_requested_count": vocab_count,
+            "word_selected_count": len(vocab),
+            "word_unfilled_slots": word_unfilled_slots,
+            "word_reallocated_slots": word_reallocated_slots,
+            "word_fallback_used": word_fallback_used,
+            "word_fallback_reason": word_fallback_reason,
+            "word_warnings": word_warnings,
+            "verb_requested_count": verb_count,
+            "verb_selected_count": len(verbs),
+            "verb_clean_pool_count": verb_eligible_pool_count,
+            "verb_seed_fallback_used": bool(verb_source_summary.get("seed_fallback", 0)),
+            "verb_fallback_source": "seed_basic_verb_pool" if verb_source_summary.get("seed_fallback", 0) else "",
+            "verb_fake_suru_rejected_count": rejected_fake_suru_count,
+            "verb_warnings": ["insufficient_verbs_after_safe_fallback"] if len(verbs) < verb_count else [],
+            "grammar_pool_total_by_level": grammar_stats.get("grammar_pool_total_by_level", {}),
+            "pool_diagnostics": {
+                "word": {
+                    "requested": vocab_count,
+                    "selected": len(vocab),
+                    "unfilled_slots": word_unfilled_slots,
+                    "reallocated_slots": word_reallocated_slots,
+                    "fallback_used": word_fallback_used,
+                    "fallback_reason": word_fallback_reason,
+                    "warnings": list(word_warnings),
+                },
+                "verb": {
+                    "requested": verb_count,
+                    "selected": len(verbs),
+                    "clean_pool_count": verb_eligible_pool_count,
+                    "fake_suru_rejected_count": rejected_fake_suru_count,
+                    "seed_fallback_used": bool(verb_source_summary.get("seed_fallback", 0)),
+                    "fallback_source": "seed_basic_verb_pool" if verb_source_summary.get("seed_fallback", 0) else "",
+                    "warnings": ["insufficient_verbs_after_safe_fallback"] if len(verbs) < verb_count else [],
+                },
+                "grammar": {
+                    "quota": grammar_stats.get("grammar_quota", grammar_quota),
+                    "pool_total_by_level": grammar_stats.get("grammar_pool_total_by_level", {}),
+                    "selected_count_by_level": grammar_stats.get("grammar_selected_counts", {}),
+                    "fallback_warnings": grammar_stats.get("grammar_fallback_warnings", []),
+                },
+            },
+        }
+    )
     metadata["generation_elapsed_ms"] = round((time.perf_counter() - material_started) * 1000)
     print(
         "[material-generator] local sources "
@@ -10502,6 +10638,7 @@ def generate_daily_material(
         "resolved_settings": raw_material["metadata"].get("resolved_settings", {}),
         "count_validation": count_validation,
         "settings_trace": settings_trace,
+        "pool_diagnostics": raw_material["metadata"].get("pool_diagnostics", {}),
     }
 
 
@@ -12316,6 +12453,7 @@ def api_generate():
                         "settings_source": settings_source,
                         "count_validation": count_validation,
                         "settings_trace": settings_trace,
+                        "pool_diagnostics": fallback_material.get("metadata", {}).get("pool_diagnostics", {}),
                     }
                 )
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
