@@ -461,15 +461,9 @@
           <label class="control-label">填充題數量 <span class="range-value" id="fill-value">5</span></label>
           <input type="range" id="setting-fill" class="form-range" min="0" max="30" value="5" oninput="syncRangeLabels()">
         </div>
-        <div class="col-md-6">
-          <label class="form-label">文法等級</label>
-          <select id="setting-grammar-level" class="form-select">
-            <option>N5</option><option>N4</option><option>N3</option><option>N2</option><option>N1</option>
-          </select>
-        </div>
-        <div class="col-md-6">
-          <label class="control-label">文法數量 <span class="range-value" id="grammar-value">3</span></label>
-          <input type="range" id="setting-grammar" class="form-range" min="0" max="10" value="3" oninput="syncRangeLabels()">
+        <div class="col-12">
+          <label class="form-label">每日文法固定抽選</label>
+          <div class="setting-help">N1、N2、N3 各 1 個；N4、N5 各 2 個。總計最多 7 個，題庫不足時會自動略過不足等級。</div>
         </div>
       </div>
       <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
@@ -594,9 +588,12 @@
 
   function fallbackDashboardData(warning = "") {
     const hasMaterial = Boolean(currentMaterialData);
-    const wordCount = hasMaterial ? (currentMaterialData.vocabulary || []).length : 0;
-    const verbCount = hasMaterial ? (currentMaterialData.verbs || []).length : 0;
-    const targetLevel = hasMaterial ? (currentMaterialData.targetLevel || "") : (selectedTargetLevelsFromDom()[0] || "N5");
+    const materialMeta = hasMaterial ? (currentMaterialData.metadata || {}) : {};
+    const materialResolved = currentMaterialData?.resolved_settings || materialMeta.resolved_settings || {};
+    const materialValidation = currentMaterialData?.count_validation || materialMeta.count_validation || {};
+    const wordCount = hasMaterial ? (materialValidation.word_count_actual ?? (currentMaterialData.vocabulary || []).length) : 0;
+    const verbCount = hasMaterial ? (materialValidation.verb_count_actual ?? (currentMaterialData.verbs || []).length) : 0;
+    const targetLevel = hasMaterial ? (materialResolved.target_level || currentMaterialData.targetLevel || "") : (selectedTargetLevelsFromDom()[0] || "N5");
     const quizTotal = Number(document.getElementById("setting-mcq")?.value || 5) + Number(document.getElementById("setting-fill")?.value || 5);
     const days = recentSevenDaysFallback();
     if (hasMaterial) days[days.length - 1].active = days[days.length - 1].studied = true;
@@ -616,7 +613,9 @@
         date: hasMaterial ? currentMaterialData.date : todayDisplay(),
         target_level: targetLevel,
         word_count: wordCount,
-        verb_count: verbCount
+        verb_count: verbCount,
+        resolved_settings: materialResolved,
+        count_validation: materialValidation
       },
       quiz: { completed: 0, total: quizTotal, accuracy_text: "尚無紀錄" },
       learning_streak: { active_days_last_7: hasMaterial ? 1 : 0, days },
@@ -665,8 +664,6 @@
     const verbCount = Number(document.getElementById("setting-verb").value);
     const choiceCount = Number(document.getElementById("setting-mcq").value);
     const fillCount = Number(document.getElementById("setting-fill").value);
-    const grammarLevel = document.getElementById("setting-grammar-level").value;
-    const grammarCount = Number(document.getElementById("setting-grammar").value);
     return {
       target_level: targetLevel,
       target_levels: targetLevels,
@@ -675,9 +672,7 @@
       verb_count: verbCount,
       mcq_count: choiceCount,
       choice_count: choiceCount,
-      fill_count: fillCount,
-      grammar_level: grammarLevel,
-      grammar_count: grammarCount
+      fill_count: fillCount
     };
   }
 
@@ -690,7 +685,6 @@
     document.getElementById("verb-value").innerText = document.getElementById("setting-verb").value;
     document.getElementById("mcq-value").innerText = document.getElementById("setting-mcq").value;
     document.getElementById("fill-value").innerText = document.getElementById("setting-fill").value;
-    document.getElementById("grammar-value").innerText = document.getElementById("setting-grammar").value;
   }
 
   function perfLog(label, startedAt) {
@@ -736,8 +730,6 @@
     document.getElementById("setting-verb").value = settings.verb_count;
     document.getElementById("setting-mcq").value = settings.mcq_count;
     document.getElementById("setting-fill").value = settings.fill_count;
-    document.getElementById("setting-grammar-level").value = settings.grammar_level || "N5";
-    document.getElementById("setting-grammar").value = settings.grammar_count || 3;
     syncRangeLabels();
     perfLog("settings", started);
   }
@@ -1003,15 +995,13 @@
         `[control-center] generate clicked settings target_level=${settingsPayload.target_level} ` +
         `target_levels=${settingsPayload.target_levels.join(",")} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
-        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
-        `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
+        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count}`
       );
       console.log(
         `[control-center] generate payload target_level=${settingsPayload.target_level} ` +
         `target_levels=${settingsPayload.target_levels.join(",")} ` +
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
-        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count} ` +
-        `grammar_level=${settingsPayload.grammar_level} grammar_count=${settingsPayload.grammar_count}`
+        `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count}`
       );
       await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
       const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
@@ -1311,8 +1301,10 @@
       </tr>`).join("");
     const grammar = data.grammar || {};
     const grammarPoints = Array.isArray(data.grammar_points) ? data.grammar_points : [];
+    const grammarMode = data.metadata?.grammar_mode || data.metadata?.resolved_settings?.grammar_mode || "";
     const grammarLevel = data.grammarLevel || data.metadata?.grammar_level || "";
-    document.getElementById("grammar-title").innerText = `${grammarLevel || data.targetLevel || ""} 今日文法`;
+    const grammarLabel = grammarMode === "fixed_quota" ? "每日固定文法" : (grammarLevel || data.targetLevel || "");
+    document.getElementById("grammar-title").innerText = `${grammarLabel} 今日文法`;
     document.getElementById("grammar-exp").innerText = grammarPoints.length
       ? (grammar.exp || "今日文法由本地題庫抽取，不消耗 Gemini API 額度。")
       : "今日尚未建立文法說明。";

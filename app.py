@@ -596,6 +596,8 @@ GRAMMAR_LEVEL_FALLBACKS = {
     "N1": ["N1", "N2", "N3"],
 }
 DEFAULT_GRAMMAR_COUNT_BY_LEVEL = {"N5": 3, "N4": 2, "N3": 2, "N2": 1, "N1": 1}
+LOCAL_FIXED_GRAMMAR_QUOTA = {"N1": 1, "N2": 1, "N3": 1, "N4": 2, "N5": 2}
+LOCAL_FIXED_GRAMMAR_TOTAL = sum(LOCAL_FIXED_GRAMMAR_QUOTA.values())
 GRAMMAR_ADJACENT_FALLBACKS = {
     "N5": ["N5", "N4"],
     "N4": ["N4", "N5"],
@@ -8871,7 +8873,7 @@ def record_grammar_selection(grammar_items, material_date, material_key=None, ma
         conn.commit()
 
 
-def select_grammar_points(grammar_level, grammar_count, material_date=None):
+def select_grammar_points(grammar_level, grammar_count, material_date=None, allow_level_fallback=True, ignore_recent=False):
     selector_started = time.perf_counter()
     grammar_level = grammar_level if grammar_level in LEVELS else "N5"
     try:
@@ -8899,8 +8901,8 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
     selected_keys = set()
     warnings = []
     material_date_value = material_date or get_today_taipei_date()
-    levels = grammar_fallback_levels(grammar_level)
-    recent_keys = get_recent_used_grammar_keys(material_date_value, days=LOCAL_GRAMMAR_COOLDOWN_DAYS)
+    levels = grammar_fallback_levels(grammar_level) if allow_level_fallback else [grammar_level]
+    recent_keys = set() if ignore_recent else get_recent_used_grammar_keys(material_date_value, days=LOCAL_GRAMMAR_COOLDOWN_DAYS)
     recent_duplicate_rejected_count = 0
     selected_from_unused_count = 0
     selected_from_oldest_used_count = 0
@@ -9098,14 +9100,150 @@ def select_grammar_points(grammar_level, grammar_count, material_date=None):
         }
 
 
+def select_fixed_quota_grammar_points(material_date=None):
+    selector_started = time.perf_counter()
+    quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    selected = []
+    selected_keys = set()
+    selected_counts = {level: 0 for level in quota}
+    warnings = []
+    level_stats = {}
+    source_counts = {}
+    recent_duplicate_rejected_count = 0
+    recent_used_count = 0
+    selected_from_unused_count = 0
+    selected_from_oldest_used_count = 0
+    cooldown_relaxed_levels = []
+
+    for level, requested_count in quota.items():
+        if requested_count <= 0:
+            continue
+        try:
+            level_items, stats = select_grammar_points(
+                level,
+                requested_count,
+                material_date=material_date,
+                allow_level_fallback=False,
+            )
+        except Exception as exc:
+            print(f"[grammar-selector] fixed quota level={level} failed; reason={exc}")
+            level_items, stats = [], {
+                "grammar_warnings": [f"grammar_level_{level}_failed"],
+                "grammar_selection": {"selected_count": 0},
+                "grammar_duplicate_filter": {},
+            }
+
+        level_stats[level] = stats
+        grammar_selection = stats.get("grammar_selection") or {}
+        duplicate_filter = stats.get("grammar_duplicate_filter") or {}
+        recent_duplicate_rejected_count += int(grammar_selection.get("recent_duplicate_rejected_count") or 0)
+        recent_used_count += int(duplicate_filter.get("recent_used_count") or 0)
+        selected_from_unused_count += int(grammar_selection.get("selected_from_unused_count") or 0)
+        selected_from_oldest_used_count += int(grammar_selection.get("selected_from_oldest_used_count") or 0)
+        for source, count in (grammar_selection.get("source_counts") or {}).items():
+            source_counts[source] = source_counts.get(source, 0) + int(count or 0)
+        for warning in stats.get("grammar_warnings") or []:
+            if warning and warning not in warnings:
+                warnings.append(warning)
+
+        for item in level_items:
+            if selected_counts[level] >= requested_count:
+                break
+            key = grammar_item_dedupe_key(item)
+            if not key or key in selected_keys:
+                continue
+            selected.append(item)
+            selected_keys.add(key)
+            selected_counts[level] += 1
+
+        if selected_counts[level] < requested_count:
+            try:
+                relaxed_items, relaxed_stats = select_grammar_points(
+                    level,
+                    requested_count,
+                    material_date=material_date,
+                    allow_level_fallback=False,
+                    ignore_recent=True,
+                )
+                level_stats[f"{level}:cooldown_relaxed"] = relaxed_stats
+                for item in relaxed_items:
+                    if selected_counts[level] >= requested_count:
+                        break
+                    key = grammar_item_dedupe_key(item)
+                    if not key or key in selected_keys:
+                        continue
+                    selected.append(item)
+                    selected_keys.add(key)
+                    selected_counts[level] += 1
+                if selected_counts[level] >= requested_count:
+                    cooldown_relaxed_levels.append(level)
+                    warning = f"grammar_{level}_cooldown_relaxed"
+                    if warning not in warnings:
+                        warnings.append(warning)
+            except Exception as exc:
+                print(f"[grammar-selector] fixed quota relaxed level={level} failed; reason={exc}")
+
+        if selected_counts[level] < requested_count:
+            warning = f"insufficient_grammar_{level}_quota"
+            if warning not in warnings:
+                warnings.append(warning)
+
+    total_target = sum(quota.values())
+    total_actual = len(selected)
+    selected_key_list = [grammar_item_dedupe_key(item) for item in selected if grammar_item_dedupe_key(item)]
+    elapsed_ms = round((time.perf_counter() - selector_started) * 1000)
+    print(
+        "[grammar-selector] strategy=fixed_quota "
+        f"quota={quota} selected_counts={selected_counts} "
+        f"total_actual={total_actual} warnings={warnings} elapsed_ms={elapsed_ms}"
+    )
+    return selected, {
+        "grammar_pool_empty": not bool(selected),
+        "grammar_fallback_used": bool(warnings),
+        "grammar_warnings": warnings,
+        "grammar_quota": quota,
+        "grammar_selected_counts": selected_counts,
+        "grammar_total_target": total_target,
+        "grammar_total_actual": total_actual,
+        "grammar_fallback_warnings": warnings,
+        "grammar_selection": {
+            "strategy": "fixed_quota_rotation",
+            "requested_count": total_target,
+            "selected_count": total_actual,
+            "grammar_quota": quota,
+            "grammar_selected_counts": selected_counts,
+            "grammar_total_target": total_target,
+            "grammar_total_actual": total_actual,
+            "grammar_fallback_warnings": warnings,
+            "cooldown_relaxed_levels": cooldown_relaxed_levels,
+            "source_counts": source_counts,
+            "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
+            "cooldown_days_requested": LOCAL_GRAMMAR_COOLDOWN_DAYS,
+            "cooldown_days_used": LOCAL_GRAMMAR_COOLDOWN_DAYS,
+            "selected_grammar_keys": selected_key_list,
+            "level_stats": level_stats,
+            "warnings": warnings,
+        },
+        "grammar_duplicate_filter": {
+            "cooldown_days_requested": LOCAL_GRAMMAR_COOLDOWN_DAYS,
+            "cooldown_days_used": 0 if cooldown_relaxed_levels else LOCAL_GRAMMAR_COOLDOWN_DAYS,
+            "recent_duplicate_rejected_count": recent_duplicate_rejected_count,
+            "recent_used_count": recent_used_count,
+            "selected_count": total_actual,
+            "insufficient_unique": total_actual < total_target,
+        },
+    }
+
+
 def build_local_material(settings, force_seed=False, material_date=None):
     material_started = time.perf_counter()
     settings = normalize_settings(settings)
     safe_mode = False
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
-    grammar_level = settings.get("grammar_level", "N5") if settings.get("grammar_level") in LEVELS else "N5"
-    grammar_count = int(settings.get("grammar_count") or default_grammar_count(grammar_level))
+    grammar_level = "fixed_quota"
+    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_count = LOCAL_FIXED_GRAMMAR_TOTAL
     source_counts = {"vocabulary": 0, "slang": 0, "wrong": 0, "seed": 0}
     vocab_selector_stats = {
         "selection_strategy": "rotation_until_exhausted",
@@ -9420,7 +9558,7 @@ def build_local_material(settings, force_seed=False, material_date=None):
     wrong_items = due_wrong_answer_summary()
     source_counts["wrong"] = len(wrong_items)
     quiz = build_local_quiz(vocab, verbs, settings)
-    grammar_points, grammar_stats = select_grammar_points(grammar_level, grammar_count, material_date or get_today_taipei_date())
+    grammar_points, grammar_stats = select_fixed_quota_grammar_points(material_date or get_today_taipei_date())
     grammar_examples = [
         {"jp": item.get("example_japanese", ""), "cn": item.get("example_zh", "")}
         for item in grammar_points[:2]
@@ -9458,6 +9596,9 @@ def build_local_material(settings, force_seed=False, material_date=None):
             "verb_count": verb_count,
             "grammar_level": grammar_level,
             "grammar_count": grammar_count,
+            "grammar_mode": "fixed_quota",
+            "grammar_quota": grammar_quota,
+            "grammar_total_target": grammar_count,
         },
         "target_levels": selected_target_levels,
         "cooldown_policy": {
@@ -9617,6 +9758,12 @@ def build_local_material(settings, force_seed=False, material_date=None):
         "quiz": quiz,
         "grammar_count": len(grammar_points),
         "grammar_level": grammar_level,
+        "grammar_mode": "fixed_quota",
+        "grammar_quota": grammar_stats.get("grammar_quota", grammar_quota),
+        "grammar_selected_counts": grammar_stats.get("grammar_selected_counts", {}),
+        "grammar_total_target": grammar_stats.get("grammar_total_target", grammar_count),
+        "grammar_total_actual": grammar_stats.get("grammar_total_actual", len(grammar_points)),
+        "grammar_fallback_warnings": grammar_stats.get("grammar_fallback_warnings", []),
         "grammar_keys": [item.get("grammar_key", "") for item in grammar_points if item.get("grammar_key")],
         "grammar_fallback_used": bool(grammar_stats.get("grammar_fallback_used")),
         "grammar_warnings": grammar_stats.get("grammar_warnings", []),
@@ -10071,6 +10218,9 @@ def material_from_rows(rows, target_date=None):
         payload_verbs = material_payload.get("verbs") or []
         if payload_verbs:
             verbs = [normalize_material_verb_schema(item) for item in payload_verbs]
+    resolved_settings = metadata.get("resolved_settings") if isinstance(metadata.get("resolved_settings"), dict) else {}
+    count_validation = metadata.get("count_validation") if isinstance(metadata.get("count_validation"), dict) else {}
+    target_level_value = resolved_settings.get("target_level") or first.get("target_level", "")
 
     date_iso = canonical_material_date(first.get("material_date") or first.get("date") or target_date)
     try:
@@ -10089,12 +10239,14 @@ def material_from_rows(rows, target_date=None):
         "generation_source": first.get("generation_source", "") or metadata.get("generation_source", ""),
         "generation_mode": first.get("generation_mode", "") or metadata.get("generation_mode", ""),
         "available_versions": available_versions,
-        "targetLevel": first.get("target_level", ""),
+        "targetLevel": target_level_value,
         "vocabulary": vocabulary,
         "verbs": verbs,
         "grammar": {"title": first["grammar_title"], "exp": first["grammar_exp"], "examples": examples},
         "grammar_points": material_payload.get("grammar_points", []) if isinstance(material_payload, dict) else [],
         "grammarLevel": metadata.get("grammar_level", ""),
+        "resolved_settings": resolved_settings,
+        "count_validation": count_validation,
         "metadata": metadata,
     }
 
@@ -10280,6 +10432,13 @@ def generate_daily_material(
     raw_material.setdefault("metadata", {})
     raw_material["metadata"]["generation_trigger"] = generation_trigger
     raw_material["metadata"]["settings_source"] = settings_source
+    grammar_mode = raw_material["metadata"].get("grammar_mode") or raw_material["metadata"].get("resolved_settings", {}).get("grammar_mode", "")
+    grammar_level_for_metadata = "fixed_quota" if grammar_mode == "fixed_quota" else settings.get("grammar_level", "")
+    grammar_count_for_metadata = (
+        int(raw_material["metadata"].get("grammar_total_target") or LOCAL_FIXED_GRAMMAR_TOTAL)
+        if grammar_mode == "fixed_quota"
+        else int(settings.get("grammar_count") or 0)
+    )
     raw_material["metadata"].setdefault("resolved_settings", {}).update(
         {
             "generation_trigger": generation_trigger,
@@ -10290,8 +10449,11 @@ def generate_daily_material(
             "verb_count": requested_verbs,
             "choice_count": int(settings.get("mcq_count") or 0),
             "fill_count": int(settings.get("fill_count") or 0),
-            "grammar_level": settings.get("grammar_level", ""),
-            "grammar_count": int(settings.get("grammar_count") or 0),
+            "grammar_level": grammar_level_for_metadata,
+            "grammar_count": grammar_count_for_metadata,
+            "grammar_mode": grammar_mode or "settings",
+            "grammar_quota": raw_material["metadata"].get("grammar_quota", {}),
+            "grammar_total_target": raw_material["metadata"].get("grammar_total_target", grammar_count_for_metadata),
         }
     )
     raw_material["metadata"]["count_validation"] = count_validation
@@ -13178,9 +13340,16 @@ def build_dashboard_payload():
     try:
         today_material = material_by_date(today)
         payload["has_today_material"] = bool(today_material)
-        payload["vocab_count"] = len(today_material["vocabulary"]) if today_material else 0
-        payload["verb_count"] = len(today_material["verbs"]) if today_material else 0
-        payload["grammar_count"] = len(today_material.get("grammar_points", [])) if today_material else 0
+        material_metadata = today_material.get("metadata", {}) if today_material else {}
+        material_resolved = today_material.get("resolved_settings") or material_metadata.get("resolved_settings", {}) if today_material else {}
+        material_validation = today_material.get("count_validation") or material_metadata.get("count_validation", {}) if today_material else {}
+        actual_vocab_count = len(today_material["vocabulary"]) if today_material else 0
+        actual_verb_count = len(today_material["verbs"]) if today_material else 0
+        actual_grammar_count = len(today_material.get("grammar_points", [])) if today_material else 0
+        payload["vocab_count"] = trace_int(material_validation.get("word_count_actual")) or actual_vocab_count
+        payload["verb_count"] = trace_int(material_validation.get("verb_count_actual")) or actual_verb_count
+        payload["grammar_count"] = trace_int(material_metadata.get("grammar_total_actual")) or actual_grammar_count
+        material_target_level = material_resolved.get("target_level") or today_material.get("targetLevel") if today_material else settings["target_level"]
         payload["today_material"] = {
             "status": "generated" if today_material else "not_generated",
             "date": today,
@@ -13189,10 +13358,12 @@ def build_dashboard_payload():
             "version_no": today_material.get("version_no") if today_material else 0,
             "version_count": len(today_material.get("available_versions", [])) if today_material else 0,
             "generation_source": today_material.get("generation_source") if today_material else "",
-            "target_level": today_material.get("targetLevel") if today_material else settings["target_level"],
+            "target_level": material_target_level,
             "word_count": payload["vocab_count"],
             "verb_count": payload["verb_count"],
             "grammar_count": payload["grammar_count"],
+            "resolved_settings": material_resolved,
+            "count_validation": material_validation,
         }
     except Exception as e:
         print(f"[dashboard-summary] material query failed; reason={e}")
