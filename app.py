@@ -5606,7 +5606,7 @@ def fetch_vocabulary_pool_verb_rows(limit=300):
         f"LOWER(COALESCE(NULLIF(part_of_speech, ''), '')) IN ({sql_placeholders(len(pos_values))}) "
         f"OR {' OR '.join(pos_like_clauses)} "
         "OR COALESCE(verb_group, 0) IN (1, 2, 3) "
-        "OR LOWER(COALESCE(NULLIF(conjugation_type, ''), '')) LIKE '%verb%'"
+        f"OR LOWER(COALESCE(NULLIF(conjugation_type, ''), '')) LIKE {'%s' if DATABASE_URL else '?'}"
         ")",
     ]
     params = []
@@ -5614,6 +5614,7 @@ def fetch_vocabulary_pool_verb_rows(limit=300):
     params.extend(blocked_sources)
     params.extend([value.lower() for value in pos_values])
     params.extend([f"%{marker}%" for marker in VERB_POOL_POS_LIKE])
+    params.append("%verb%")
     sql = f"""
         SELECT *
         FROM vocabulary_pool
@@ -8965,6 +8966,28 @@ def record_grammar_selection(grammar_items, material_date, material_key=None, ma
         conn.commit()
 
 
+def best_effort_record_grammar_selection(grammar_items, material_date, material_key=None, material_version_no=None):
+    try:
+        record_grammar_selection(
+            grammar_items,
+            material_date,
+            material_key=material_key,
+            material_version_no=material_version_no,
+        )
+        return ""
+    except BaseException as exc:
+        warning = "grammar_selection_log_failed"
+        print(
+            "[grammar-selector] selection log best-effort failed "
+            f"material_key={material_key}; reason={exc}"
+        )
+        try:
+            print(traceback.format_exc())
+        except Exception:
+            pass
+        return warning
+
+
 def select_grammar_points(grammar_level, grammar_count, material_date=None, allow_level_fallback=True, ignore_recent=False):
     selector_started = time.perf_counter()
     grammar_level = grammar_level if grammar_level in LEVELS else "N5"
@@ -10126,6 +10149,7 @@ def save_material_for_date(material_date, material, settings, generation_source=
     material["generation_mode"] = metadata.get("generation_mode") or generation_mode
     material["date"] = date
     max_rows = 1
+    selection_log_warnings = []
 
     new_rows = []
     for i in range(max_rows):
@@ -10203,16 +10227,14 @@ def save_material_for_date(material_date, material, settings, generation_source=
         except Exception as exc:
             print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
             print(traceback.format_exc())
-        try:
-            record_grammar_selection(
-                material.get("grammar_points") or [],
-                date_iso,
-                material_key=material_key,
-                material_version_no=version_no,
-            )
-        except Exception as exc:
-            print(f"[grammar-selector] selection log write failed material_key={material_key}; reason={exc}")
-            print(traceback.format_exc())
+        grammar_log_warning = best_effort_record_grammar_selection(
+            material.get("grammar_points") or [],
+            date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+        if grammar_log_warning:
+            selection_log_warnings.append(grammar_log_warning)
         invalidate_archive_dates_cache("daily material saved")
         return {
             "date": date,
@@ -10221,6 +10243,7 @@ def save_material_for_date(material_date, material, settings, generation_source=
             "version_no": version_no,
             "generation_source": generation_source,
             "generation_mode": metadata.get("generation_mode", generation_mode),
+            "selection_log_warnings": selection_log_warnings,
         }
 
     df = read_database()
@@ -10250,16 +10273,14 @@ def save_material_for_date(material_date, material, settings, generation_source=
     except Exception as exc:
         print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
         print(traceback.format_exc())
-    try:
-        record_grammar_selection(
-            material.get("grammar_points") or [],
-            date_iso,
-            material_key=material_key,
-            material_version_no=version_no,
-        )
-    except Exception as exc:
-        print(f"[grammar-selector] selection log write failed material_key={material_key}; reason={exc}")
-        print(traceback.format_exc())
+    grammar_log_warning = best_effort_record_grammar_selection(
+        material.get("grammar_points") or [],
+        date_iso,
+        material_key=material_key,
+        material_version_no=version_no,
+    )
+    if grammar_log_warning:
+        selection_log_warnings.append(grammar_log_warning)
     invalidate_archive_dates_cache("daily material saved")
     return {
         "date": date,
@@ -10268,6 +10289,7 @@ def save_material_for_date(material_date, material, settings, generation_source=
         "version_no": version_no,
         "generation_source": generation_source,
         "generation_mode": metadata.get("generation_mode", generation_mode),
+        "selection_log_warnings": selection_log_warnings,
     }
 
 
@@ -10639,6 +10661,7 @@ def generate_daily_material(
         "count_validation": count_validation,
         "settings_trace": settings_trace,
         "pool_diagnostics": raw_material["metadata"].get("pool_diagnostics", {}),
+        "selection_log_warnings": save_info.get("selection_log_warnings", []),
     }
 
 
@@ -12454,6 +12477,7 @@ def api_generate():
                         "count_validation": count_validation,
                         "settings_trace": settings_trace,
                         "pool_diagnostics": fallback_material.get("metadata", {}).get("pool_diagnostics", {}),
+                        "selection_log_warnings": save_info.get("selection_log_warnings", []),
                     }
                 )
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
