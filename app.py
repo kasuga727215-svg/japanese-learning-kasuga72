@@ -890,7 +890,11 @@ def request_settings_overrides(raw):
     overrides = {}
     for key, value in (raw or {}).items():
         normalized_key = SETTING_ALIASES.get(key, key)
-        if normalized_key in DEFAULT_SETTINGS and str(value) != "":
+        if value is None:
+            continue
+        if isinstance(value, str) and value.strip().lower() in {"", "undefined", "null", "nan"}:
+            continue
+        if normalized_key in DEFAULT_SETTINGS:
             overrides[normalized_key] = value
     return overrides
 
@@ -3806,7 +3810,16 @@ def save_postgres_settings(settings):
 
 
 def save_settings_file(settings):
-    current = normalize_settings(load_settings() | normalize_settings(settings))
+    sanitized = request_settings_overrides(settings or {})
+    current = normalize_settings(load_settings() | sanitized)
+    print(
+        "[settings-save] received "
+        f"target_levels={','.join(settings_target_levels(sanitized)) if sanitized else ''} "
+        f"word_count={sanitized.get('vocab_count', '')} "
+        f"verb_count={sanitized.get('verb_count', '')} "
+        f"choice_count={sanitized.get('mcq_count', '')} "
+        f"fill_count={sanitized.get('fill_count', '')}"
+    )
     ensure_settings_store()
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         conn.executemany(
@@ -3819,7 +3832,15 @@ def save_settings_file(settings):
         )
         conn.commit()
     save_postgres_settings(current)
-    invalidate_dashboard_cache("mistake retry")
+    invalidate_dashboard_cache("settings saved")
+    print(
+        "[settings-save] persisted "
+        f"target_levels={','.join(settings_target_levels(current))} "
+        f"word_count={current.get('vocab_count')} "
+        f"verb_count={current.get('verb_count')} "
+        f"choice_count={current.get('mcq_count')} "
+        f"fill_count={current.get('fill_count')}"
+    )
     return current
 
 
@@ -12299,7 +12320,13 @@ def api_get_settings():
 
 @app.post("/api/settings")
 def api_save_settings():
-    return jsonify(public_settings(save_settings_file(request.get_json(silent=True) or {})))
+    try:
+        saved = public_settings(save_settings_file(request.get_json(silent=True) or {}))
+        return jsonify({"ok": True, **saved})
+    except Exception as exc:
+        print(f"[settings-save] failed reason={exc}")
+        print(traceback.format_exc())
+        return jsonify({"ok": False, "error": "settings_save_failed", "reason": str(exc)}), 200
 
 
 @app.get("/api/archive-dates")
@@ -12477,7 +12504,6 @@ def api_generate():
                         "count_validation": count_validation,
                         "settings_trace": settings_trace,
                         "pool_diagnostics": fallback_material.get("metadata", {}).get("pool_diagnostics", {}),
-                        "selection_log_warnings": save_info.get("selection_log_warnings", []),
                     }
                 )
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
@@ -12490,6 +12516,7 @@ def api_generate():
                     generation_source="manual_local",
                     generation_mode="local_fallback",
                 )
+                fallback_material["metadata"]["selection_log_warnings"] = save_info.get("selection_log_warnings", [])
                 invalidate_dashboard_cache("local generation seed fallback")
                 print(
                     "[local-generate] seed_fallback_used=true "
