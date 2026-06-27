@@ -447,11 +447,11 @@
         </div>
         <div class="col-md-4">
           <label class="control-label">單字數量 <span class="range-value" id="vocab-value">8</span></label>
-          <input type="range" id="setting-vocab" class="form-range" min="1" max="30" value="8" oninput="syncRangeLabels()">
+          <input type="number" id="word_count" class="form-control" min="1" max="20" step="1" value="8" oninput="syncRangeLabels()">
         </div>
         <div class="col-md-4">
           <label class="control-label">動詞數量 <span class="range-value" id="verb-value">4</span></label>
-          <input type="range" id="setting-verb" class="form-range" min="0" max="20" value="4" oninput="syncRangeLabels()">
+          <input type="number" id="verb_count" class="form-control" min="1" max="20" step="1" value="4" oninput="syncRangeLabels()">
         </div>
         <div class="col-md-6">
           <label class="control-label">選擇題數量 <span class="range-value" id="mcq-value">5</span></label>
@@ -657,13 +657,20 @@
     });
   }
 
+  function readIntSetting(id, fallback, min, max) {
+    const element = document.getElementById(id);
+    const parsed = parseInt(element?.value, 10);
+    const value = Number.isFinite(parsed) ? parsed : fallback;
+    return Math.max(min, Math.min(max, value));
+  }
+
   function collectControlCenterSettings() {
     const targetLevels = selectedTargetLevelsFromDom();
     const targetLevel = targetLevels.find(level => level !== "SNS") || "N5";
-    const wordCount = Number(document.getElementById("setting-vocab").value);
-    const verbCount = Number(document.getElementById("setting-verb").value);
-    const choiceCount = Number(document.getElementById("setting-mcq").value);
-    const fillCount = Number(document.getElementById("setting-fill").value);
+    const wordCount = readIntSetting("word_count", 8, 1, 20);
+    const verbCount = readIntSetting("verb_count", 4, 1, 20);
+    const choiceCount = readIntSetting("setting-mcq", 5, 0, 30);
+    const fillCount = readIntSetting("setting-fill", 5, 0, 30);
     return {
       target_level: targetLevel,
       target_levels: targetLevels,
@@ -681,8 +688,8 @@
   }
 
   function syncRangeLabels() {
-    document.getElementById("vocab-value").innerText = document.getElementById("setting-vocab").value;
-    document.getElementById("verb-value").innerText = document.getElementById("setting-verb").value;
+    document.getElementById("vocab-value").innerText = document.getElementById("word_count").value;
+    document.getElementById("verb-value").innerText = document.getElementById("verb_count").value;
     document.getElementById("mcq-value").innerText = document.getElementById("setting-mcq").value;
     document.getElementById("fill-value").innerText = document.getElementById("setting-fill").value;
   }
@@ -726,8 +733,8 @@
     const started = performance.now();
     const settings = await api("/api/settings");
     setTargetLevelCheckboxes(settings.target_levels || [settings.target_level || "N5"]);
-    document.getElementById("setting-vocab").value = settings.vocab_count;
-    document.getElementById("setting-verb").value = settings.verb_count;
+    document.getElementById("word_count").value = settings.vocab_count;
+    document.getElementById("verb_count").value = settings.verb_count;
     document.getElementById("setting-mcq").value = settings.mcq_count;
     document.getElementById("setting-fill").value = settings.fill_count;
     syncRangeLabels();

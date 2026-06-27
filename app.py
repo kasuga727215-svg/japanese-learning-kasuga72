@@ -871,7 +871,7 @@ def normalize_settings(raw):
         settings["grammar_level"] = DEFAULT_SETTINGS["grammar_level"]
 
     for key, default, min_value, max_value in [
-        ("vocab_count", 8, 1, 30),
+        ("vocab_count", 8, 1, 20),
         ("verb_count", 4, 0, 20),
         ("mcq_count", 5, 0, 30),
         ("fill_count", 5, 0, 30),
@@ -3776,33 +3776,68 @@ def load_postgres_settings():
         return {}
 
 
+def postgres_column_exists(cur, table_name, column_name):
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = %s AND column_name = %s
+        )
+        """,
+        (table_name, column_name),
+    )
+    row = cur.fetchone()
+    return bool(row and row[0])
+
+
+def ensure_postgres_settings_schema(cur):
+    cur.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {POSTGRES_SETTINGS_TABLE} (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    cur.execute(
+        f"""
+        ALTER TABLE {POSTGRES_SETTINGS_TABLE}
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        """
+    )
+    return postgres_column_exists(cur, POSTGRES_SETTINGS_TABLE, "updated_at")
+
+
 def save_postgres_settings(settings):
     if not DATABASE_URL:
         return False
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    CREATE TABLE IF NOT EXISTS {POSTGRES_SETTINGS_TABLE} (
-                        key TEXT PRIMARY KEY,
-                        value TEXT NOT NULL,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+                has_updated_at = ensure_postgres_settings_schema(cur)
+                if has_updated_at:
+                    cur.executemany(
+                        f"""
+                        INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value, updated_at)
+                        VALUES (%s, %s, CURRENT_TIMESTAMP)
+                        ON CONFLICT(key) DO UPDATE SET
+                            value = EXCLUDED.value,
+                            updated_at = CURRENT_TIMESTAMP
+                        """,
+                        [(key, str(value)) for key, value in settings.items()],
                     )
-                    """
-                )
-                cur.executemany(
-                    f"""
-                    INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value, updated_at)
-                    VALUES (%s, %s, CURRENT_TIMESTAMP)
-                    ON CONFLICT(key) DO UPDATE SET
-                        value = EXCLUDED.value,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
-                    [(key, str(value)) for key, value in settings.items()],
-                )
+                else:
+                    cur.executemany(
+                        f"""
+                        INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value)
+                        VALUES (%s, %s)
+                        ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+                        """,
+                        [(key, str(value)) for key, value in settings.items()],
+                    )
             conn.commit()
-        print(f"[settings-store] saved postgres_settings count={len(settings)}")
+        print(f"[settings-store] saved postgres_settings count={len(settings)} updated_at_column={has_updated_at}")
         return True
     except Exception as exc:
         print(f"[settings-store] postgres_settings_save_failed fallback=sqlite reason={exc}")
@@ -5610,32 +5645,27 @@ VERB_POOL_BLOCKED_SOURCES = {
 
 def fetch_vocabulary_pool_verb_rows(limit=300):
     limit = max(1, min(int(limit or 300), 500))
-    pos_values = sorted(VERB_POOL_POS_VALUES)
+    pos_values = ["verb", "動詞"]
     blocked_categories = sorted(VERB_POOL_BLOCKED_CATEGORIES)
     blocked_sources = sorted(VERB_POOL_BLOCKED_SOURCES)
-    pos_like_clauses = ["part_of_speech LIKE ?" for _ in VERB_POOL_POS_LIKE]
-    if DATABASE_URL:
-        pos_like_clauses = [clause.replace("?", "%s") for clause in pos_like_clauses]
+    params = {}
+
+    def bind(name, value):
+        params[name] = value
+        return f"%({name})s" if DATABASE_URL else f":{name}"
+
+    def bind_list(prefix, values):
+        return ", ".join(bind(f"{prefix}_{index}", value) for index, value in enumerate(values))
+
     where = [
         "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1",
         "COALESCE(NULLIF(meaning_zh, ''), '') <> ''",
         "COALESCE(NULLIF(reading_hiragana, ''), '') <> ''",
         "LOWER(COALESCE(quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
-        f"LOWER(COALESCE(NULLIF(category, ''), 'general')) NOT IN ({sql_placeholders(len(blocked_categories))})",
-        f"LOWER(COALESCE(NULLIF(source, ''), 'manual')) NOT IN ({sql_placeholders(len(blocked_sources))})",
-        "("
-        f"LOWER(COALESCE(NULLIF(part_of_speech, ''), '')) IN ({sql_placeholders(len(pos_values))}) "
-        f"OR {' OR '.join(pos_like_clauses)} "
-        "OR COALESCE(verb_group, 0) IN (1, 2, 3) "
-        f"OR LOWER(COALESCE(NULLIF(conjugation_type, ''), '')) LIKE {'%s' if DATABASE_URL else '?'}"
-        ")",
+        f"LOWER(COALESCE(NULLIF(category, ''), 'general')) NOT IN ({bind_list('blocked_category', blocked_categories)})",
+        f"LOWER(COALESCE(NULLIF(source, ''), 'manual')) NOT IN ({bind_list('blocked_source', blocked_sources)})",
+        f"COALESCE(NULLIF(part_of_speech, ''), '') IN ({bind_list('pos', pos_values)})",
     ]
-    params = []
-    params.extend(blocked_categories)
-    params.extend(blocked_sources)
-    params.extend([value.lower() for value in pos_values])
-    params.extend([f"%{marker}%" for marker in VERB_POOL_POS_LIKE])
-    params.append("%verb%")
     sql = f"""
         SELECT *
         FROM vocabulary_pool
@@ -5643,9 +5673,8 @@ def fetch_vocabulary_pool_verb_rows(limit=300):
         ORDER BY COALESCE(used_in_material_count, 0) ASC,
                  {'last_used_at ASC NULLS FIRST' if DATABASE_URL else "COALESCE(last_used_at, '') ASC"},
                  RANDOM()
-        LIMIT {'%s' if DATABASE_URL else '?'}
+        LIMIT {bind('limit', limit)}
     """
-    params.append(limit)
     try:
         if DATABASE_URL:
             if not vocab_pool_db_query_allowed():
@@ -12322,7 +12351,7 @@ def api_get_settings():
 def api_save_settings():
     try:
         saved = public_settings(save_settings_file(request.get_json(silent=True) or {}))
-        return jsonify({"ok": True, **saved})
+        return jsonify({"ok": True, "settings": saved, **saved})
     except Exception as exc:
         print(f"[settings-save] failed reason={exc}")
         print(traceback.format_exc())
