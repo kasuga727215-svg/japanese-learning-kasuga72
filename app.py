@@ -931,6 +931,10 @@ def public_settings(settings):
     levels = settings_target_levels(data)
     data["target_levels"] = levels
     data["target_level"] = primary_target_level(levels, data.get("target_level"))
+    data["word_count"] = trace_int(data.get("vocab_count"))
+    data["verb_count"] = trace_int(data.get("verb_count"))
+    data["choice_count"] = trace_int(data.get("mcq_count"))
+    data["fill_count"] = trace_int(data.get("fill_count"))
     return data
 
 
@@ -12344,7 +12348,16 @@ def api_reset_vocab_rules():
 
 @app.get("/api/settings")
 def api_get_settings():
-    return jsonify(public_settings(load_settings()))
+    settings = public_settings(load_settings())
+    print(
+        "[settings-load] returned "
+        f"target_levels={','.join(settings_target_levels(settings))} "
+        f"word_count={settings.get('word_count')} "
+        f"verb_count={settings.get('verb_count')} "
+        f"choice_count={settings.get('choice_count')} "
+        f"fill_count={settings.get('fill_count')}"
+    )
+    return jsonify({"ok": True, "settings": settings, **settings})
 
 
 @app.post("/api/settings")

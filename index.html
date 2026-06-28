@@ -659,7 +659,11 @@
 
   function readIntSetting(id, fallback, min, max) {
     const element = document.getElementById(id);
-    const parsed = parseInt(element?.value, 10);
+    return readIntSettingValue(element?.value, fallback, min, max);
+  }
+
+  function readIntSettingValue(rawValue, fallback, min, max) {
+    const parsed = parseInt(rawValue, 10);
     const value = Number.isFinite(parsed) ? parsed : fallback;
     return Math.max(min, Math.min(max, value));
   }
@@ -685,6 +689,31 @@
 
   function currentSettings() {
     return collectControlCenterSettings();
+  }
+
+  function settingsFromResponse(data) {
+    return data?.settings || data || {};
+  }
+
+  function applyControlCenterSettings(settings, source = "settings") {
+    const wordCount = settings.word_count ?? settings.vocab_count ?? 8;
+    const verbCount = settings.verb_count ?? 4;
+    const choiceCount = settings.choice_count ?? settings.mcq_count ?? 5;
+    const fillCount = settings.fill_count ?? 5;
+    console.debug(
+      `[settings-hydrate] loaded source=${source} word_count=${wordCount} verb_count=${verbCount} ` +
+      `choice_count=${choiceCount} fill_count=${fillCount}`
+    );
+    setTargetLevelCheckboxes(settings.target_levels || [settings.target_level || "N5"]);
+    document.getElementById("word_count").value = readIntSettingValue(wordCount, 8, 1, 20);
+    document.getElementById("verb_count").value = readIntSettingValue(verbCount, 4, 1, 20);
+    document.getElementById("setting-mcq").value = readIntSettingValue(choiceCount, 5, 0, 30);
+    document.getElementById("setting-fill").value = readIntSettingValue(fillCount, 5, 0, 30);
+    syncRangeLabels();
+    console.debug(
+      `[settings-hydrate] applied word_count=${document.getElementById("word_count").value} ` +
+      `verb_count=${document.getElementById("verb_count").value}`
+    );
   }
 
   function syncRangeLabels() {
@@ -731,13 +760,8 @@
 
   async function loadSettings() {
     const started = performance.now();
-    const settings = await api("/api/settings");
-    setTargetLevelCheckboxes(settings.target_levels || [settings.target_level || "N5"]);
-    document.getElementById("word_count").value = settings.vocab_count;
-    document.getElementById("verb_count").value = settings.verb_count;
-    document.getElementById("setting-mcq").value = settings.mcq_count;
-    document.getElementById("setting-fill").value = settings.fill_count;
-    syncRangeLabels();
+    const data = await api("/api/settings");
+    applyControlCenterSettings(settingsFromResponse(data), "GET /api/settings");
     perfLog("settings", started);
   }
 
@@ -747,7 +771,18 @@
     btn.disabled = true;
     btn.innerText = "保存中...";
     try {
-      await api("/api/settings", { method: "POST", body: JSON.stringify(currentSettings()) });
+      const payload = currentSettings();
+      console.debug(
+        `[settings-save] payload word_count=${payload.word_count} verb_count=${payload.verb_count} ` +
+        `choice_count=${payload.choice_count} fill_count=${payload.fill_count}`
+      );
+      const result = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
+      const persistedSettings = settingsFromResponse(result);
+      console.debug(
+        `[settings-save] response word_count=${persistedSettings.word_count ?? persistedSettings.vocab_count} ` +
+        `verb_count=${persistedSettings.verb_count}`
+      );
+      applyControlCenterSettings(persistedSettings, "POST /api/settings");
       msg.className = "mt-3 success-text";
       msg.innerText = "設定已經保存。Render Cron 下次會讀取這組參數。";
       await loadDashboard();
@@ -1010,13 +1045,20 @@
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
         `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count}`
       );
-      await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
+      const saveResult = await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
+      const persistedSettings = settingsFromResponse(saveResult);
+      console.debug(
+        `[settings-save] response word_count=${persistedSettings.word_count ?? persistedSettings.vocab_count} ` +
+        `verb_count=${persistedSettings.verb_count}`
+      );
+      applyControlCenterSettings(persistedSettings, "POST /api/settings before generate");
       const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
-      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify({...settingsPayload, mode: generationMode}) });
+      const generationPayload = {...collectControlCenterSettings(), mode: generationMode};
+      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify(generationPayload) });
       const validation = result.count_validation || {};
-      const requestedWords = validation.word_count_requested ?? settingsPayload.word_count;
+      const requestedWords = validation.word_count_requested ?? generationPayload.word_count;
       const actualWords = validation.word_count_actual ?? requestedWords;
-      const requestedVerbs = validation.verb_count_requested ?? settingsPayload.verb_count;
+      const requestedVerbs = validation.verb_count_requested ?? generationPayload.verb_count;
       const actualVerbs = validation.verb_count_actual ?? requestedVerbs;
       const matched = validation.word_count_matched !== false && validation.verb_count_matched !== false;
       msg.className = "mt-3 success-text";
