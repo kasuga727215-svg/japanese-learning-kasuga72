@@ -10583,6 +10583,12 @@ def generate_daily_material(
         f"grammar_count={settings.get('grammar_count')} "
         f"settings_source={settings_source}"
     )
+    print(
+        "[generate-start] resolved "
+        f"word_count={settings.get('vocab_count')} "
+        f"verb_count={settings.get('verb_count')} "
+        f"settings_source={settings_source}"
+    )
 
     if mode == "local":
         print("[feature-boundary] daily_material mode=local skip gemini")
@@ -10683,6 +10689,13 @@ def generate_daily_material(
     date = save_info["date"]
     print(f"[material-generator] local material generated; ai_used={str(raw_material.get('metadata', {}).get('ai_used', False)).lower()}")
     print(f"[material-generator] material saved date={date} material_key={save_info['material_key']}")
+    print(
+        "[material-save] "
+        f"material_key={save_info['material_key']} "
+        f"version_no={save_info['version_no']} "
+        f"resolved word_count={requested_words} "
+        f"verb_count={requested_verbs}"
+    )
     material = material_by_key(save_info["material_key"])
     if not material:
         raise RuntimeError(f"教材寫入後重新讀取失敗：{save_info['material_key']}")
@@ -12478,6 +12491,18 @@ def api_materials():
     material_key = request.args.get("material_key", "").strip()
     payload = material_by_key(material_key) if material_key else material_by_date(request.args.get("date", today_string()))
     elapsed_ms = round((time.perf_counter() - started) * 1000)
+    metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+    resolved = payload.get("resolved_settings") or metadata.get("resolved_settings", {}) if isinstance(payload, dict) else {}
+    validation = payload.get("count_validation") or metadata.get("count_validation", {}) if isinstance(payload, dict) else {}
+    print(
+        "[materials-load] "
+        f"latest material_key={payload.get('material_key', '') if isinstance(payload, dict) else ''} "
+        f"version_no={payload.get('version_no', '') if isinstance(payload, dict) else ''} "
+        f"resolved word_count={resolved.get('word_count', '') if isinstance(resolved, dict) else ''} "
+        f"verb_count={resolved.get('verb_count', '') if isinstance(resolved, dict) else ''} "
+        f"actual word_count={validation.get('word_count_actual', '') if isinstance(validation, dict) else ''} "
+        f"verb_count={validation.get('verb_count_actual', '') if isinstance(validation, dict) else ''}"
+    )
     print(f"[perf] load_daily_material ms={elapsed_ms}")
     return jsonify(payload)
 

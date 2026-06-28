@@ -1045,6 +1045,10 @@
         `word_count=${settingsPayload.word_count} verb_count=${settingsPayload.verb_count} ` +
         `choice_count=${settingsPayload.choice_count} fill_count=${settingsPayload.fill_count}`
       );
+      console.debug(
+        `[generate-click] payload word_count=${settingsPayload.word_count} ` +
+        `verb_count=${settingsPayload.verb_count}`
+      );
       const saveResult = await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
       const persistedSettings = settingsFromResponse(saveResult);
       console.debug(
@@ -1061,12 +1065,16 @@
       const requestedVerbs = validation.verb_count_requested ?? generationPayload.verb_count;
       const actualVerbs = validation.verb_count_actual ?? requestedVerbs;
       const matched = validation.word_count_matched !== false && validation.verb_count_matched !== false;
+      console.debug(
+        `[generate-success] material_key=${result.material_key || ""} ` +
+        `word_count=${actualWords}/${requestedWords} verb_count=${actualVerbs}/${requestedVerbs}`
+      );
       msg.className = "mt-3 success-text";
       msg.innerText = matched
         ? `今日教材已成功從本地詞庫建立。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。`
         : `今日教材已建立，但內容未補滿：單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。請查看 Render Logs。`;
       currentMaterialData = null;
-      await loadMaterialByDate(result.material_key || result.date || result.material_date);
+      await loadMaterialByDate(result.material_key || result.date || result.material_date, true);
       invalidateArchiveDatesCache();
       await loadArchiveList(true);
       await loadDashboard(true);
@@ -1194,7 +1202,7 @@
     perfLog("material", started);
   }
 
-  async function loadMaterialByDate(dateOrKey) {
+  async function loadMaterialByDate(dateOrKey, forceRefresh = false) {
     showTab(null, "tab-daily");
     document.getElementById("content-loader").innerHTML = "正在讀取剛生成的學習材料...";
     document.getElementById("content-loader").style.display = "block";
@@ -1202,7 +1210,8 @@
     const query = isMaterialKey(dateOrKey)
       ? `material_key=${encodeURIComponent(dateOrKey)}`
       : `date=${encodeURIComponent(dateOrKey)}`;
-    const data = await api(`/api/materials?${query}`);
+    const cacheBust = forceRefresh ? `&_=${Date.now()}` : "";
+    const data = await api(`/api/materials?${query}${cacheBust}`);
     if (data?.material_key && window.history?.replaceState) {
       const url = new URL(window.location.href);
       url.searchParams.set("material_key", data.material_key);
@@ -1315,6 +1324,16 @@
     document.getElementById("material-content").style.display = "block";
     const vocabulary = Array.isArray(data.vocabulary) ? data.vocabulary : [];
     const verbs = Array.isArray(data.verbs) ? data.verbs : [];
+    const materialMetadata = data.metadata || {};
+    const materialResolved = data.resolved_settings || materialMetadata.resolved_settings || {};
+    const materialValidation = data.count_validation || materialMetadata.count_validation || {};
+    console.debug(
+      `[materials-render] status word_count=${materialValidation.word_count_actual ?? vocabulary.length} ` +
+      `verb_count=${materialValidation.verb_count_actual ?? verbs.length} ` +
+      `resolved_word_count=${materialResolved.word_count ?? ""} ` +
+      `resolved_verb_count=${materialResolved.verb_count ?? ""} ` +
+      `material_key=${data.material_key || ""} version_no=${data.version_no || ""}`
+    );
     document.getElementById("vocab-list").innerHTML = vocabulary.map(v => `
       <div class="col-12 col-md-6"><div class="vocab-card p-3">
         <div class="vocab-card-content">
