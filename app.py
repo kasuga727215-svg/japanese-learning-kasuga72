@@ -3780,21 +3780,6 @@ def load_postgres_settings():
         return {}
 
 
-def postgres_column_exists(cur, table_name, column_name):
-    cur.execute(
-        """
-        SELECT EXISTS (
-            SELECT 1
-            FROM information_schema.columns
-            WHERE table_name = %s AND column_name = %s
-        )
-        """,
-        (table_name, column_name),
-    )
-    row = cur.fetchone()
-    return bool(row and row[0])
-
-
 def ensure_postgres_settings_schema(cur):
     cur.execute(
         f"""
@@ -3804,13 +3789,6 @@ def ensure_postgres_settings_schema(cur):
         )
         """
     )
-    cur.execute(
-        f"""
-        ALTER TABLE {POSTGRES_SETTINGS_TABLE}
-        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        """
-    )
-    return postgres_column_exists(cur, POSTGRES_SETTINGS_TABLE, "updated_at")
 
 
 def save_postgres_settings(settings):
@@ -3819,29 +3797,17 @@ def save_postgres_settings(settings):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                has_updated_at = ensure_postgres_settings_schema(cur)
-                if has_updated_at:
-                    cur.executemany(
-                        f"""
-                        INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value, updated_at)
-                        VALUES (%s, %s, CURRENT_TIMESTAMP)
-                        ON CONFLICT(key) DO UPDATE SET
-                            value = EXCLUDED.value,
-                            updated_at = CURRENT_TIMESTAMP
-                        """,
-                        [(key, str(value)) for key, value in settings.items()],
-                    )
-                else:
-                    cur.executemany(
-                        f"""
-                        INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value)
-                        VALUES (%s, %s)
-                        ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
-                        """,
-                        [(key, str(value)) for key, value in settings.items()],
-                    )
+                ensure_postgres_settings_schema(cur)
+                cur.executemany(
+                    f"""
+                    INSERT INTO {POSTGRES_SETTINGS_TABLE} (key, value)
+                    VALUES (%s, %s)
+                    ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    [(key, str(value)) for key, value in settings.items()],
+                )
             conn.commit()
-        print(f"[settings-store] saved postgres_settings count={len(settings)} updated_at_column={has_updated_at}")
+        print(f"[settings-store] saved postgres_settings count={len(settings)}")
         return True
     except Exception as exc:
         print(f"[settings-store] postgres_settings_save_failed fallback=sqlite reason={exc}")
@@ -3870,7 +3836,9 @@ def save_settings_file(settings):
             list(current.items()),
         )
         conn.commit()
-    save_postgres_settings(current)
+    postgres_saved = save_postgres_settings(current)
+    if DATABASE_URL and not postgres_saved:
+        raise RuntimeError("postgres_settings_save_failed")
     invalidate_dashboard_cache("settings saved")
     print(
         "[settings-save] persisted "
