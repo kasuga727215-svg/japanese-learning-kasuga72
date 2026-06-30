@@ -645,15 +645,16 @@
 
   function selectedTargetLevelsFromDom() {
     const values = Array.from(document.querySelectorAll("#setting-target-levels input[type='checkbox']:checked"))
-      .map(input => input.value)
+      .map(input => String(input.value || "").trim().replace(/^jlpt:/i, "").toUpperCase())
       .filter(Boolean);
     return values.length ? values : ["N5"];
   }
 
   function setTargetLevelCheckboxes(levels) {
-    const selected = Array.isArray(levels) && levels.length ? levels : ["N5"];
+    const selected = normalizeTargetLevelList(levels);
     document.querySelectorAll("#setting-target-levels input[type='checkbox']").forEach(input => {
-      input.checked = selected.includes(input.value);
+      const value = String(input.value || "").trim().replace(/^jlpt:/i, "").toUpperCase();
+      input.checked = selected.includes(value);
     });
   }
 
@@ -691,28 +692,60 @@
     return collectControlCenterSettings();
   }
 
-  function settingsFromResponse(data) {
-    return data?.settings || data || {};
+  function normalizeTargetLevelList(rawLevels, fallbackLevel = "N5") {
+    const fallback = String(fallbackLevel || "N5").trim().replace(/^jlpt:/i, "").toUpperCase();
+    let levels = rawLevels;
+    if (typeof levels === "string") {
+      const trimmed = levels.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        try {
+          levels = JSON.parse(trimmed);
+        } catch {
+          levels = trimmed.split(",");
+        }
+      } else {
+        levels = trimmed.split(",");
+      }
+    }
+    if (!Array.isArray(levels)) levels = [fallback];
+    const normalized = levels
+      .map(level => String(level || "").trim().replace(/^jlpt:/i, "").toUpperCase())
+      .filter(level => ["N5", "N4", "N3", "N2", "N1", "SNS"].includes(level));
+    return normalized.length ? Array.from(new Set(normalized)) : [fallback || "N5"];
+  }
+
+  function normalizeSettingsResponse(data) {
+    const raw = data?.settings || data || {};
+    const targetLevels = normalizeTargetLevelList(raw.target_levels, raw.target_level || "N5");
+    return {
+      target_level: targetLevels.find(level => level !== "SNS") || "N5",
+      target_levels: targetLevels,
+      word_count: readIntSettingValue(raw.word_count ?? raw.vocab_count, 8, 1, 20),
+      verb_count: readIntSettingValue(raw.verb_count, 4, 1, 20),
+      choice_count: readIntSettingValue(raw.choice_count ?? raw.mcq_count, 5, 0, 30),
+      fill_count: readIntSettingValue(raw.fill_count, 5, 0, 30)
+    };
   }
 
   function applyControlCenterSettings(settings, source = "settings") {
-    const wordCount = settings.word_count ?? settings.vocab_count ?? 8;
-    const verbCount = settings.verb_count ?? 4;
-    const choiceCount = settings.choice_count ?? settings.mcq_count ?? 5;
-    const fillCount = settings.fill_count ?? 5;
+    const normalized = normalizeSettingsResponse(settings);
+    const wordCount = normalized.word_count;
+    const verbCount = normalized.verb_count;
+    const choiceCount = normalized.choice_count;
+    const fillCount = normalized.fill_count;
     console.debug(
       `[settings-hydrate] loaded source=${source} word_count=${wordCount} verb_count=${verbCount} ` +
-      `choice_count=${choiceCount} fill_count=${fillCount}`
+      `choice_count=${choiceCount} fill_count=${fillCount} target_levels=${normalized.target_levels.join(",")}`
     );
-    setTargetLevelCheckboxes(settings.target_levels || [settings.target_level || "N5"]);
-    document.getElementById("word_count").value = readIntSettingValue(wordCount, 8, 1, 20);
-    document.getElementById("verb_count").value = readIntSettingValue(verbCount, 4, 1, 20);
-    document.getElementById("setting-mcq").value = readIntSettingValue(choiceCount, 5, 0, 30);
-    document.getElementById("setting-fill").value = readIntSettingValue(fillCount, 5, 0, 30);
+    setTargetLevelCheckboxes(normalized.target_levels);
+    document.getElementById("word_count").value = String(wordCount);
+    document.getElementById("verb_count").value = String(verbCount);
+    document.getElementById("setting-mcq").value = String(choiceCount);
+    document.getElementById("setting-fill").value = String(fillCount);
     syncRangeLabels();
     console.debug(
       `[settings-hydrate] applied word_count=${document.getElementById("word_count").value} ` +
-      `verb_count=${document.getElementById("verb_count").value}`
+      `verb_count=${document.getElementById("verb_count").value} target_levels=${selectedTargetLevelsFromDom().join(",")}`
     );
   }
 
@@ -761,7 +794,12 @@
   async function loadSettings() {
     const started = performance.now();
     const data = await api("/api/settings");
-    applyControlCenterSettings(settingsFromResponse(data), "GET /api/settings");
+    const settings = normalizeSettingsResponse(data);
+    console.debug(
+      `[settings-hydrate] response word_count=${settings.word_count} verb_count=${settings.verb_count} ` +
+      `target_levels=${settings.target_levels.join(",")}`
+    );
+    applyControlCenterSettings(settings, "GET /api/settings");
     perfLog("settings", started);
   }
 
@@ -777,10 +815,10 @@
         `choice_count=${payload.choice_count} fill_count=${payload.fill_count}`
       );
       const result = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
-      const persistedSettings = settingsFromResponse(result);
+      const persistedSettings = normalizeSettingsResponse(result);
       console.debug(
-        `[settings-save] response word_count=${persistedSettings.word_count ?? persistedSettings.vocab_count} ` +
-        `verb_count=${persistedSettings.verb_count}`
+        `[settings-save] response word_count=${persistedSettings.word_count} ` +
+        `verb_count=${persistedSettings.verb_count} target_levels=${persistedSettings.target_levels.join(",")}`
       );
       applyControlCenterSettings(persistedSettings, "POST /api/settings");
       msg.className = "mt-3 success-text";
@@ -1050,10 +1088,10 @@
         `verb_count=${settingsPayload.verb_count}`
       );
       const saveResult = await api("/api/settings", { method: "POST", body: JSON.stringify(settingsPayload) });
-      const persistedSettings = settingsFromResponse(saveResult);
+      const persistedSettings = normalizeSettingsResponse(saveResult);
       console.debug(
-        `[settings-save] response word_count=${persistedSettings.word_count ?? persistedSettings.vocab_count} ` +
-        `verb_count=${persistedSettings.verb_count}`
+        `[settings-save] response word_count=${persistedSettings.word_count} ` +
+        `verb_count=${persistedSettings.verb_count} target_levels=${persistedSettings.target_levels.join(",")}`
       );
       applyControlCenterSettings(persistedSettings, "POST /api/settings before generate");
       const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
