@@ -453,8 +453,8 @@ COLUMNS = [
 DEFAULT_SETTINGS = {
     "target_level": "N3",
     "target_levels": "[\"N3\"]",
-    "vocab_count": "8",
-    "verb_count": "4",
+    "vocab_count": "15",
+    "verb_count": "10",
     "mcq_count": "5",
     "fill_count": "5",
     "grammar_level": "N5",
@@ -871,8 +871,8 @@ def normalize_settings(raw):
         settings["grammar_level"] = DEFAULT_SETTINGS["grammar_level"]
 
     for key, default, min_value, max_value in [
-        ("vocab_count", 8, 1, 20),
-        ("verb_count", 4, 0, 20),
+        ("vocab_count", int(DEFAULT_SETTINGS["vocab_count"]), 1, 20),
+        ("verb_count", int(DEFAULT_SETTINGS["verb_count"]), 0, 20),
         ("mcq_count", 5, 0, 30),
         ("fill_count", 5, 0, 30),
         ("grammar_count", 3, 0, 10),
@@ -3755,13 +3755,15 @@ def load_vocab_rule_context(material_date=None):
 
 def load_settings():
     ensure_settings_store()
+    if DATABASE_URL:
+        postgres_settings = load_postgres_settings()
+        if postgres_settings:
+            return normalize_settings(postgres_settings)
+        return normalize_settings({})
+
     with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-    sqlite_settings = normalize_settings(dict(rows))
-    postgres_settings = load_postgres_settings()
-    if postgres_settings:
-        return normalize_settings(sqlite_settings | postgres_settings)
-    return sqlite_settings
+    return normalize_settings(dict(rows))
 
 
 def load_postgres_settings():
