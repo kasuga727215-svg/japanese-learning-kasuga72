@@ -10698,15 +10698,24 @@ def generate_daily_material(
 
     telegram_status = "未發送"
     telegram_dispatched_async = False
-    if notify_telegram:
+    telegram_delivery = "web_async" if notify_telegram else "external_cron"
+    try:
+        telegram_message = build_telegram_notification(material, date, app_url)
+    except Exception as e:
+        telegram_message = ""
+        telegram_status = f"Telegram notification build failed: {e}"
+    if notify_telegram and telegram_message:
         try:
             telegram_dispatched_async = send_telegram_message_async(
-                build_telegram_notification(material, date, app_url),
+                telegram_message,
                 context=f"{generation_trigger}:{save_info['material_key']}",
             )
             telegram_status = "Telegram 通知已排入背景發送"
         except Exception as e:
             telegram_status = f"Telegram 通知發送失敗：{e}"
+
+    if not notify_telegram:
+        telegram_status = "Telegram delivery delegated to cron_generate.py"
 
     invalidate_dashboard_cache("daily material generated")
     return {
@@ -10720,6 +10729,9 @@ def generate_daily_material(
         "generation_trigger": generation_trigger,
         "telegram": telegram_status,
         "telegram_dispatched_async": telegram_dispatched_async,
+        "telegram_delivery": telegram_delivery,
+        "telegram_message": telegram_message,
+        "notification_message": telegram_message,
         "generation_mode": raw_material.get("metadata", {}).get("generation_mode", mode),
         "ai_used": bool(raw_material.get("metadata", {}).get("ai_used", False)),
         "fallback_used": bool(raw_material.get("metadata", {}).get("fallback_used", False)),
@@ -10733,7 +10745,7 @@ def generate_daily_material(
     }
 
 
-def run_daily_schedule(app_url=None, mode="local"):
+def run_daily_schedule(app_url=None, mode="local", notify_telegram=True):
     date = get_today_taipei_date()
     print(f"[daily-schedule] start date={date}")
     try:
@@ -10767,6 +10779,7 @@ def run_daily_schedule(app_url=None, mode="local"):
                     material_date=date,
                     generation_source="scheduled",
                     generation_trigger="cron",
+                    notify_telegram=notify_telegram,
                 )
             except Exception as generation_exc:
                 print(
@@ -10781,27 +10794,44 @@ def run_daily_schedule(app_url=None, mode="local"):
                     material_date=date,
                     generation_source="scheduled",
                     generation_trigger="cron",
+                    notify_telegram=notify_telegram,
                 )
                 result["fallback_used"] = True
                 result["primary_error"] = str(generation_exc)
             print(f"[daily-schedule] save material success date={date} material_key={result.get('material_key')}")
             print(f"[daily-schedule] reload material from db success date={date} material_key={result.get('material_key')}")
-            print(f"[daily-schedule] telegram dispatch async date={date} material_key={result.get('material_key')}")
+            print(
+                "[daily-schedule] telegram delivery "
+                f"mode={result.get('telegram_delivery')} date={date} material_key={result.get('material_key')}"
+            )
             return result
         print(f"[daily-schedule] reload material from db success date={date} material_key={material.get('material_key')}")
+        telegram_dispatched_async = False
+        telegram_delivery = "web_async" if notify_telegram else "external_cron"
+        telegram_message = ""
         try:
-            telegram_dispatched_async = send_telegram_message_async(
-                build_telegram_notification(material, date, app_url),
-                context=f"cron-existing:{material.get('material_key')}",
-            )
+            telegram_message = build_telegram_notification(material, date, app_url)
         except Exception as telegram_exc:
-            telegram_dispatched_async = False
             print(
-                "[daily-schedule] telegram queue failed "
+                "[daily-schedule] telegram message build failed "
                 f"date={date} material_key={material.get('material_key')} reason={telegram_exc}"
             )
+        if notify_telegram and telegram_message:
+            try:
+                telegram_dispatched_async = send_telegram_message_async(
+                    telegram_message,
+                    context=f"cron-existing:{material.get('material_key')}",
+                )
+            except Exception as telegram_exc:
+                print(
+                    "[daily-schedule] telegram queue failed "
+                    f"date={date} material_key={material.get('material_key')} reason={telegram_exc}"
+                )
         telegram_status = "Telegram 通知已排入背景發送" if telegram_dispatched_async else "Telegram 通知未排入背景發送"
-        print(f"[daily-schedule] telegram dispatch async date={date} material_key={material.get('material_key')}")
+        print(
+            "[daily-schedule] telegram delivery "
+            f"mode={telegram_delivery} date={date} material_key={material.get('material_key')}"
+        )
         invalidate_dashboard_cache("daily schedule material ready")
         return {
             "ok": True,
@@ -10814,7 +10844,10 @@ def run_daily_schedule(app_url=None, mode="local"):
             "generation_mode": material.get("metadata", {}).get("generation_mode", "local"),
             "ai_used": bool(material.get("metadata", {}).get("ai_used", False)),
             "telegram_dispatched_async": telegram_dispatched_async,
-            "telegram": "Telegram 通知已排入背景發送",
+            "telegram_delivery": telegram_delivery,
+            "telegram_message": telegram_message,
+            "notification_message": telegram_message,
+            "telegram": telegram_status,
         }
     except Exception as exc:
         print(f"[daily-schedule] failed reason={exc}")
@@ -12651,10 +12684,18 @@ def api_cron_daily_push():
     cron_started = time.perf_counter()
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
         return jsonify({"ok": False, "error": "unauthorized", "message": "unauthorized"}), 401
+    notify_telegram = str(request.args.get("notify", "1")).strip().lower() not in {"0", "false", "no", "off"}
     try:
-        payload = run_daily_schedule(app_url=APP_URL, mode=request.args.get("mode", "local"))
+        payload = run_daily_schedule(
+            app_url=APP_URL,
+            mode=request.args.get("mode", "local"),
+            notify_telegram=notify_telegram,
+        )
         elapsed_ms = round((time.perf_counter() - cron_started) * 1000)
         payload["cron_total_elapsed_ms"] = elapsed_ms
+        if not notify_telegram:
+            payload["telegram_delivery"] = "external_cron"
+            payload["telegram_dispatched_async"] = False
         print(f"[cron] daily_push success elapsed_ms={elapsed_ms}")
         return jsonify(payload), 200
     except Exception as e:
