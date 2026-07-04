@@ -108,7 +108,6 @@ APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
-DAILY_CRON_DISABLE_FLAGS = ("DISABLE_DAILY_CRON", "DAILY_CRON_DISABLED", "STOP_DAILY_CRON")
 MANUAL_GENERATE_TIMEOUT_SECONDS = read_int_env("MANUAL_GENERATE_TIMEOUT_SECONDS", 20, 1, 55)
 LOCAL_GENERATION_SAFE_MODE_DEFAULT = os.environ.get("LOCAL_GENERATION_SAFE_MODE", "true").strip().lower()
 LOCAL_SELECTION_COOLDOWN_DAYS = read_int_env("LOCAL_SELECTION_COOLDOWN_DAYS", 7, 0, 30)
@@ -166,14 +165,6 @@ class ManualGenerateTimeout(Exception):
         self.stage = stage
         self.elapsed_ms = elapsed_ms
         self.timeout_seconds = timeout_seconds
-
-
-def env_flag_enabled(name):
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
-
-
-def daily_cron_disabled():
-    return any(env_flag_enabled(name) for name in DAILY_CRON_DISABLE_FLAGS)
 
 
 def manual_generate_timeout_payload(error):
@@ -12910,9 +12901,8 @@ def api_generate():
 @app.route("/api/cron/daily-push", methods=["GET", "POST"])
 def api_cron_daily_push():
     cron_started = time.perf_counter()
-    if daily_cron_disabled():
-        print("[cron-api] skipped reason=daily_cron_disabled")
-        return jsonify({"ok": True, "skipped": True, "reason": "daily_cron_disabled"}), 200
+    print("[cron-api] skipped reason=daily_cron_disabled_manual_only")
+    return jsonify({"ok": True, "skipped": True, "reason": "daily_cron_disabled_manual_only"}), 200
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
         return jsonify({"ok": False, "error": "unauthorized", "message": "unauthorized"}), 401
     notify_telegram = str(request.args.get("notify", "1")).strip().lower() not in {"0", "false", "no", "off"}
