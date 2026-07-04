@@ -6142,6 +6142,82 @@ def record_vocab_selection_logs(items, selected_for="word", material_date=None, 
         conn.commit()
 
 
+def _record_vocab_selection_logs_safely(
+    items,
+    selected_for="word",
+    material_date=None,
+    material_key=None,
+    material_version_no=None,
+    warning="vocab_selection_log_failed",
+):
+    try:
+        record_vocab_selection_logs(
+            items,
+            selected_for=selected_for,
+            material_date=material_date,
+            material_key=material_key,
+            material_version_no=material_version_no,
+        )
+        return ""
+    except BaseException as exc:
+        print(
+            "[vocab-selector] selection log best-effort failed "
+            f"selected_for={selected_for} material_key={material_key}; reason={exc}"
+        )
+        try:
+            print(traceback.format_exc())
+        except Exception:
+            pass
+        return warning
+
+
+def best_effort_record_vocab_selection_logs(
+    items,
+    selected_for="word",
+    material_date=None,
+    material_key=None,
+    material_version_no=None,
+):
+    if not items:
+        return ""
+    warning = f"{selected_for}_selection_log_failed" if selected_for else "vocab_selection_log_failed"
+    if DATABASE_URL:
+        result = {"warning": ""}
+
+        def worker():
+            result["warning"] = _record_vocab_selection_logs_safely(
+                items,
+                selected_for=selected_for,
+                material_date=material_date,
+                material_key=material_key,
+                material_version_no=material_version_no,
+                warning=warning,
+            )
+
+        thread = threading.Thread(
+            target=worker,
+            name=f"{selected_for or 'vocab'}-selection-log-{material_key or 'unknown'}",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(0.05)
+        if thread.is_alive():
+            print(
+                "[vocab-selector] selection log deferred "
+                f"selected_for={selected_for} material_key={material_key}"
+            )
+            return f"{selected_for}_selection_log_deferred" if selected_for else "vocab_selection_log_deferred"
+        return result["warning"]
+    return _record_vocab_selection_logs_safely(
+        items,
+        selected_for=selected_for,
+        material_date=material_date,
+        material_key=material_key,
+        material_version_no=material_version_no,
+        warning=warning,
+    )
+
+
 def sql_placeholders(count):
     return ", ".join(["%s" if DATABASE_URL else "?"] * count)
 
@@ -8991,26 +9067,49 @@ def record_grammar_selection(grammar_items, material_date, material_key=None, ma
 
 
 def best_effort_record_grammar_selection(grammar_items, material_date, material_key=None, material_version_no=None):
-    try:
-        record_grammar_selection(
-            grammar_items,
-            material_date,
-            material_key=material_key,
-            material_version_no=material_version_no,
-        )
+    if not grammar_items:
         return ""
-    except BaseException as exc:
-        warning = "grammar_selection_log_failed"
-        print(
-            "[grammar-selector] selection log best-effort failed "
-            f"material_key={material_key}; reason={exc}"
-        )
-        try:
-            print(traceback.format_exc())
-        except Exception:
-            pass
-        return warning
 
+    def run_safely():
+        try:
+            record_grammar_selection(
+                grammar_items,
+                material_date,
+                material_key=material_key,
+                material_version_no=material_version_no,
+            )
+            return ""
+        except BaseException as exc:
+            warning = "grammar_selection_log_failed"
+            print(
+                "[grammar-selector] selection log best-effort failed "
+                f"material_key={material_key}; reason={exc}"
+            )
+            try:
+                print(traceback.format_exc())
+            except Exception:
+                pass
+            return warning
+
+    if DATABASE_URL:
+        result = {"warning": ""}
+
+        def worker():
+            result["warning"] = run_safely()
+
+        thread = threading.Thread(
+            target=worker,
+            name=f"grammar-selection-log-{material_key or 'unknown'}",
+            daemon=True,
+        )
+        thread.start()
+        thread.join(0.05)
+        if thread.is_alive():
+            print(f"[grammar-selector] selection log deferred material_key={material_key}")
+            return "grammar_selection_log_deferred"
+        return result["warning"]
+
+    return run_safely()
 
 def select_grammar_points(grammar_level, grammar_count, material_date=None, allow_level_fallback=True, ignore_recent=False):
     selector_started = time.perf_counter()
@@ -10229,28 +10328,24 @@ def save_material_for_date(material_date, material, settings, generation_source=
                 cur.execute("UPDATE materials SET is_latest = FALSE WHERE material_date = %s", (date_iso,))
                 cur.executemany(f"INSERT INTO materials ({columns_sql}) VALUES ({placeholders})", rows)
             conn.commit()
-        try:
-            record_vocab_selection_logs(
-                vocab_list,
-                selected_for="word",
-                material_date=date_iso,
-                material_key=material_key,
-                material_version_no=version_no,
-            )
-        except Exception as exc:
-            print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
-            print(traceback.format_exc())
-        try:
-            record_vocab_selection_logs(
-                verb_list,
-                selected_for="verb",
-                material_date=date_iso,
-                material_key=material_key,
-                material_version_no=version_no,
-            )
-        except Exception as exc:
-            print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
-            print(traceback.format_exc())
+        word_log_warning = best_effort_record_vocab_selection_logs(
+            vocab_list,
+            selected_for="word",
+            material_date=date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+        if word_log_warning:
+            selection_log_warnings.append(word_log_warning)
+        verb_log_warning = best_effort_record_vocab_selection_logs(
+            verb_list,
+            selected_for="verb",
+            material_date=date_iso,
+            material_key=material_key,
+            material_version_no=version_no,
+        )
+        if verb_log_warning:
+            selection_log_warnings.append(verb_log_warning)
         grammar_log_warning = best_effort_record_grammar_selection(
             material.get("grammar_points") or [],
             date_iso,
@@ -10275,28 +10370,24 @@ def save_material_for_date(material_date, material, settings, generation_source=
     df.loc[df["material_date"] == date_iso, "is_latest"] = "false"
     output = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     output[COLUMNS].to_csv(DATABASE_FILE, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_MINIMAL)
-    try:
-        record_vocab_selection_logs(
-            vocab_list,
-            selected_for="word",
-            material_date=date_iso,
-            material_key=material_key,
-            material_version_no=version_no,
-        )
-    except Exception as exc:
-        print(f"[vocab-selector] selection log write failed material_key={material_key}; reason={exc}")
-        print(traceback.format_exc())
-    try:
-        record_vocab_selection_logs(
-            verb_list,
-            selected_for="verb",
-            material_date=date_iso,
-            material_key=material_key,
-            material_version_no=version_no,
-        )
-    except Exception as exc:
-        print(f"[verb-selector] selection log write failed material_key={material_key}; reason={exc}")
-        print(traceback.format_exc())
+    word_log_warning = best_effort_record_vocab_selection_logs(
+        vocab_list,
+        selected_for="word",
+        material_date=date_iso,
+        material_key=material_key,
+        material_version_no=version_no,
+    )
+    if word_log_warning:
+        selection_log_warnings.append(word_log_warning)
+    verb_log_warning = best_effort_record_vocab_selection_logs(
+        verb_list,
+        selected_for="verb",
+        material_date=date_iso,
+        material_key=material_key,
+        material_version_no=version_no,
+    )
+    if verb_log_warning:
+        selection_log_warnings.append(verb_log_warning)
     grammar_log_warning = best_effort_record_grammar_selection(
         material.get("grammar_points") or [],
         date_iso,

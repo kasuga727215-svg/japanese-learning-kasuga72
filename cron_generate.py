@@ -151,6 +151,9 @@ def main():
     print(json.dumps(payload, ensure_ascii=False))
     if not payload.get("ok"):
         return 1
+    if not payload.get("material_key"):
+        print("[cron-generate] api_error reason=missing_material_key")
+        return 1
     telegram_message = payload.get("telegram_message") or payload.get("notification_message") or build_fallback_telegram_message(payload)
     if telegram_message:
         send_telegram_from_cron(telegram_message)
