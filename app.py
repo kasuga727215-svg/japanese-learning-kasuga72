@@ -108,6 +108,8 @@ APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
 ARCHIVE_DATES_CACHE_TTL_SECONDS = int(os.environ.get("ARCHIVE_DATES_CACHE_TTL_SECONDS", "60"))
+DAILY_CRON_DISABLE_FLAGS = ("DISABLE_DAILY_CRON", "DAILY_CRON_DISABLED", "STOP_DAILY_CRON")
+MANUAL_GENERATE_TIMEOUT_SECONDS = read_int_env("MANUAL_GENERATE_TIMEOUT_SECONDS", 20, 1, 55)
 LOCAL_GENERATION_SAFE_MODE_DEFAULT = os.environ.get("LOCAL_GENERATION_SAFE_MODE", "true").strip().lower()
 LOCAL_SELECTION_COOLDOWN_DAYS = read_int_env("LOCAL_SELECTION_COOLDOWN_DAYS", 7, 0, 30)
 LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX = os.environ.get("LOCAL_SELECTION_ALLOW_COOLDOWN_RELAX", "false").strip().lower() == "true"
@@ -156,6 +158,67 @@ PRACTICE_QUESTION_TYPE_ALIASES = {
     "passive": "ukemi_form",
     "passive_form": "ukemi_form",
 }
+
+
+class ManualGenerateTimeout(Exception):
+    def __init__(self, stage, elapsed_ms, timeout_seconds):
+        super().__init__("manual generation exceeded time budget")
+        self.stage = stage
+        self.elapsed_ms = elapsed_ms
+        self.timeout_seconds = timeout_seconds
+
+
+def env_flag_enabled(name):
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+def daily_cron_disabled():
+    return any(env_flag_enabled(name) for name in DAILY_CRON_DISABLE_FLAGS)
+
+
+def manual_generate_timeout_payload(error):
+    return {
+        "ok": False,
+        "error": "manual_generate_timeout",
+        "reason": "manual generation exceeded time budget",
+        "message": "本地生成逾時，已放棄。請稍後再試或降低生成數量。",
+        "stage": getattr(error, "stage", "unknown"),
+        "elapsed_ms": getattr(error, "elapsed_ms", 0),
+        "timeout_seconds": getattr(error, "timeout_seconds", MANUAL_GENERATE_TIMEOUT_SECONDS),
+    }
+
+
+def run_manual_generation_with_timeout(operation, timeout_seconds=None, started_at=None):
+    timeout_seconds = timeout_seconds or MANUAL_GENERATE_TIMEOUT_SECONDS
+    started_at = started_at or time.monotonic()
+    deadline = started_at + timeout_seconds
+    stage_state = {"stage": "start"}
+    result = {}
+
+    def deadline_check(stage):
+        stage_state["stage"] = stage
+        elapsed_ms = round((time.monotonic() - started_at) * 1000)
+        if time.monotonic() >= deadline:
+            raise ManualGenerateTimeout(stage, elapsed_ms, timeout_seconds)
+
+    def worker():
+        try:
+            result["value"] = operation(deadline_check)
+        except Exception as exc:
+            result["error"] = exc
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise ManualGenerateTimeout(stage_state["stage"], round((time.monotonic() - started_at) * 1000), timeout_seconds)
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(remaining)
+    if thread.is_alive():
+        elapsed_ms = round((time.monotonic() - started_at) * 1000)
+        raise ManualGenerateTimeout(stage_state["stage"], elapsed_ms, timeout_seconds)
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
 PRACTICE_CANONICAL_FORM_ALIASES = {
     "renyou_form": ("renyou_form", "masu_stem", "renyou"),
     "te_form": ("te_form", "te"),
@@ -9456,9 +9519,11 @@ def select_fixed_quota_grammar_points(material_date=None):
     }
 
 
-def build_local_material(settings, force_seed=False, material_date=None):
+def build_local_material(settings, force_seed=False, material_date=None, deadline_check=None):
     material_started = time.perf_counter()
     settings = normalize_settings(settings)
+    if deadline_check:
+        deadline_check("build_material_start")
     safe_mode = False
     vocab_count = int(settings["vocab_count"])
     verb_count = int(settings["verb_count"])
@@ -9507,6 +9572,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
     slang_quota = 0
 
     base_quota = max(0, vocab_count - slang_quota)
+    if deadline_check:
+        deadline_check("word_selector_before")
     if force_seed:
         vocab = []
     else:
@@ -9619,6 +9686,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
             if warning not in generation_warnings:
                 generation_warnings.append(warning)
     vocab = vocab[:vocab_count]
+    if deadline_check:
+        deadline_check("word_selector_after")
     selected_normalized_keys = [item_normalized_key(item) for item in vocab if item_normalized_key(item)]
     category_counts = Counter(vocab_category_group(item) for item in vocab)
     vocab_source_summary = Counter((item.get("source") or "unknown") for item in vocab)
@@ -9643,6 +9712,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
     verb_stage_counts = {"db_pure_verbs": 0, "pure_verb_safe_pool": 0, "verbs_table": 0}
     verbs = []
     selected_verb_keys = []
+    if deadline_check:
+        deadline_check("verb_selector_before")
     verb_recent_keys_by_days = {
         days: get_recent_used_verb_keys(material_date=material_date or get_today_taipei_date(), days=days)
         for days in local_selection_cooldown_sequence()
@@ -9781,6 +9852,8 @@ def build_local_material(settings, force_seed=False, material_date=None):
     selected_verb_keys = [item_normalized_key(item) for item in verbs if item_normalized_key(item)]
     suru_verb_count = sum(1 for item in verbs if material_verb_is_suru(item))
     pure_verb_count = max(0, len(verbs) - suru_verb_count)
+    if deadline_check:
+        deadline_check("verb_selector_after")
     final_verb_stage_counts = {"db_pure_verbs": 0, "pure_verb_safe_pool": 0, "verbs_table": 0}
     for item in verbs:
         source = str(item.get("source") or "").strip()
@@ -9795,7 +9868,11 @@ def build_local_material(settings, force_seed=False, material_date=None):
     wrong_items = due_wrong_answer_summary()
     source_counts["wrong"] = len(wrong_items)
     quiz = build_local_quiz(vocab, verbs, settings)
+    if deadline_check:
+        deadline_check("grammar_selector_before")
     grammar_points, grammar_stats = select_fixed_quota_grammar_points(material_date or get_today_taipei_date())
+    if deadline_check:
+        deadline_check("grammar_selector_after")
     grammar_examples = [
         {"jp": item.get("example_japanese", ""), "cn": item.get("example_zh", "")}
         for item in grammar_points[:2]
@@ -10653,8 +10730,11 @@ def generate_daily_material(
     notify_telegram=True,
     generation_source="manual_local",
     generation_trigger="manual",
+    deadline_check=None,
 ):
     settings, settings_source, db_settings = resolve_generation_settings_with_trace(posted_settings, persist=bool(posted_settings))
+    if deadline_check:
+        deadline_check("resolve_settings_after")
     mode = "local" if use_sample else normalize_generation_mode(mode)
     print(f"[material-generator] mode={mode} start")
     print(
@@ -10679,9 +10759,18 @@ def generate_daily_material(
 
     if mode == "local":
         print("[feature-boundary] daily_material mode=local skip gemini")
-        raw_material = build_local_material(settings, force_seed=use_sample, material_date=material_date or get_today_taipei_date())
+        if deadline_check:
+            deadline_check("build_material_before")
+        raw_material = build_local_material(
+            settings,
+            force_seed=use_sample,
+            material_date=material_date or get_today_taipei_date(),
+            deadline_check=deadline_check,
+        )
+        if deadline_check:
+            deadline_check("build_material_after")
     elif mode == "ai_enhance":
-        raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date())
+        raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date(), deadline_check=deadline_check)
         raw_material["metadata"]["generation_mode"] = "ai_enhance"
         raw_material["metadata"]["ai_used"] = False
         raw_material["metadata"]["fallback_used"] = False
@@ -10699,7 +10788,7 @@ def generate_daily_material(
             }
         except Exception as e:
             print(f"[material-generator] ai_full failed; fallback local; error={classify_gemini_error(e)}")
-            raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date())
+            raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date(), deadline_check=deadline_check)
             raw_material["metadata"]["generation_mode"] = "local"
             raw_material["metadata"]["ai_used"] = False
             raw_material["metadata"]["fallback_used"] = True
@@ -10766,6 +10855,8 @@ def generate_daily_material(
     print(f"[count-validation] requested_words={requested_words} actual_words={actual_words} word_count_matched={str(actual_words >= requested_words).lower()}")
     print(f"[count-validation] requested_verbs={requested_verbs} actual_verbs={actual_verbs} verb_count_matched={str(actual_verbs >= requested_verbs).lower()}")
 
+    if deadline_check:
+        deadline_check("save_material_before")
     save_info = save_material_for_date(
         material_date or get_today_taipei_date(),
         raw_material,
@@ -10773,6 +10864,8 @@ def generate_daily_material(
         generation_source=generation_source,
         generation_mode=raw_material.get("metadata", {}).get("generation_mode", mode),
     )
+    if deadline_check:
+        deadline_check("save_material_after")
     date = save_info["date"]
     print(f"[material-generator] local material generated; ai_used={str(raw_material.get('metadata', {}).get('ai_used', False)).lower()}")
     print(f"[material-generator] material saved date={date} material_key={save_info['material_key']}")
@@ -10788,6 +10881,8 @@ def generate_daily_material(
         raise RuntimeError(f"教材寫入後重新讀取失敗：{save_info['material_key']}")
 
     telegram_status = "未發送"
+    if deadline_check:
+        deadline_check("telegram_before")
     telegram_dispatched_async = False
     telegram_delivery = "web_async" if notify_telegram else "external_cron"
     try:
@@ -12648,28 +12743,62 @@ def api_materials():
 def api_generate():
     mode = "local"
     data = {}
+    manual_started = time.monotonic()
     try:
         data = request.get_json(silent=True) or {}
         mode = request.args.get("mode") or data.get("mode") or "local"
+        use_sample = request.args.get("sample") == "1"
+        app_url = request.host_url.rstrip("/")
+        if normalize_generation_mode(mode) == "local":
+            print(f"[manual-generate] start timeout_seconds={MANUAL_GENERATE_TIMEOUT_SECONDS}")
+            result = run_manual_generation_with_timeout(
+                lambda deadline_check: generate_daily_material(
+                    use_sample=use_sample,
+                    posted_settings=data,
+                    app_url=app_url,
+                    mode=mode,
+                    generation_source="manual_local",
+                    deadline_check=deadline_check,
+                ),
+                timeout_seconds=MANUAL_GENERATE_TIMEOUT_SECONDS,
+                started_at=manual_started,
+            )
+            elapsed_ms = round((time.monotonic() - manual_started) * 1000)
+            print(f"[manual-generate] success elapsed_ms={elapsed_ms} material_key={result.get('material_key', '')}")
+            return jsonify(result)
         return jsonify(
             generate_daily_material(
                 use_sample=request.args.get("sample") == "1",
                 posted_settings=data,
-                app_url=request.host_url.rstrip("/"),
+                app_url=app_url,
                 mode=mode,
                 generation_source="manual_local",
             )
         )
+    except ManualGenerateTimeout as e:
+        print(f"[manual-generate] timeout elapsed_ms={e.elapsed_ms} stage={e.stage}")
+        return jsonify(manual_generate_timeout_payload(e)), 200
     except Exception as e:
         if mode == "local":
             print(f"[local-generate] primary local generation failed; trying seed fallback; reason={e}")
             print(traceback.format_exc())
             try:
-                settings, settings_source, db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
-                fallback_material = build_local_material(
-                    settings,
-                    force_seed=True,
-                    material_date=get_today_taipei_date(),
+                def fallback_operation(deadline_check):
+                    settings, settings_source, db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
+                    deadline_check("resolve_settings_after")
+                    fallback_material = build_local_material(
+                        settings,
+                        force_seed=True,
+                        material_date=get_today_taipei_date(),
+                        deadline_check=deadline_check,
+                    )
+                    deadline_check("build_material_after")
+                    return settings, settings_source, db_settings, fallback_material
+
+                settings, settings_source, db_settings, fallback_material = run_manual_generation_with_timeout(
+                    fallback_operation,
+                    timeout_seconds=MANUAL_GENERATE_TIMEOUT_SECONDS,
+                    started_at=manual_started,
                 )
                 requested_words = int(settings.get("vocab_count") or 0)
                 requested_verbs = int(settings.get("verb_count") or 0)
@@ -12713,6 +12842,9 @@ def api_generate():
                 warnings = fallback_material["metadata"].setdefault("warnings", [])
                 if "local_generation_primary_failed_used_seed_fallback" not in warnings:
                     warnings.append("local_generation_primary_failed_used_seed_fallback")
+                elapsed_ms = round((time.monotonic() - manual_started) * 1000)
+                if elapsed_ms >= MANUAL_GENERATE_TIMEOUT_SECONDS * 1000:
+                    raise ManualGenerateTimeout("save_material_before", elapsed_ms, MANUAL_GENERATE_TIMEOUT_SECONDS)
                 save_info = save_material_for_date(
                     get_today_taipei_date(),
                     fallback_material,
@@ -12742,7 +12874,12 @@ def api_generate():
                         "settings_trace": settings_trace,
                     }
                 )
+            except ManualGenerateTimeout as timeout_exc:
+                print(f"[manual-generate] timeout elapsed_ms={timeout_exc.elapsed_ms} stage={timeout_exc.stage}")
+                return jsonify(manual_generate_timeout_payload(timeout_exc)), 200
             except Exception as fallback_exc:
+                elapsed_ms = round((time.monotonic() - manual_started) * 1000)
+                print(f"[manual-generate] failed error={fallback_exc} elapsed_ms={elapsed_ms}")
                 print(f"[local-generate] seed fallback failed; reason={fallback_exc}")
                 print(traceback.format_exc())
                 return jsonify(
@@ -12773,6 +12910,9 @@ def api_generate():
 @app.route("/api/cron/daily-push", methods=["GET", "POST"])
 def api_cron_daily_push():
     cron_started = time.perf_counter()
+    if daily_cron_disabled():
+        print("[cron-api] skipped reason=daily_cron_disabled")
+        return jsonify({"ok": True, "skipped": True, "reason": "daily_cron_disabled"}), 200
     if CRON_SECRET and request.args.get("secret") != CRON_SECRET:
         return jsonify({"ok": False, "error": "unauthorized", "message": "unauthorized"}), 401
     notify_telegram = str(request.args.get("notify", "1")).strip().lower() not in {"0", "false", "no", "off"}

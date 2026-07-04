@@ -1103,7 +1103,24 @@
       applyControlCenterSettings(persistedSettings, "POST /api/settings before generate");
       const query = useSample ? "?sample=1&mode=local" : `?mode=${encodeURIComponent(generationMode)}`;
       const generationPayload = {...collectControlCenterSettings(), mode: generationMode};
-      const result = await api(`/api/generate${query}`, { method: "POST", body: JSON.stringify(generationPayload) });
+      const manualTimeoutSeconds = Number(window.MANUAL_GENERATE_FRONTEND_TIMEOUT_SECONDS || 25);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), manualTimeoutSeconds * 1000);
+      let result;
+      try {
+        result = await api(`/api/generate${query}`, {
+          method: "POST",
+          body: JSON.stringify(generationPayload),
+          signal: controller.signal
+        });
+      } catch (error) {
+        if (error && error.name === "AbortError") {
+          throw new Error("本地生成逾時，已放棄。請稍後再試或降低生成數量。");
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
       const validation = result.count_validation || {};
       const requestedWords = validation.word_count_requested ?? generationPayload.word_count;
       const actualWords = validation.word_count_actual ?? requestedWords;

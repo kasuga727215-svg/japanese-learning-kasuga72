@@ -8,6 +8,15 @@ from urllib.request import Request, urlopen
 
 
 TRANSIENT_HTTP_STATUSES = {502, 503, 504}
+DAILY_CRON_DISABLE_FLAGS = ("DISABLE_DAILY_CRON", "DAILY_CRON_DISABLED", "STOP_DAILY_CRON")
+
+
+def env_flag_enabled(name):
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
+
+
+def daily_cron_disabled():
+    return any(env_flag_enabled(name) for name in DAILY_CRON_DISABLE_FLAGS)
 
 
 def build_cron_url():
@@ -113,6 +122,10 @@ def send_telegram_from_cron(message):
 
 
 def main():
+    if daily_cron_disabled():
+        print("[cron-generate] disabled by env flag; skip daily generation")
+        return 0
+
     url = build_cron_url()
     retries = max(1, int(os.environ.get("CRON_HTTP_RETRIES", "4") or 4))
     retry_delay = max(1, int(os.environ.get("CRON_HTTP_RETRY_DELAY_SECONDS", "12") or 12))
