@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -6500,7 +6501,15 @@ def allocate_vocab_slots(settings, available_rules, word_count):
     return {key: count for key, count in slots.items() if count > 0}
 
 
-def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
+def material_vocab_from_six_main_rules(
+    settings,
+    limit,
+    exclude_keys=None,
+    return_stats=False,
+    material_date=None,
+    recent_keys_by_days=None,
+    word_usage_stats=None,
+):
     started = time.perf_counter()
     material_date = canonical_material_date(material_date or get_today_taipei_date())
     stats = {
@@ -6572,14 +6581,28 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if normalize_vocab_key(key)}
     cooldown_sequence = local_selection_cooldown_sequence()
-    recent_keys_by_days = {
-        days: get_recent_used_normalized_keys(days, material_date=material_date)
-        for days in cooldown_sequence
-        if days > 0
-    }
-    word_usage_stats = get_selection_usage_stats("word")
+    if recent_keys_by_days is None:
+        recent_keys_by_days = {
+            days: get_recent_used_normalized_keys(days, material_date=material_date)
+            for days in cooldown_sequence
+            if days > 0
+        }
+    if word_usage_stats is None:
+        word_usage_stats = get_selection_usage_stats("word")
     stats["recent_used_word_count"] = len(recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()))
     sns_slang_ids = []
+
+    def allocation_elapsed_ms():
+        return round((time.perf_counter() - started) * 1000)
+
+    def allocation_soft_timeout():
+        return (time.perf_counter() - started) >= 2.0
+
+    def note_allocation_soft_timeout():
+        stats["soft_timeout"] = True
+        stats.setdefault("warnings", [])
+        if "vocab_allocation_soft_timeout_used_seed_fallback" not in stats["warnings"]:
+            stats["warnings"].append("vocab_allocation_soft_timeout_used_seed_fallback")
 
     def select_item(item, rule_key):
         key = item_normalized_key(item)
@@ -6609,6 +6632,9 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         return True
 
     def rows_for_rule(rule, needed, cooldown_days):
+        if allocation_soft_timeout():
+            note_allocation_soft_timeout()
+            return []
         rule_key = rule["rule_key"]
         exclude_for_sql = set(selected_keys)
         if cooldown_days > 0:
@@ -6658,6 +6684,9 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
                 break
             selected_before_cooldown = len(selected)
             for rule in available_rules:
+                if allocation_soft_timeout():
+                    note_allocation_soft_timeout()
+                    break
                 if len(selected) >= limit:
                     break
                 rule_key = rule["rule_key"]
@@ -6687,9 +6716,11 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
                     select_item(item, rule_key)
             if len(selected) > selected_before_cooldown:
                 stats["cooldown_days_used"] = cooldown_days
+            if allocation_soft_timeout():
+                break
 
     select_with_slot_limits(planned_slots)
-    if len(selected) < limit:
+    if len(selected) < limit and not stats.get("soft_timeout"):
         refill_limits = {
             rule["rule_key"]: min(clamp_int(rule.get("max_per_material", 0), 0, 0), limit)
             for rule in available_rules
@@ -6715,7 +6746,11 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
         item.pop("_raw_source", None)
         item.pop("_matched_rule_keys", None)
     stats["selected_from_db_count"] = len(selected)
-    stats["generation_elapsed_ms"] = round((time.perf_counter() - started) * 1000)
+    stats["generation_elapsed_ms"] = allocation_elapsed_ms()
+    if stats["generation_elapsed_ms"] > 2000:
+        stats.setdefault("warnings", [])
+        if "vocab_allocation_elapsed_over_2000ms" not in stats["warnings"]:
+            stats["warnings"].append("vocab_allocation_elapsed_over_2000ms")
     print(
         f"[vocab-allocation] requested={limit} "
         f"available_rules={stats['rule_selection']['available_rules']} "
@@ -6745,8 +6780,24 @@ def material_vocab_from_six_main_rules(settings, limit, exclude_keys=None, retur
     return (selected, stats) if return_stats else selected
 
 
-def material_vocab_from_vocabulary_pool(settings, limit, exclude_keys=None, return_stats=False, material_date=None):
-    return material_vocab_from_six_main_rules(settings, limit, exclude_keys=exclude_keys, return_stats=return_stats, material_date=material_date)
+def material_vocab_from_vocabulary_pool(
+    settings,
+    limit,
+    exclude_keys=None,
+    return_stats=False,
+    material_date=None,
+    recent_keys_by_days=None,
+    word_usage_stats=None,
+):
+    return material_vocab_from_six_main_rules(
+        settings,
+        limit,
+        exclude_keys=exclude_keys,
+        return_stats=return_stats,
+        material_date=material_date,
+        recent_keys_by_days=recent_keys_by_days,
+        word_usage_stats=word_usage_stats,
+    )
     started = time.perf_counter()
     stats = {
         "selection_strategy": "safe_jlpt_basic_only" if local_generation_safe_mode_enabled() else "safe_jlpt_prefilter_first",
@@ -7800,19 +7851,28 @@ LOCAL_SEED_VERBS = [
 ]
 
 
-def material_seed_vocab(settings, limit, exclude_keys=None, material_date=None):
+def material_seed_vocab(
+    settings,
+    limit,
+    exclude_keys=None,
+    material_date=None,
+    recent_keys_by_days=None,
+    word_usage_stats=None,
+):
     if limit <= 0:
         return []
     seed = seed_basic_safe_pool(settings)
     selected = []
     seen = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
     cooldown_sequence = local_selection_cooldown_sequence()
-    recent_keys_by_days = {
-        days: get_recent_used_normalized_keys(days, material_date=material_date)
-        for days in cooldown_sequence
-        if days > 0
-    }
-    word_usage_stats = get_selection_usage_stats("word")
+    if recent_keys_by_days is None:
+        recent_keys_by_days = {
+            days: get_recent_used_normalized_keys(days, material_date=material_date)
+            for days in cooldown_sequence
+            if days > 0
+        }
+    if word_usage_stats is None:
+        word_usage_stats = get_selection_usage_stats("word")
 
     def normalized_seed_item(item):
         word = first_text(item, ["word", "surface", "base_form"]).strip()
@@ -7876,7 +7936,16 @@ def enabled_jlpt_levels_for_vocab_supplement():
     return levels or ["N5", "N4"]
 
 
-def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, material_date=None, stage_name="safe_pool"):
+def material_safe_vocab_supplement(
+    settings,
+    limit,
+    levels,
+    exclude_keys=None,
+    material_date=None,
+    stage_name="safe_pool",
+    recent_keys=None,
+    word_usage_stats=None,
+):
     stats = {
         "selection_strategy": "safe_vocab_supplement",
         "selected_from_db_count": 0,
@@ -7904,8 +7973,10 @@ def material_safe_vocab_supplement(settings, limit, levels, exclude_keys=None, m
     target = settings.get("target_level", "")
     selected = []
     selected_keys = {normalize_vocab_key(key) for key in (exclude_keys or set()) if key}
-    word_usage_stats = get_selection_usage_stats("word")
-    recent_keys = get_recent_used_normalized_keys(LOCAL_SELECTION_COOLDOWN_DAYS, material_date=material_date)
+    if word_usage_stats is None:
+        word_usage_stats = get_selection_usage_stats("word")
+    if recent_keys is None:
+        recent_keys = get_recent_used_normalized_keys(LOCAL_SELECTION_COOLDOWN_DAYS, material_date=material_date)
     levels = [level for level in levels if level in LEVELS]
     for level in levels:
         if len(selected) >= limit:
@@ -8016,6 +8087,12 @@ def merge_vocab_selector_stats(target, source):
     target.setdefault("rejected_by_category_quota", {})
     for name, count in (source.get("rejected_by_category_quota") or {}).items():
         target["rejected_by_category_quota"][name] = target["rejected_by_category_quota"].get(name, 0) + count
+    target.setdefault("warnings", [])
+    for warning in (source.get("warnings") or []):
+        if warning and warning not in target["warnings"]:
+            target["warnings"].append(warning)
+    if source.get("soft_timeout"):
+        target["soft_timeout"] = True
     target["cooldown_days_used"] = min(
         target.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
         source.get("cooldown_days_used", LOCAL_SELECTION_COOLDOWN_DAYS),
@@ -8023,18 +8100,34 @@ def merge_vocab_selector_stats(target, source):
     return target
 
 
+@lru_cache(maxsize=None)
+def cached_seed_json_rows(path):
+    started = time.perf_counter()
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            loaded = json.load(file)
+        rows = tuple(dict(row) for row in loaded) if isinstance(loaded, list) else tuple()
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[seed-cache] miss path={path} count={len(rows)} elapsed_ms={elapsed_ms}")
+        return rows
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[seed-cache] miss path={path} failed elapsed_ms={elapsed_ms} reason={exc}")
+        return tuple()
+
+
+def load_cached_seed_json_rows(path):
+    before = cached_seed_json_rows.cache_info().hits
+    rows = cached_seed_json_rows(path)
+    after = cached_seed_json_rows.cache_info().hits
+    if after > before:
+        print(f"[seed-cache] hit path={path} count={len(rows)}")
+    return [dict(row) for row in rows]
+
+
 def load_basic_seed_vocab_items(settings=None):
-    global _BASIC_SEED_VOCAB_CACHE
-    if _BASIC_SEED_VOCAB_CACHE is None:
-        try:
-            with open(VOCABULARY_SEED_BASIC_FILE, "r", encoding="utf-8") as file:
-                loaded = json.load(file)
-            _BASIC_SEED_VOCAB_CACHE = loaded if isinstance(loaded, list) else []
-        except Exception as exc:
-            print(f"[vocab-selector] basic seed vocabulary unavailable; error={exc}")
-            _BASIC_SEED_VOCAB_CACHE = []
     target = (settings or {}).get("target_level", "")
-    rows = list(_BASIC_SEED_VOCAB_CACHE)
+    rows = load_cached_seed_json_rows(VOCABULARY_SEED_BASIC_FILE)
     if not target:
         return rows
     def seed_sort_key(row):
@@ -9565,11 +9658,29 @@ def build_local_material(settings, force_seed=False, material_date=None, deadlin
     base_quota = max(0, vocab_count - slang_quota)
     if deadline_check:
         deadline_check("word_selector_before")
+    word_cooldown_sequence = local_selection_cooldown_sequence()
+    word_recent_keys_by_days = {
+        days: get_recent_used_normalized_keys(days, material_date=material_date or get_today_taipei_date())
+        for days in word_cooldown_sequence
+        if days > 0
+    }
+    word_usage_stats = get_selection_usage_stats("word")
+    primary_word_pool_stats = {}
     if force_seed:
         vocab = []
     else:
-        vocab, pool_stats = material_vocab_from_vocabulary_pool(settings, base_quota, return_stats=True, material_date=material_date or get_today_taipei_date())
+        vocab, pool_stats = material_vocab_from_vocabulary_pool(
+            settings,
+            base_quota,
+            return_stats=True,
+            material_date=material_date or get_today_taipei_date(),
+            recent_keys_by_days=word_recent_keys_by_days,
+            word_usage_stats=word_usage_stats,
+        )
+        primary_word_pool_stats = pool_stats or {}
         merge_vocab_selector_stats(vocab_selector_stats, pool_stats)
+    if deadline_check:
+        deadline_check("word_primary_pool_after")
     vocab, duplicates, selected_keys = dedupe_vocab_items(vocab)
     duplicate_filtered_count += duplicates
     source_counts["vocabulary"] = len([item for item in vocab if item.get("source") in {"vocabulary_pool", "materials"}])
@@ -9610,6 +9721,8 @@ def build_local_material(settings, force_seed=False, material_date=None, deadlin
             exclude_keys=selected_keys,
             material_date=material_date or get_today_taipei_date(),
             stage_name=stage_key,
+            recent_keys=word_recent_keys_by_days.get(LOCAL_SELECTION_COOLDOWN_DAYS, set()),
+            word_usage_stats=word_usage_stats,
         )
         items, duplicates, selected_keys = dedupe_vocab_items(items, selected_keys)
         duplicate_filtered_count += duplicates
@@ -9627,7 +9740,29 @@ def build_local_material(settings, force_seed=False, material_date=None, deadlin
                 ordered.append(level)
         return ordered
 
-    if not force_seed and len(vocab) < vocab_count:
+    skip_db_reallocation = (
+        bool(primary_word_pool_stats.get("soft_timeout"))
+        or (
+            not force_seed
+            and base_quota > 0
+            and int(primary_word_pool_stats.get("pool_total_count", 0) or 0) < base_quota
+            and len(vocab) < vocab_count
+        )
+    )
+    if skip_db_reallocation:
+        warning = "insufficient_primary_word_pool_used_seed_fallback"
+        if primary_word_pool_stats.get("soft_timeout"):
+            warning = "vocab_allocation_soft_timeout_used_seed_fallback"
+        if warning not in generation_warnings:
+            generation_warnings.append(warning)
+        word_warnings.append(warning)
+        print(
+            "[word-selector] skip db reallocation "
+            f"pool_total={primary_word_pool_stats.get('pool_total_count', 0)} "
+            f"selected={len(vocab)} requested={vocab_count} reason={warning}"
+        )
+
+    if not force_seed and len(vocab) < vocab_count and not skip_db_reallocation:
         before_reallocation = len(vocab)
         add_vocab_supplement("reallocation_safe_pool", one_time_reallocation_levels())
         word_reallocated_slots += max(0, len(vocab) - before_reallocation)
@@ -9635,7 +9770,16 @@ def build_local_material(settings, force_seed=False, material_date=None, deadlin
     vocab_seed_fallback_count = 0
     if len(vocab) < vocab_count:
         before_seed_reallocation = len(vocab)
-        seed_items = material_seed_vocab(settings, vocab_count - len(vocab), exclude_keys=selected_keys, material_date=material_date or get_today_taipei_date())
+        seed_started = time.perf_counter()
+        seed_items = material_seed_vocab(
+            settings,
+            vocab_count - len(vocab),
+            exclude_keys=selected_keys,
+            material_date=material_date or get_today_taipei_date(),
+            recent_keys_by_days=word_recent_keys_by_days,
+            word_usage_stats=word_usage_stats,
+        )
+        seed_elapsed_ms = round((time.perf_counter() - seed_started) * 1000)
         seed_items, duplicates, selected_keys = dedupe_vocab_items(seed_items, selected_keys)
         duplicate_filtered_count += duplicates
         vocab.extend(seed_items)
@@ -9671,6 +9815,11 @@ def build_local_material(settings, force_seed=False, material_date=None, deadlin
                 vocab_selector_stats["selected_rule_counts"][rule_key] = vocab_selector_stats["selected_rule_counts"].get(rule_key, 0) + 1
         source_counts["seed"] += len(seed_items)
         seed_used = bool(seed_items)
+        print(
+            "[word-fallback] "
+            f"used={str(bool(seed_items)).lower()} selected={len(seed_items)} "
+            f"elapsed_ms={seed_elapsed_ms} remaining_before={vocab_count - before_seed_reallocation}"
+        )
     if len(vocab) < vocab_count:
         word_warnings.append("insufficient_words_after_one_time_reallocation")
         for warning in word_warnings:
