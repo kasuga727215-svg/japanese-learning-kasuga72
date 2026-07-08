@@ -94,14 +94,14 @@ def normalize_vocab_key(value):
     return text.lower()
 
 
-def bool_to_int(value, default=1):
+def bool_value(value, default=True):
     if value is None or value == "":
         return default
     if isinstance(value, bool):
-        return 1 if value else 0
+        return value
     if isinstance(value, (int, float)):
-        return 1 if value else 0
-    return 0 if str(value).strip().lower() in {"0", "false", "no", "off", "disabled"} else 1
+        return bool(value)
+    return str(value).strip().lower() not in {"0", "false", "no", "off", "disabled"}
 
 
 def int_or_none(value):
@@ -187,8 +187,8 @@ def normalize_seed_item(raw):
         "example_translation_zh": first_text(raw, ("example_translation_zh", "example_chinese", "example_translation")),
         "source": source,
         "priority": int_or_none(raw.get("priority")) or (5 if source == "seed_basic" else 1),
-        "is_active": bool_to_int(raw.get("is_active", raw.get("enabled", 1))),
-        "enabled": bool_to_int(raw.get("enabled", raw.get("is_active", 1))),
+        "is_active": bool_value(raw.get("is_active", raw.get("enabled", True))),
+        "enabled": bool_value(raw.get("enabled", raw.get("is_active", True))),
         "status": first_text(raw, ("status",)) or "active",
         "used_in_material_count": int_or_none(raw.get("used_in_material_count")) or 0,
         "last_used_at": clean_text(raw.get("last_used_at")),
@@ -317,12 +317,27 @@ def group_counts(db, column):
 
 
 def safe_pool_count(db):
+    columns = db.columns()
+    active_clauses = []
+    if "is_active" in columns:
+        active_clauses.append(
+            "COALESCE(is_active, TRUE) = TRUE"
+            if db.kind == "postgres"
+            else "COALESCE(is_active, 1) = 1"
+        )
+    if "enabled" in columns:
+        active_clauses.append(
+            "COALESCE(enabled, TRUE) = TRUE"
+            if db.kind == "postgres"
+            else "COALESCE(enabled, 1) = 1"
+        )
+    active_sql = " AND ".join(active_clauses) or "1 = 1"
     row = db.fetchone(
-        """
+        f"""
         SELECT COUNT(*) AS count
         FROM vocabulary_pool
         WHERE jlpt_level IN ('N5', 'N4', 'N3', 'N2', 'N1')
-          AND COALESCE(is_active, 1) = 1
+          AND {active_sql}
           AND COALESCE(NULLIF(meaning_zh, ''), '') <> ''
           AND COALESCE(NULLIF(reading_hiragana, ''), '') <> ''
           AND LOWER(COALESCE(quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')
