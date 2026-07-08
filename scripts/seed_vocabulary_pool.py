@@ -89,6 +89,11 @@ def clean_text(value):
     return text
 
 
+def timestamp_or_none(value):
+    text = clean_text(value)
+    return text or None
+
+
 def normalize_vocab_key(value):
     text = unicodedata.normalize("NFKC", clean_text(value))
     return text.lower()
@@ -191,8 +196,8 @@ def normalize_seed_item(raw):
         "enabled": bool_value(raw.get("enabled", raw.get("is_active", True))),
         "status": first_text(raw, ("status",)) or "active",
         "used_in_material_count": int_or_none(raw.get("used_in_material_count")) or 0,
-        "last_used_at": clean_text(raw.get("last_used_at")),
-        "created_at": clean_text(raw.get("created_at")) or now,
+        "last_used_at": timestamp_or_none(raw.get("last_used_at")),
+        "created_at": timestamp_or_none(raw.get("created_at")) or now,
         "updated_at": now,
     }
 
