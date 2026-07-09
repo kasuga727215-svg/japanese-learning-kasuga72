@@ -95,7 +95,7 @@ SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 VOCABULARY_SEED_BASIC_FILE = os.path.join(BASE_DIR, "data", "vocabulary_seed_n5_n3.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 40, 5, 60)
-GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS = read_int_env("GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS", 18, 5, 20)
+GEMINI_GENERATE_TIMEOUT_SECONDS = read_int_env("GEMINI_GENERATE_TIMEOUT_SECONDS", 50, 5, 55)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
@@ -5233,7 +5233,7 @@ def build_gemini_daily_material(settings, deadline_check=None):
         deadline_check("gemini_prompt_before")
     prompt = build_gemini_daily_material_prompt(settings)
     started = time.perf_counter()
-    raw_text = call_gemini(prompt, timeout_seconds=GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS)
+    raw_text = call_gemini(prompt, timeout_seconds=GEMINI_GENERATE_TIMEOUT_SECONDS)
     if deadline_check:
         deadline_check("gemini_response_after")
     try:
@@ -13262,7 +13262,11 @@ def api_generate():
                         "reason": "Gemini daily material generator is not configured",
                     }
                 ), 200
-            print(f"[manual-generate] start timeout_seconds={MANUAL_GENERATE_TIMEOUT_SECONDS}")
+            timeout_seconds = GEMINI_GENERATE_TIMEOUT_SECONDS if normalized_mode == "gemini" else MANUAL_GENERATE_TIMEOUT_SECONDS
+            if normalized_mode == "gemini":
+                print(f"[gemini-generate] start timeout_seconds={timeout_seconds}")
+            else:
+                print(f"[manual-generate] start timeout_seconds={timeout_seconds}")
             generation_source = "gemini_api" if normalized_mode == "gemini" else "manual_local"
             result = run_manual_generation_with_timeout(
                 lambda deadline_check: generate_daily_material(
@@ -13273,11 +13277,14 @@ def api_generate():
                     generation_source=generation_source,
                     deadline_check=deadline_check,
                 ),
-                timeout_seconds=MANUAL_GENERATE_TIMEOUT_SECONDS,
+                timeout_seconds=timeout_seconds,
                 started_at=manual_started,
             )
             elapsed_ms = round((time.monotonic() - manual_started) * 1000)
-            print(f"[manual-generate] success elapsed_ms={elapsed_ms} material_key={result.get('material_key', '')}")
+            if normalized_mode == "gemini":
+                print(f"[gemini-generate] success elapsed_ms={elapsed_ms} material_key={result.get('material_key', '')}")
+            else:
+                print(f"[manual-generate] success elapsed_ms={elapsed_ms} material_key={result.get('material_key', '')}")
             return jsonify(result)
         return jsonify(
             generate_daily_material(
@@ -13289,8 +13296,8 @@ def api_generate():
             )
         )
     except ManualGenerateTimeout as e:
-        print(f"[manual-generate] timeout elapsed_ms={e.elapsed_ms} stage={e.stage}")
         if normalize_generation_mode(mode) == "gemini":
+            print(f"[gemini-generate] timeout elapsed_ms={e.elapsed_ms} stage={e.stage}")
             return jsonify(
                 {
                     "ok": False,
@@ -13301,6 +13308,7 @@ def api_generate():
                     "timeout_seconds": e.timeout_seconds,
                 }
             ), 200
+        print(f"[manual-generate] timeout elapsed_ms={e.elapsed_ms} stage={e.stage}")
         return jsonify(manual_generate_timeout_payload(e)), 200
     except Exception as e:
         if mode == "local":
