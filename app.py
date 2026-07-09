@@ -95,6 +95,7 @@ SNS_EXAMPLES_FILE = os.path.join(BASE_DIR, "data", "social_examples.json")
 VOCABULARY_SEED_BASIC_FILE = os.path.join(BASE_DIR, "data", "vocabulary_seed_n5_n3.json")
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 40, 5, 60)
+GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS = read_int_env("GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS", 18, 5, 20)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
@@ -4897,6 +4898,361 @@ JSON 格式：
 
 請嚴格生成剛好 {settings["vocab_count"]} 個單字、剛好 {settings["verb_count"]} 個動詞、1 個文法點，並至少給 2 個例句。
 """.strip()
+
+
+def build_gemini_daily_material_prompt(settings):
+    target_levels = settings_target_levels(settings)
+    word_count = int(settings.get("vocab_count") or 0)
+    verb_count = int(settings.get("verb_count") or 0)
+    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_total = int(sum(grammar_quota.values()))
+    schema = {
+        "level": settings.get("target_level", "N5"),
+        "target_levels": target_levels,
+        "vocab": [
+            {
+                "word": "見る",
+                "reading": "みる",
+                "meaning": "看",
+                "part_of_speech": "動詞",
+                "jlpt_level": "N5",
+                "category": "general",
+                "example_sentence": "映画を見ます。",
+                "example_translation_zh": "我看電影。",
+            }
+        ],
+        "verbs": [
+            {
+                "surface": "見る",
+                "dictionary_form": "見る",
+                "reading_hiragana": "みる",
+                "meaning_zh": "看",
+                "verb_group": 2,
+                "verb_type": "一段動詞",
+                "jlpt_level": "N5",
+                "forms": {
+                    "dictionary": "見る",
+                    "masu_stem": "見",
+                    "te": "見て",
+                    "ta": "見た",
+                    "nai": "見ない",
+                    "ba": "見れば",
+                    "volitional": "見よう",
+                    "potential": "見られる",
+                    "causative": "見させる",
+                    "passive": "見られる",
+                    "causativePassive": "見させられる",
+                },
+            }
+        ],
+        "grammar": {
+            "title": "今日の文法",
+            "exp": "本日教材中的重點文法整理。",
+            "examples": [{"jp": "今日は雨です。", "cn": "今天下雨。"}],
+        },
+        "grammar_points": [
+            {
+                "grammar_key": "particle:は",
+                "title": "は",
+                "display_name": "は",
+                "jlpt_level": "N5",
+                "grammar_type": "particle",
+                "meaning_zh": "主題提示 / 對比",
+                "connection": "名詞 + は",
+                "structure_formula": "名詞 + は",
+                "usage_summary_zh": "提示句子的主題。",
+                "usage_detail_zh": "用來指出接下來要談論的主題。",
+                "example_japanese": "私は学生です。",
+                "example_hiragana": "わたしはがくせいです。",
+                "example_zh": "我是學生。",
+                "note_zh": "不要把 は 只理解成主詞標記。",
+                "learning_tip_zh": "把 は 想成「至於...」。",
+                "common_mistake_zh": "初學者常把 は 和 が 混用。",
+                "usage_items": [],
+            }
+        ],
+    }
+    return f"""
+你是日語學習教材生成器。請根據使用者設定，生成一份「每日教材」。
+
+設定：
+- target_levels: {json.dumps(target_levels, ensure_ascii=False)}
+- primary target_level: {settings.get("target_level", "N5")}
+- word_count: {word_count}
+- verb_count: {verb_count}
+- grammar_quota: {json.dumps(grammar_quota, ensure_ascii=False)}
+- grammar_total_target: {grammar_total}
+
+嚴格要求：
+1. 只回傳 JSON，不要 Markdown，不要說明文字，不要 code fence。
+2. vocab 必須剛好 {word_count} 筆，word 不可重複。
+3. verbs 必須剛好 {verb_count} 筆，surface/dictionary_form 不可重複。
+4. grammar_points 目標最多 {grammar_total} 筆，文法點不可重複，盡量依 grammar_quota 分配。
+5. reading / reading_hiragana / example_hiragana 必須是平假名。
+6. meaning / meaning_zh / example_translation_zh 必須是繁體中文。
+7. JLPT level 必須落在 target_levels 內；若含 SNS，SNS 只可少量作為詞彙，不可主導教材。
+8. 例句要自然、短、適合學習。
+9. verbs 只使用真正日語動詞，不要用大量「名詞 + する」或商務機械詞補數量。
+10. 每個 verb 的 forms 必須完整包含 dictionary, masu_stem, te, ta, nai, ba, volitional, potential, causative, passive, causativePassive。
+11. 不可回空字串；不知道就換一個更基礎的詞或文法。
+
+請完全符合這個 JSON schema 的欄位名稱：
+{json.dumps(schema, ensure_ascii=False, indent=2)}
+""".strip()
+
+
+def classify_gemini_daily_material_error(error):
+    text = str(error or "")
+    if text.startswith("json_parse_error"):
+        return "json_parse_error"
+    if text.startswith(("insufficient_", "invalid_", "incomplete_", "empty_")):
+        return "schema_validation_failed"
+    return classify_gemini_error(error)
+
+
+def simple_text(value):
+    return str(value or "").strip()
+
+
+def normalize_gemini_level(value, fallback="N5"):
+    level = simple_text(value).upper()
+    return level if level in LEVELS else fallback
+
+
+def normalize_gemini_forms(raw_forms, source):
+    forms = raw_forms if isinstance(raw_forms, dict) else {}
+    normalized = {}
+    for canonical, aliases in VERB_FORM_SCHEMA.items():
+        normalized[canonical] = clean_verb_form(pick_form_value(forms, aliases) or pick_form_value(source, aliases))
+    for camel, canonical in VERB_ALIAS_FIELDS.items():
+        if camel == "base":
+            continue
+        normalized[camel] = normalized.get(canonical, NO_VERB_FORM)
+    return normalized
+
+
+def normalize_gemini_vocab_item(item, fallback_level):
+    if not isinstance(item, dict):
+        item = {}
+    word = simple_text(item.get("word") or item.get("surface") or item.get("term"))
+    reading = enforce_hiragana_reading(item.get("reading") or item.get("reading_hiragana"), word)
+    meaning = simple_text(item.get("meaning") or item.get("meaning_zh"))
+    return {
+        "word": word,
+        "reading": reading,
+        "meaning": meaning,
+        "part_of_speech": simple_text(item.get("part_of_speech") or item.get("pos")),
+        "jlpt_level": normalize_gemini_level(item.get("jlpt_level") or item.get("level"), fallback_level),
+        "category": simple_text(item.get("category")) or "general",
+        "source": "gemini",
+        "normalized_key": normalize_vocab_key(item.get("normalized_key") or word),
+        "example_sentence": simple_text(item.get("example_sentence") or item.get("example_japanese")),
+        "example_translation_zh": simple_text(item.get("example_translation_zh") or item.get("example_zh")),
+    }
+
+
+def normalize_gemini_verb_item(item, fallback_level):
+    if not isinstance(item, dict):
+        item = {}
+    forms_source = item.get("forms") if isinstance(item.get("forms"), dict) else {}
+    surface = simple_text(
+        item.get("surface")
+        or item.get("dictionary_form")
+        or item.get("base_form")
+        or forms_source.get("dictionary")
+        or item.get("base")
+    )
+    reading = enforce_hiragana_reading(item.get("reading_hiragana") or item.get("reading"), surface)
+    meaning = simple_text(item.get("meaning_zh") or item.get("meaning"))
+    try:
+        group = int(item.get("verb_group") or 0)
+    except (TypeError, ValueError):
+        group = 0
+    if group not in {1, 2, 3}:
+        group = infer_material_verb_group(item, surface) or 0
+    forms = normalize_gemini_forms(forms_source, item)
+    if surface and forms.get("dictionary") in {"", NO_VERB_FORM}:
+        forms["dictionary"] = surface
+    normalized = {
+        "surface": surface,
+        "dictionary_form": surface,
+        "reading_hiragana": reading,
+        "reading": reading,
+        "meaning_zh": meaning,
+        "meaning": meaning,
+        "verb_group": group,
+        "verb_type": simple_text(item.get("verb_type")) or material_verb_type_label(group, surface),
+        "verb_group_label": simple_text(item.get("verb_type")) or material_verb_type_label(group, surface),
+        "jlpt_level": normalize_gemini_level(item.get("jlpt_level") or item.get("level"), fallback_level),
+        "part_of_speech": "動詞",
+        "normalized_key": normalize_vocab_key(item.get("normalized_key") or surface),
+        "forms": forms,
+        "base": make_verb_base_display(surface, reading, meaning, simple_text(item.get("verb_type")) or material_verb_type_label(group, surface), normalize_gemini_level(item.get("jlpt_level") or item.get("level"), fallback_level)),
+    }
+    for alias, form_key in VERB_ALIAS_FIELDS.items():
+        if alias == "base":
+            continue
+        normalized[alias] = forms.get(form_key, NO_VERB_FORM)
+    return normalized
+
+
+def normalize_gemini_grammar_point(item, fallback_level):
+    if not isinstance(item, dict):
+        item = {}
+    title = simple_text(item.get("title") or item.get("display_name") or item.get("grammar_key"))
+    grammar_key = simple_text(item.get("grammar_key")) or normalize_vocab_key(title)
+    return {
+        "grammar_key": grammar_key,
+        "title": title,
+        "display_name": simple_text(item.get("display_name")) or title,
+        "jlpt_level": normalize_gemini_level(item.get("jlpt_level") or item.get("level"), fallback_level),
+        "grammar_type": simple_text(item.get("grammar_type") or item.get("category")),
+        "meaning_zh": simple_text(item.get("meaning_zh") or item.get("meaning")),
+        "connection": simple_text(item.get("connection") or item.get("structure_formula") or item.get("structure")),
+        "structure_formula": simple_text(item.get("structure_formula") or item.get("connection") or item.get("structure")),
+        "usage_summary_zh": simple_text(item.get("usage_summary_zh")),
+        "usage_detail_zh": simple_text(item.get("usage_detail_zh")),
+        "example_japanese": simple_text(item.get("example_japanese") or item.get("example_jp")),
+        "example_hiragana": enforce_hiragana_reading(item.get("example_hiragana"), item.get("example_japanese") or item.get("example_jp")),
+        "example_zh": simple_text(item.get("example_zh") or item.get("example_translation_zh")),
+        "note_zh": simple_text(item.get("note_zh")),
+        "learning_tip_zh": simple_text(item.get("learning_tip_zh")),
+        "common_mistake_zh": simple_text(item.get("common_mistake_zh")),
+        "usage_items": item.get("usage_items") if isinstance(item.get("usage_items"), list) else [],
+        "category": simple_text(item.get("category") or item.get("grammar_type")),
+        "source": "gemini",
+    }
+
+
+def unique_by_key(items, key_name):
+    unique = []
+    seen = set()
+    for item in items:
+        key = simple_text(item.get(key_name))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def adapt_gemini_daily_material(raw_payload, settings):
+    source = raw_payload if isinstance(raw_payload, dict) else {}
+    if isinstance(source.get("result"), dict):
+        source = source["result"]
+    fallback_level = settings.get("target_level", "N5")
+    target_levels = settings_target_levels(settings)
+    vocab = [
+        normalize_gemini_vocab_item(item, fallback_level)
+        for item in (source.get("vocab") or source.get("vocabulary") or [])
+        if isinstance(item, dict)
+    ]
+    verbs = [
+        normalize_gemini_verb_item(item, fallback_level)
+        for item in (source.get("verbs") or [])
+        if isinstance(item, dict)
+    ]
+    grammar_points = [
+        normalize_gemini_grammar_point(item, fallback_level)
+        for item in (source.get("grammar_points") or [])
+        if isinstance(item, dict)
+    ]
+    vocab = unique_by_key(vocab, "normalized_key")
+    verbs = unique_by_key(verbs, "normalized_key")
+    grammar_points = unique_by_key(grammar_points, "grammar_key")
+    raw_grammar = source.get("grammar") if isinstance(source.get("grammar"), dict) else {}
+    grammar_examples = raw_grammar.get("examples") if isinstance(raw_grammar.get("examples"), list) else []
+    grammar = {
+        "title": simple_text(raw_grammar.get("title")) or "今日の文法",
+        "exp": simple_text(raw_grammar.get("exp") or raw_grammar.get("explanation")) or "本日教材中的重點文法整理。",
+        "examples": [
+            {
+                "jp": simple_text(item.get("jp") or item.get("example_japanese")),
+                "cn": simple_text(item.get("cn") or item.get("example_zh")),
+            }
+            for item in grammar_examples
+            if isinstance(item, dict)
+        ],
+    }
+    material = {
+        "date": material_date_display(get_today_taipei_date()),
+        "level": fallback_level,
+        "target_levels": target_levels,
+        "grammar_level": "fixed_quota",
+        "vocab": vocab,
+        "verbs": verbs,
+        "grammar": grammar,
+        "grammar_points": grammar_points,
+        "metadata": {
+            "generation_mode": "gemini",
+            "generation_source": "gemini_api",
+            "ai_used": True,
+            "fallback_used": False,
+            "source_summary": {"gemini": 1},
+            "generated_at": utc_now_iso(),
+            "grammar_mode": "fixed_quota",
+            "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
+            "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+            "grammar_total_actual": len(grammar_points),
+        },
+    }
+    return material
+
+
+def validate_gemini_daily_material(material, settings):
+    requested_words = int(settings.get("vocab_count") or 0)
+    requested_verbs = int(settings.get("verb_count") or 0)
+    vocab = material.get("vocab") if isinstance(material.get("vocab"), list) else []
+    verbs = material.get("verbs") if isinstance(material.get("verbs"), list) else []
+    grammar_points = material.get("grammar_points") if isinstance(material.get("grammar_points"), list) else []
+    if len(vocab) < requested_words:
+        raise ValueError(f"insufficient_vocab_count:{len(vocab)}/{requested_words}")
+    if len(verbs) < requested_verbs:
+        raise ValueError(f"insufficient_verb_count:{len(verbs)}/{requested_verbs}")
+    for index, item in enumerate(vocab[:requested_words], start=1):
+        if not item.get("word") or not item.get("reading") or not item.get("meaning"):
+            raise ValueError(f"invalid_vocab_item:{index}")
+    required_form_keys = ["dictionary", "masu_stem", "te_form", "ta_form", "nai_form", "ba_form", "volitional_form", "potential_form", "causative_form", "passive_form", "causative_passive_form"]
+    for index, item in enumerate(verbs[:requested_verbs], start=1):
+        if not item.get("surface") or not item.get("reading_hiragana") or not item.get("meaning_zh"):
+            raise ValueError(f"invalid_verb_item:{index}")
+        forms = item.get("forms") if isinstance(item.get("forms"), dict) else {}
+        if any(not forms.get(key) or forms.get(key) == NO_VERB_FORM for key in required_form_keys):
+            raise ValueError(f"incomplete_verb_forms:{index}")
+    if not isinstance(material.get("grammar"), dict):
+        raise ValueError("invalid_grammar")
+    if not grammar_points:
+        raise ValueError("empty_grammar_points")
+    material["vocab"] = vocab[:requested_words]
+    material["verbs"] = verbs[:requested_verbs]
+    return material
+
+
+def build_gemini_daily_material(settings, deadline_check=None):
+    if deadline_check:
+        deadline_check("gemini_prompt_before")
+    prompt = build_gemini_daily_material_prompt(settings)
+    started = time.perf_counter()
+    raw_text = call_gemini(prompt, timeout_seconds=GEMINI_DAILY_MATERIAL_TIMEOUT_SECONDS)
+    if deadline_check:
+        deadline_check("gemini_response_after")
+    try:
+        parsed = parse_gemini_json_safely(raw_text)
+    except Exception as exc:
+        raise ValueError(f"json_parse_error:{exc}") from exc
+    material = adapt_gemini_daily_material(parsed, settings)
+    validate_gemini_daily_material(material, settings)
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    material.setdefault("metadata", {})["gemini_elapsed_ms"] = elapsed_ms
+    material["metadata"]["gemini_model"] = choose_gemini_model()
+    print(
+        "[gemini-material] success "
+        f"words={len(material.get('vocab') or [])} "
+        f"verbs={len(material.get('verbs') or [])} "
+        f"grammar_points={len(material.get('grammar_points') or [])} "
+        f"elapsed_ms={elapsed_ms}"
+    )
+    return material
 
 
 def sample_material(settings=None):
@@ -10829,7 +11185,7 @@ def send_telegram_message_async(text, context="telegram"):
 
 def normalize_generation_mode(value):
     mode = str(value or "local").strip().lower()
-    return mode if mode in {"local", "ai_enhance", "ai_full"} else "local"
+    return mode if mode in {"local", "gemini", "ai_enhance", "ai_full"} else "local"
 
 
 def material_success_message(date, settings, material, telegram_status):
@@ -10909,6 +11265,13 @@ def generate_daily_material(
         )
         if deadline_check:
             deadline_check("build_material_after")
+    elif mode == "gemini":
+        print("[feature-boundary] daily_material mode=gemini use gemini daily material generator")
+        if deadline_check:
+            deadline_check("gemini_material_before")
+        raw_material = build_gemini_daily_material(settings, deadline_check=deadline_check)
+        if deadline_check:
+            deadline_check("gemini_material_after")
     elif mode == "ai_enhance":
         raw_material = build_local_material(settings, material_date=material_date or get_today_taipei_date(), deadline_check=deadline_check)
         raw_material["metadata"]["generation_mode"] = "ai_enhance"
@@ -12889,15 +13252,25 @@ def api_generate():
         mode = request.args.get("mode") or data.get("mode") or "local"
         use_sample = request.args.get("sample") == "1"
         app_url = request.host_url.rstrip("/")
-        if normalize_generation_mode(mode) == "local":
+        normalized_mode = normalize_generation_mode(mode)
+        if normalized_mode in {"local", "gemini"}:
+            if normalized_mode == "gemini" and not GEMINI_API_KEY:
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "gemini_generation_not_available",
+                        "reason": "Gemini daily material generator is not configured",
+                    }
+                ), 200
             print(f"[manual-generate] start timeout_seconds={MANUAL_GENERATE_TIMEOUT_SECONDS}")
+            generation_source = "gemini_api" if normalized_mode == "gemini" else "manual_local"
             result = run_manual_generation_with_timeout(
                 lambda deadline_check: generate_daily_material(
                     use_sample=use_sample,
                     posted_settings=data,
                     app_url=app_url,
-                    mode=mode,
-                    generation_source="manual_local",
+                    mode=normalized_mode,
+                    generation_source=generation_source,
                     deadline_check=deadline_check,
                 ),
                 timeout_seconds=MANUAL_GENERATE_TIMEOUT_SECONDS,
@@ -12917,6 +13290,17 @@ def api_generate():
         )
     except ManualGenerateTimeout as e:
         print(f"[manual-generate] timeout elapsed_ms={e.elapsed_ms} stage={e.stage}")
+        if normalize_generation_mode(mode) == "gemini":
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "gemini_generate_timeout",
+                    "reason": "Gemini generation exceeded time budget",
+                    "elapsed_ms": e.elapsed_ms,
+                    "stage": e.stage,
+                    "timeout_seconds": e.timeout_seconds,
+                }
+            ), 200
         return jsonify(manual_generate_timeout_payload(e)), 200
     except Exception as e:
         if mode == "local":
@@ -13034,6 +13418,30 @@ def api_generate():
                         },
                     }
                 ), 200
+        if normalize_generation_mode(mode) == "gemini":
+            reason = classify_gemini_daily_material_error(e)
+            if reason == "timeout":
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": "gemini_generate_timeout",
+                        "reason": "Gemini generation exceeded time budget",
+                        "elapsed_ms": round((time.monotonic() - manual_started) * 1000),
+                    }
+                ), 200
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "gemini_generation_failed",
+                    "reason": reason,
+                    "message": "Gemini 每日教材生成失敗，請稍後再試。",
+                    "debug": {
+                        "stage": "api_generate_gemini",
+                        "reason": str(e)[:500],
+                    },
+                }
+            ), 200
+
         payload = {
             "ok": False,
             "error": "local_generation_failed",
