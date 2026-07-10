@@ -10,6 +10,7 @@ import threading
 import time
 import traceback
 import unicodedata
+import uuid
 from collections import Counter
 import urllib.error
 import urllib.parse
@@ -96,6 +97,7 @@ VOCABULARY_SEED_BASIC_FILE = os.path.join(BASE_DIR, "data", "vocabulary_seed_n5_
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 GEMINI_TIMEOUT_SECONDS = read_int_env("GEMINI_TIMEOUT_SECONDS", 40, 5, 60)
 GEMINI_GENERATE_TIMEOUT_SECONDS = read_int_env("GEMINI_GENERATE_TIMEOUT_SECONDS", 50, 5, 55)
+GEMINI_STAGE_TIMEOUT_SECONDS = read_int_env("GEMINI_STAGE_TIMEOUT_SECONDS", 18, 5, 25)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
@@ -126,6 +128,7 @@ _VOCAB_POOL_DB_UNAVAILABLE_UNTIL = 0.0
 _SCHEMA_LOCK = threading.Lock()
 _SETTINGS_SCHEMA_READY = False
 _MATERIALS_SCHEMA_READY = False
+_GEMINI_JOBS_SCHEMA_READY = False
 _GEMINI_BILLING_LOCK = threading.Lock()
 _GEMINI_BILLING_STATE = {
     "prepayment_depleted": False,
@@ -3921,6 +3924,167 @@ def get_db_connection():
     return psycopg.connect(DATABASE_URL, connect_timeout=DB_CONNECT_TIMEOUT_SECONDS)
 
 
+GEMINI_JOB_COLUMNS = [
+    "job_id",
+    "material_date",
+    "status",
+    "current_stage",
+    "settings_json",
+    "vocab_json",
+    "verbs_json",
+    "grammar_json",
+    "error_message",
+    "created_at",
+    "updated_at",
+]
+
+
+def ensure_gemini_generation_jobs_store():
+    global _GEMINI_JOBS_SCHEMA_READY
+    if _GEMINI_JOBS_SCHEMA_READY:
+        return
+    with _SCHEMA_LOCK:
+        if _GEMINI_JOBS_SCHEMA_READY:
+            return
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS gemini_generation_jobs (
+                            job_id TEXT PRIMARY KEY,
+                            material_date DATE NOT NULL,
+                            status TEXT NOT NULL DEFAULT 'running',
+                            current_stage TEXT NOT NULL DEFAULT 'created',
+                            settings_json TEXT NOT NULL DEFAULT '{}',
+                            vocab_json TEXT NOT NULL DEFAULT '[]',
+                            verbs_json TEXT NOT NULL DEFAULT '[]',
+                            grammar_json TEXT NOT NULL DEFAULT '{}',
+                            error_message TEXT DEFAULT '',
+                            created_at TIMESTAMPTZ NOT NULL,
+                            updated_at TIMESTAMPTZ NOT NULL
+                        )
+                        """
+                    )
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_status ON gemini_generation_jobs(status)")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_date ON gemini_generation_jobs(material_date)")
+                conn.commit()
+        else:
+            prepare_sqlite_path()
+            with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS gemini_generation_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        material_date TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'running',
+                        current_stage TEXT NOT NULL DEFAULT 'created',
+                        settings_json TEXT NOT NULL DEFAULT '{}',
+                        vocab_json TEXT NOT NULL DEFAULT '[]',
+                        verbs_json TEXT NOT NULL DEFAULT '[]',
+                        grammar_json TEXT NOT NULL DEFAULT '{}',
+                        error_message TEXT DEFAULT '',
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_status ON gemini_generation_jobs(status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_date ON gemini_generation_jobs(material_date)")
+                conn.commit()
+        _GEMINI_JOBS_SCHEMA_READY = True
+
+
+def gemini_job_json(value, fallback):
+    try:
+        parsed = json.loads(value or "")
+        return parsed if parsed not in (None, "") else fallback
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+
+
+def create_gemini_generation_job(settings, material_date=None):
+    ensure_gemini_generation_jobs_store()
+    job_id = uuid.uuid4().hex
+    date_iso = canonical_material_date(material_date or get_today_taipei_date())
+    now = utc_now_iso()
+    payload = {
+        "job_id": job_id,
+        "material_date": date_iso,
+        "status": "running",
+        "current_stage": "created",
+        "settings_json": json.dumps(settings, ensure_ascii=False),
+        "vocab_json": "[]",
+        "verbs_json": "[]",
+        "grammar_json": "{}",
+        "error_message": "",
+        "created_at": now,
+        "updated_at": now,
+    }
+    if DATABASE_URL:
+        placeholders = ", ".join(["%s"] * len(GEMINI_JOB_COLUMNS))
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"INSERT INTO gemini_generation_jobs ({', '.join(GEMINI_JOB_COLUMNS)}) VALUES ({placeholders})",
+                    tuple(payload[column] for column in GEMINI_JOB_COLUMNS),
+                )
+            conn.commit()
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.execute(
+                f"INSERT INTO gemini_generation_jobs ({', '.join(GEMINI_JOB_COLUMNS)}) VALUES ({', '.join(':' + column for column in GEMINI_JOB_COLUMNS)})",
+                payload,
+            )
+            conn.commit()
+    print(f"[gemini-job] created job_id={job_id}")
+    return payload
+
+
+def load_gemini_generation_job(job_id):
+    ensure_gemini_generation_jobs_store()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT {', '.join(GEMINI_JOB_COLUMNS)} FROM gemini_generation_jobs WHERE job_id = %s",
+                    (job_id,),
+                )
+                row = cur.fetchone()
+        return dict(zip(GEMINI_JOB_COLUMNS, row)) if row else None
+    rows = sqlite_dicts(
+        f"SELECT {', '.join(GEMINI_JOB_COLUMNS)} FROM gemini_generation_jobs WHERE job_id = ?",
+        (job_id,),
+    )
+    return rows[0] if rows else None
+
+
+def update_gemini_generation_job(job_id, **fields):
+    if not fields:
+        return
+    ensure_gemini_generation_jobs_store()
+    fields["updated_at"] = utc_now_iso()
+    allowed = {column for column in GEMINI_JOB_COLUMNS if column != "job_id"}
+    updates = {key: value for key, value in fields.items() if key in allowed}
+    if not updates:
+        return
+    if DATABASE_URL:
+        assignments = ", ".join(f"{key} = %s" for key in updates)
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"UPDATE gemini_generation_jobs SET {assignments} WHERE job_id = %s",
+                    (*updates.values(), job_id),
+                )
+            conn.commit()
+    else:
+        assignments = ", ".join(f"{key} = :{key}" for key in updates)
+        payload = {**updates, "job_id": job_id}
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.execute(f"UPDATE gemini_generation_jobs SET {assignments} WHERE job_id = :job_id", payload)
+            conn.commit()
+
+
 def vocab_pool_db_query_allowed():
     return not (DATABASE_URL and time.time() < _VOCAB_POOL_DB_UNAVAILABLE_UNTIL)
 
@@ -5001,6 +5165,112 @@ def build_gemini_daily_material_prompt(settings):
 """.strip()
 
 
+def build_gemini_stage_prompt(stage, settings):
+    target_levels = settings_target_levels(settings)
+    fallback_level = settings.get("target_level", "N5")
+    word_count = int(settings.get("vocab_count") or 0)
+    verb_count = int(settings.get("verb_count") or 0)
+    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_total = int(sum(grammar_quota.values()))
+    common_rules = (
+        "Return JSON only. Do not use Markdown fences. "
+        "Use Traditional Chinese meanings. Japanese readings must be hiragana. "
+        f"Allowed JLPT levels: {', '.join(target_levels)}. Primary level: {fallback_level}. "
+        "Do not return duplicate items or empty strings."
+    )
+    if stage == "vocab":
+        schema = {
+            "vocab": [
+                {
+                    "word": "",
+                    "reading": "",
+                    "meaning": "",
+                    "part_of_speech": "",
+                    "jlpt_level": fallback_level,
+                    "category": "general",
+                    "source": "gemini",
+                    "normalized_key": "",
+                    "example_sentence": "",
+                    "example_translation_zh": "",
+                }
+            ]
+        }
+        return (
+            f"{common_rules} Generate exactly {word_count} useful Japanese vocabulary items "
+            "for a daily learning material. Avoid niche business compounds and internet slang unless SNS is requested. "
+            f"Schema: {json.dumps(schema, ensure_ascii=False)}"
+        )
+    if stage == "verbs":
+        schema = {
+            "verbs": [
+                {
+                    "surface": "",
+                    "dictionary_form": "",
+                    "reading_hiragana": "",
+                    "meaning_zh": "",
+                    "verb_group": 1,
+                    "verb_type": "",
+                    "jlpt_level": fallback_level,
+                    "part_of_speech": "動詞",
+                    "normalized_key": "",
+                    "forms": {
+                        "dictionary": "",
+                        "masu_stem": "",
+                        "te": "",
+                        "ta": "",
+                        "nai": "",
+                        "ba": "",
+                        "volitional": "",
+                        "potential": "",
+                        "causative": "",
+                        "passive": "",
+                        "causativePassive": "",
+                    },
+                }
+            ]
+        }
+        return (
+            f"{common_rules} Generate exactly {verb_count} real Japanese verbs for a conjugation table. "
+            "Avoid fake noun + suru compounds. Include complete conjugation forms for every verb. "
+            f"Schema: {json.dumps(schema, ensure_ascii=False)}"
+        )
+    if stage == "grammar":
+        schema = {
+            "grammar": {
+                "title": "",
+                "exp": "",
+                "examples": [{"jp": "", "cn": ""}],
+            },
+            "grammar_points": [
+                {
+                    "grammar_key": "",
+                    "title": "",
+                    "display_name": "",
+                    "jlpt_level": fallback_level,
+                    "grammar_type": "",
+                    "meaning_zh": "",
+                    "connection": "",
+                    "structure_formula": "",
+                    "usage_summary_zh": "",
+                    "usage_detail_zh": "",
+                    "example_japanese": "",
+                    "example_hiragana": "",
+                    "example_zh": "",
+                    "note_zh": "",
+                    "learning_tip_zh": "",
+                    "common_mistake_zh": "",
+                    "usage_items": [],
+                }
+            ],
+        }
+        return (
+            f"{common_rules} Generate daily grammar points with quota {json.dumps(grammar_quota, ensure_ascii=False)} "
+            f"and at most {grammar_total} total grammar_points. Keep explanations concise. "
+            f"Schema: {json.dumps(schema, ensure_ascii=False)}"
+        )
+    raise ValueError(f"unsupported_gemini_stage:{stage}")
+
+
 def classify_gemini_daily_material_error(error):
     text = str(error or "")
     if text.startswith("json_parse_error"):
@@ -5136,10 +5406,103 @@ def unique_by_key(items, key_name):
     return unique
 
 
-def adapt_gemini_daily_material(raw_payload, settings):
+def source_from_gemini_payload(raw_payload):
     source = raw_payload if isinstance(raw_payload, dict) else {}
     if isinstance(source.get("result"), dict):
         source = source["result"]
+    return source
+
+
+def parse_gemini_stage_payload(raw_text):
+    try:
+        return parse_gemini_json_safely(raw_text)
+    except Exception as exc:
+        raise ValueError(f"json_parse_error:{exc}") from exc
+
+
+def normalize_gemini_stage_result(stage, raw_payload, settings):
+    source = source_from_gemini_payload(raw_payload)
+    fallback_level = settings.get("target_level", "N5")
+    if stage == "vocab":
+        vocab = [
+            normalize_gemini_vocab_item(item, fallback_level)
+            for item in (source.get("vocab") or source.get("vocabulary") or [])
+            if isinstance(item, dict)
+        ]
+        vocab = unique_by_key(vocab, "normalized_key")
+        requested = int(settings.get("vocab_count") or 0)
+        if len(vocab) < requested:
+            raise ValueError(f"insufficient_vocab_count:{len(vocab)}/{requested}")
+        for index, item in enumerate(vocab[:requested], start=1):
+            if not item.get("word") or not item.get("reading") or not item.get("meaning"):
+                raise ValueError(f"invalid_vocab_item:{index}")
+        return vocab[:requested]
+    if stage == "verbs":
+        verbs = [
+            normalize_gemini_verb_item(item, fallback_level)
+            for item in (source.get("verbs") or [])
+            if isinstance(item, dict)
+        ]
+        verbs = unique_by_key(verbs, "normalized_key")
+        requested = int(settings.get("verb_count") or 0)
+        required_form_keys = [
+            "dictionary",
+            "masu_stem",
+            "te_form",
+            "ta_form",
+            "nai_form",
+            "ba_form",
+            "volitional_form",
+            "potential_form",
+            "causative_form",
+            "passive_form",
+            "causative_passive_form",
+        ]
+        if len(verbs) < requested:
+            raise ValueError(f"insufficient_verb_count:{len(verbs)}/{requested}")
+        for index, item in enumerate(verbs[:requested], start=1):
+            if not item.get("surface") or not item.get("reading_hiragana") or not item.get("meaning_zh"):
+                raise ValueError(f"invalid_verb_item:{index}")
+            forms = item.get("forms") if isinstance(item.get("forms"), dict) else {}
+            if any(not forms.get(key) or forms.get(key) == NO_VERB_FORM for key in required_form_keys):
+                raise ValueError(f"incomplete_verb_forms:{index}")
+        return verbs[:requested]
+    if stage == "grammar":
+        grammar_points = [
+            normalize_gemini_grammar_point(item, fallback_level)
+            for item in (source.get("grammar_points") or [])
+            if isinstance(item, dict)
+        ]
+        grammar_points = unique_by_key(grammar_points, "grammar_key")
+        if not grammar_points:
+            raise ValueError("empty_grammar_points")
+        raw_grammar = source.get("grammar") if isinstance(source.get("grammar"), dict) else {}
+        grammar_examples = raw_grammar.get("examples") if isinstance(raw_grammar.get("examples"), list) else []
+        grammar = {
+            "title": simple_text(raw_grammar.get("title")) or (grammar_points[0].get("display_name") or grammar_points[0].get("title") or "Grammar"),
+            "exp": simple_text(raw_grammar.get("exp") or raw_grammar.get("explanation") or raw_grammar.get("meaning_zh")),
+            "examples": [
+                {
+                    "jp": simple_text(item.get("jp") or item.get("example_japanese")),
+                    "cn": simple_text(item.get("cn") or item.get("example_zh")),
+                }
+                for item in grammar_examples
+                if isinstance(item, dict)
+            ],
+        }
+        if not grammar["examples"] and grammar_points:
+            grammar["examples"] = [
+                {
+                    "jp": simple_text(grammar_points[0].get("example_japanese")),
+                    "cn": simple_text(grammar_points[0].get("example_zh")),
+                }
+            ]
+        return {"grammar": grammar, "grammar_points": grammar_points[:LOCAL_FIXED_GRAMMAR_TOTAL]}
+    raise ValueError(f"unsupported_gemini_stage:{stage}")
+
+
+def adapt_gemini_daily_material(raw_payload, settings):
+    source = source_from_gemini_payload(raw_payload)
     fallback_level = settings.get("target_level", "N5")
     target_levels = settings_target_levels(settings)
     vocab = [
@@ -5253,6 +5616,202 @@ def build_gemini_daily_material(settings, deadline_check=None):
         f"elapsed_ms={elapsed_ms}"
     )
     return material
+
+
+def gemini_job_settings(job):
+    settings = gemini_job_json(job.get("settings_json"), {})
+    return normalize_settings(settings if isinstance(settings, dict) else {})
+
+
+def run_gemini_generation_stage(job_id, stage):
+    job = load_gemini_generation_job(job_id)
+    if not job:
+        return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
+    if job.get("status") == "failed":
+        return {
+            "ok": False,
+            "error": "gemini_stage_failed",
+            "stage": job.get("current_stage") or stage,
+            "reason": job.get("error_message") or "job already failed",
+        }, 200
+    if stage not in {"vocab", "verbs", "grammar"}:
+        return {"ok": False, "error": "unsupported_gemini_stage", "stage": stage, "reason": "unsupported stage"}, 400
+    settings = gemini_job_settings(job)
+    started = time.perf_counter()
+    print(f"[gemini-stage] start job_id={job_id} stage={stage} timeout_seconds={GEMINI_STAGE_TIMEOUT_SECONDS}")
+    update_gemini_generation_job(job_id, status="running", current_stage=stage, error_message="")
+    try:
+        prompt = build_gemini_stage_prompt(stage, settings)
+        raw_text = call_gemini(prompt, timeout_seconds=GEMINI_STAGE_TIMEOUT_SECONDS)
+        parsed = parse_gemini_stage_payload(raw_text)
+        normalized = normalize_gemini_stage_result(stage, parsed, settings)
+        if stage == "vocab":
+            update_gemini_generation_job(
+                job_id,
+                current_stage="vocab_done",
+                vocab_json=json.dumps(normalized, ensure_ascii=False),
+            )
+            next_stage = "verbs"
+            count = len(normalized)
+        elif stage == "verbs":
+            update_gemini_generation_job(
+                job_id,
+                current_stage="verbs_done",
+                verbs_json=json.dumps(normalized, ensure_ascii=False),
+            )
+            next_stage = "grammar"
+            count = len(normalized)
+        else:
+            update_gemini_generation_job(
+                job_id,
+                current_stage="grammar_done",
+                grammar_json=json.dumps(normalized, ensure_ascii=False),
+            )
+            next_stage = "finalize"
+            count = len(normalized.get("grammar_points") or [])
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[gemini-stage] saved job_id={job_id} stage={stage} count={count} elapsed_ms={elapsed_ms}")
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "stage": stage,
+            "status": "running",
+            "next_stage": next_stage,
+            "count": count,
+            "elapsed_ms": elapsed_ms,
+        }, 200
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        reason = classify_gemini_daily_material_error(exc)
+        message = f"{reason}:{str(exc)[:240]}"
+        update_gemini_generation_job(job_id, status="failed", current_stage=stage, error_message=message)
+        print(f"[gemini-stage] failed job_id={job_id} stage={stage} error={message} elapsed_ms={elapsed_ms}")
+        return {
+            "ok": False,
+            "error": "gemini_stage_failed",
+            "stage": stage,
+            "reason": reason,
+            "elapsed_ms": elapsed_ms,
+        }, 200
+
+
+def finalize_gemini_generation_job(job_id, app_url=None):
+    job = load_gemini_generation_job(job_id)
+    if not job:
+        return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
+    if job.get("status") == "failed":
+        return {
+            "ok": False,
+            "error": "gemini_stage_failed",
+            "stage": job.get("current_stage") or "finalize",
+            "reason": job.get("error_message") or "job already failed",
+        }, 200
+    started = time.perf_counter()
+    print(f"[gemini-stage] finalize job_id={job_id}")
+    try:
+        settings = gemini_job_settings(job)
+        vocab = gemini_job_json(job.get("vocab_json"), [])
+        verbs = gemini_job_json(job.get("verbs_json"), [])
+        grammar_payload = gemini_job_json(job.get("grammar_json"), {})
+        if not vocab:
+            raise ValueError("missing_vocab_batch")
+        if not verbs:
+            raise ValueError("missing_verbs_batch")
+        if not isinstance(grammar_payload, dict) or not grammar_payload.get("grammar_points"):
+            raise ValueError("missing_grammar_batch")
+        raw_payload = {
+            "level": settings.get("target_level", "N5"),
+            "target_levels": settings_target_levels(settings),
+            "vocab": vocab,
+            "verbs": verbs,
+            "grammar": grammar_payload.get("grammar") or {},
+            "grammar_points": grammar_payload.get("grammar_points") or [],
+        }
+        material = adapt_gemini_daily_material(raw_payload, settings)
+        validate_gemini_daily_material(material, settings)
+        requested_words = int(settings.get("vocab_count") or 0)
+        requested_verbs = int(settings.get("verb_count") or 0)
+        actual_words = len(material.get("vocab") or [])
+        actual_verbs = len(material.get("verbs") or [])
+        count_validation = {
+            "target_level_requested": settings.get("target_level", ""),
+            "target_level_actual": material.get("level") or settings.get("target_level", ""),
+            "word_count_requested": requested_words,
+            "word_count_actual": actual_words,
+            "verb_count_requested": requested_verbs,
+            "verb_count_actual": actual_verbs,
+            "word_count_matched": actual_words >= requested_words,
+            "verb_count_matched": actual_verbs >= requested_verbs,
+            "warnings": [],
+        }
+        material.setdefault("metadata", {}).update(
+            {
+                "generation_mode": "gemini_staged",
+                "generation_source": "gemini_api",
+                "ai_used": True,
+                "fallback_used": False,
+                "gemini_job_id": job_id,
+                "resolved_settings": {
+                    "generation_trigger": "manual",
+                    "settings_source": "request_payload",
+                    "target_level": settings.get("target_level", ""),
+                    "target_levels": settings_target_levels(settings),
+                    "word_count": requested_words,
+                    "verb_count": requested_verbs,
+                    "choice_count": int(settings.get("mcq_count") or 0),
+                    "fill_count": int(settings.get("fill_count") or 0),
+                    "grammar_level": "fixed_quota",
+                    "grammar_count": LOCAL_FIXED_GRAMMAR_TOTAL,
+                    "grammar_mode": "fixed_quota",
+                    "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
+                    "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+                },
+                "count_validation": count_validation,
+                "grammar_mode": "fixed_quota",
+                "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
+                "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+                "grammar_total_actual": len(material.get("grammar_points") or []),
+            }
+        )
+        save_info = save_material_for_date(
+            job.get("material_date") or get_today_taipei_date(),
+            material,
+            settings,
+            generation_source="gemini_api",
+            generation_mode="gemini_staged",
+        )
+        material["metadata"]["selection_log_warnings"] = save_info.get("selection_log_warnings", [])
+        update_gemini_generation_job(job_id, status="completed", current_stage="finalized", error_message="")
+        invalidate_dashboard_cache("gemini staged material generated")
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[gemini-stage] finalized job_id={job_id} material_key={save_info.get('material_key')} elapsed_ms={elapsed_ms}")
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "status": "completed",
+            "material_key": save_info.get("material_key"),
+            "material_date": save_info.get("material_date"),
+            "version_no": save_info.get("version_no"),
+            "generation_mode": "gemini_staged",
+            "generation_source": "gemini_api",
+            "resolved_settings": material["metadata"].get("resolved_settings", {}),
+            "count_validation": count_validation,
+            "selection_log_warnings": save_info.get("selection_log_warnings", []),
+            "elapsed_ms": elapsed_ms,
+        }, 200
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        reason = classify_gemini_daily_material_error(exc)
+        message = f"{reason}:{str(exc)[:240]}"
+        update_gemini_generation_job(job_id, status="failed", current_stage="finalize", error_message=message)
+        print(f"[gemini-stage] failed job_id={job_id} stage=finalize error={message} elapsed_ms={elapsed_ms}")
+        return {
+            "ok": False,
+            "error": "gemini_stage_failed",
+            "stage": "finalize",
+            "reason": reason,
+            "elapsed_ms": elapsed_ms,
+        }, 200
 
 
 def sample_material(settings=None):
@@ -13262,6 +13821,31 @@ def api_generate():
                         "reason": "Gemini daily material generator is not configured",
                     }
                 ), 200
+            if normalized_mode == "gemini":
+                print("[material-generator] mode=gemini start")
+                print("[feature-boundary] daily_material mode=gemini use gemini staged generator")
+                settings, settings_source, _db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
+                job = create_gemini_generation_job(settings, material_date=get_today_taipei_date())
+                return jsonify(
+                    {
+                        "ok": True,
+                        "job_id": job["job_id"],
+                        "status": "running",
+                        "next_stage": "vocab",
+                        "generation_mode": "gemini_staged",
+                        "settings_source": settings_source,
+                        "resolved_settings": {
+                            "target_level": settings.get("target_level", ""),
+                            "target_levels": settings_target_levels(settings),
+                            "word_count": int(settings.get("vocab_count") or 0),
+                            "verb_count": int(settings.get("verb_count") or 0),
+                            "choice_count": int(settings.get("mcq_count") or 0),
+                            "fill_count": int(settings.get("fill_count") or 0),
+                            "grammar_level": "fixed_quota",
+                            "grammar_count": LOCAL_FIXED_GRAMMAR_TOTAL,
+                        },
+                    }
+                )
             timeout_seconds = GEMINI_GENERATE_TIMEOUT_SECONDS if normalized_mode == "gemini" else MANUAL_GENERATE_TIMEOUT_SECONDS
             if normalized_mode == "gemini":
                 print(f"[gemini-generate] start timeout_seconds={timeout_seconds}")
@@ -13461,6 +14045,32 @@ def api_generate():
             },
         }
         return jsonify(payload), 200 if mode == "local" else 500
+
+
+@app.post("/api/generate/gemini-step")
+def api_generate_gemini_step():
+    try:
+        data = request.get_json(silent=True) or {}
+        job_id = str(data.get("job_id") or "").strip()
+        stage = str(data.get("stage") or "").strip().lower()
+        if not job_id:
+            return jsonify({"ok": False, "error": "missing_job_id", "reason": "job_id is required"}), 400
+        if stage == "finalize":
+            payload, status_code = finalize_gemini_generation_job(job_id, app_url=request.host_url.rstrip("/"))
+            return jsonify(payload), status_code
+        payload, status_code = run_gemini_generation_stage(job_id, stage)
+        return jsonify(payload), status_code
+    except Exception as exc:
+        print(f"[gemini-stage] failed job_id=unknown stage=unknown error={exc}")
+        print(traceback.format_exc())
+        return jsonify(
+            {
+                "ok": False,
+                "error": "gemini_stage_failed",
+                "stage": "unknown",
+                "reason": str(exc),
+            }
+        ), 200
 
 
 @app.route("/api/cron/daily-push", methods=["GET", "POST"])
