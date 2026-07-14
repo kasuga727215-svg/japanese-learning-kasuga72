@@ -4224,8 +4224,16 @@ def gemini_bank_item_from_payload(item_type, payload, fallback_level):
     }
 
 
+def normalize_gemini_bank_level(value, item_type="word", fallback="N5"):
+    level = simple_text(value).upper()
+    if item_type == "word" and level == "SNS":
+        return "SNS"
+    return level if level in LEVELS else fallback
+
+
 def gemini_bank_count_unused(item_type, level):
     ensure_gemini_item_bank_store()
+    level = normalize_gemini_bank_level(level, item_type)
     if DATABASE_URL:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -4251,8 +4259,9 @@ def gemini_bank_count_unused(item_type, level):
 
 def build_gemini_bank_prompt(item_type, level, count):
     if item_type == "word":
-        schema = {"items": [{"word": "", "reading": "", "meaning": "", "part_of_speech": "", "jlpt_level": level, "category": "general", "normalized_key": "", "example_sentence": "", "example_translation_zh": ""}]}
-        detail = "Generate useful standard Japanese vocabulary for daily learning. Avoid mechanical business compounds."
+        category = "approved_slang" if level == "SNS" else "general"
+        schema = {"items": [{"word": "", "reading": "", "meaning": "", "part_of_speech": "", "jlpt_level": level, "category": category, "normalized_key": "", "example_sentence": "", "example_translation_zh": ""}]}
+        detail = "Generate approved SNS / casual Japanese expressions with safe learning notes." if level == "SNS" else "Generate useful standard Japanese vocabulary for daily learning. Avoid mechanical business compounds."
     elif item_type == "verb":
         schema = {"items": [{"surface": "", "dictionary_form": "", "reading_hiragana": "", "meaning_zh": "", "verb_group": 1, "verb_type": "", "jlpt_level": level, "normalized_key": "", "forms": {"dictionary": "", "masu_stem": "", "te": "", "ta": "", "nai": "", "ba": "", "volitional": "", "potential": "", "causative": "", "passive": "", "causativePassive": ""}}]}
         detail = "Generate real Japanese verbs only. Avoid fake noun + suru compounds. Include complete conjugation forms."
@@ -4368,7 +4377,7 @@ def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, re
     if not GEMINI_API_KEY:
         raise RuntimeError("gemini_generation_not_available")
     ensure_gemini_item_bank_store()
-    level = normalize_gemini_level(level, "N5")
+    level = normalize_gemini_bank_level(level, item_type)
     before = gemini_bank_count_unused(item_type, level)
     minimum = int(min_unused_per_level)
     needed = max(0, minimum - before)
@@ -4403,9 +4412,9 @@ def ensure_gemini_bank_capacity(item_type, target_levels, min_unused_per_level):
     return refill
 
 
-def build_level_quota(target_levels, total_count):
+def build_level_quota(target_levels, total_count, item_type="word"):
     levels = [level for level in target_levels if level in LEVELS]
-    sns_selected = "SNS" in target_levels
+    sns_selected = item_type == "word" and "SNS" in target_levels
     total = max(0, int(total_count or 0))
     if total <= 0:
         return {}
@@ -4432,8 +4441,10 @@ def gemini_bank_stage_plan(settings):
     jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
     stages = []
     stages.extend(f"word:{level}" for level in jlpt_levels)
+    if "SNS" in target_levels:
+        stages.append("word:SNS")
     stages.extend(f"verb:{level}" for level in jlpt_levels)
-    stages.extend(f"grammar:{level}" for level in LEVELS)
+    stages.extend(f"grammar:{level}" for level in reversed(LEVELS))
     stages.append("finalize")
     return stages
 
@@ -4442,12 +4453,17 @@ def gemini_bank_step_plan(settings):
     target_levels = settings_target_levels(settings)
     jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
     steps = []
-    for item_type in ("word", "verb"):
-        for level in jlpt_levels:
-            steps.append({"stage": "refill", "item_type": item_type, "jlpt_level": level, "count": GEMINI_BANK_REFILL_BATCH_SIZE})
-    for level in LEVELS:
+    for level in jlpt_levels:
+        steps.append({"stage": "refill", "item_type": "word", "jlpt_level": level, "count": GEMINI_BANK_REFILL_BATCH_SIZE})
+    if "SNS" in target_levels:
+        steps.append({"stage": "refill", "item_type": "word", "jlpt_level": "SNS", "count": GEMINI_BANK_REFILL_BATCH_SIZE})
+    for level in jlpt_levels:
+        steps.append({"stage": "refill", "item_type": "verb", "jlpt_level": level, "count": GEMINI_BANK_REFILL_BATCH_SIZE})
+    for level in reversed(LEVELS):
         steps.append({"stage": "refill", "item_type": "grammar", "jlpt_level": level, "count": GEMINI_BANK_REFILL_BATCH_SIZE})
     steps.append({"stage": "finalize"})
+    print(f"[gemini-plan] target_levels={','.join(target_levels)}")
+    print(f"[gemini-plan] steps={steps}")
     return steps
 
 
@@ -4464,7 +4480,8 @@ def parse_gemini_bank_stage(stage):
     item_type = legacy.get(item_type, item_type)
     item_type = item_type.strip()
     level = level.strip().upper()
-    if item_type not in {"word", "verb", "grammar"} or level not in LEVELS:
+    valid_levels = [*LEVELS, "SNS"] if item_type == "word" else LEVELS
+    if item_type not in {"word", "verb", "grammar"} or level not in valid_levels:
         return None, None
     return item_type, level
 
@@ -4476,7 +4493,7 @@ def select_gemini_bank_items(item_type, quota):
     for level, count in quota.items():
         if count <= 0:
             continue
-        query_level = "N5" if level == "SNS" else level
+        query_level = level
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -4523,6 +4540,81 @@ def select_gemini_bank_items(item_type, quota):
                 conn.commit()
             selected.extend(dict(row) for row in rows)
         print(f"[gemini-bank] select item_type={item_type} level={level} selected={len(rows)}")
+    return selected
+
+
+def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None):
+    ensure_gemini_item_bank_store()
+    limit = max(0, int(deficit or 0))
+    if limit <= 0:
+        return []
+    excluded = {str(key) for key in (excluded_keys or set()) if key}
+    now = utc_now_iso()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                excluded_clause = "AND NOT (normalized_key = ANY(%s))" if excluded else ""
+                params = [item_type, LEVELS]
+                if excluded:
+                    params.append(list(excluded))
+                params.append(limit)
+                cur.execute(
+                    f"""
+                    SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                    FROM gemini_item_bank
+                    WHERE item_type = %s
+                      AND status = 'unused'
+                      AND jlpt_level = ANY(%s)
+                      {excluded_clause}
+                    ORDER BY used_count ASC, created_at ASC, id ASC
+                    LIMIT %s
+                    """,
+                    tuple(params),
+                )
+                rows = cur.fetchall()
+                ids = [row[0] for row in rows]
+                if ids:
+                    cur.execute(
+                        "UPDATE gemini_item_bank SET status = 'reserved', updated_at = %s WHERE id = ANY(%s)",
+                        (now, ids),
+                    )
+            conn.commit()
+        keys = ["id", "item_type", "normalized_key", "display_text", "reading", "jlpt_level", "category", "source", "payload_json"]
+        selected = [dict(zip(keys, row)) for row in rows]
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            level_placeholders = ",".join(["?"] * len(LEVELS))
+            params = [item_type, *LEVELS]
+            excluded_clause = ""
+            if excluded:
+                excluded_placeholders = ",".join(["?"] * len(excluded))
+                excluded_clause = f"AND normalized_key NOT IN ({excluded_placeholders})"
+                params.extend(list(excluded))
+            params.append(limit)
+            rows = conn.execute(
+                f"""
+                SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                FROM gemini_item_bank
+                WHERE item_type = ?
+                  AND status = 'unused'
+                  AND jlpt_level IN ({level_placeholders})
+                  {excluded_clause}
+                ORDER BY used_count ASC, created_at ASC, id ASC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+            ids = [row["id"] for row in rows]
+            if ids:
+                placeholders = ",".join(["?"] * len(ids))
+                conn.execute(
+                    f"UPDATE gemini_item_bank SET status = 'reserved', updated_at = ? WHERE id IN ({placeholders})",
+                    (now, *ids),
+                )
+            conn.commit()
+        selected = [dict(row) for row in rows]
+    print(f"[gemini-finalize] top_up item_type={item_type} deficit={limit} added={len(selected)}")
     return selected
 
 
@@ -4642,7 +4734,12 @@ def build_gemini_bank_material(settings, selected_words, selected_verbs, selecte
             "grammar_total_actual": len(grammar_points),
         },
     }
-    validate_gemini_daily_material(material, settings)
+    requested_words = int(settings.get("vocab_count") or 0)
+    requested_verbs = int(settings.get("verb_count") or 0)
+    if len(vocab) < requested_words:
+        raise ValueError(f"insufficient_vocab_count:{len(vocab)}/{requested_words}")
+    if len(verbs) < requested_verbs:
+        raise ValueError(f"insufficient_verb_count:{len(verbs)}/{requested_verbs}")
     return material
 
 
@@ -6320,7 +6417,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
         item_type, level = parse_gemini_bank_stage(stage)
     if not item_type:
         return {"ok": False, "error": "unsupported_gemini_stage", "stage": stage, "reason": "unsupported stage"}, 400
-    level = normalize_gemini_level(level, "N5")
+    level = normalize_gemini_bank_level(level, item_type)
     settings = gemini_job_settings(job)
     started = time.perf_counter()
     print(f"[gemini-stage] start job_id={job_id} stage={stage} timeout_seconds={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
@@ -6391,19 +6488,51 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         grammar_stage = gemini_job_json(job.get("grammar_json"), {})
         target_levels = settings_target_levels(settings)
         jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
-        word_quota = build_level_quota(target_levels, int(settings.get("vocab_count") or 0))
-        verb_quota = build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0))
+        word_quota = build_level_quota(target_levels, int(settings.get("vocab_count") or 0), item_type="word")
+        verb_quota = build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0), item_type="verb")
         grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+        print(f"[gemini-plan] target_levels={','.join(target_levels)}")
+        print(f"[gemini-plan] word_quota={word_quota}")
+        print(f"[gemini-plan] verb_quota={verb_quota}")
+        print(f"[gemini-plan] grammar_quota={grammar_quota}")
         selected_words = select_gemini_bank_items("word", word_quota)
         selected_verbs = select_gemini_bank_items("verb", verb_quota)
         selected_grammar = select_gemini_bank_items("grammar", grammar_quota)
         reserved = [*(selected_words or []), *(selected_verbs or []), *(selected_grammar or [])]
-        if not selected_words:
-            raise ValueError("gemini_bank_insufficient:word")
-        if not selected_verbs:
-            raise ValueError("gemini_bank_insufficient:verb")
+        initial_counts = {
+            "word": dict(Counter(row.get("jlpt_level", "") for row in selected_words if row.get("jlpt_level"))),
+            "verb": dict(Counter(row.get("jlpt_level", "") for row in selected_verbs if row.get("jlpt_level"))),
+            "grammar": dict(Counter(row.get("jlpt_level", "") for row in selected_grammar if row.get("jlpt_level"))),
+        }
+        print(f"[gemini-finalize] initial selected_counts_by_level={initial_counts}")
+        requested_words = int(settings.get("vocab_count") or 0)
+        requested_verbs = int(settings.get("verb_count") or 0)
+        top_up = {
+            "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
+            "verb": {"needed": max(0, requested_verbs - len(selected_verbs)), "added": 0},
+            "grammar_warning": [],
+        }
+        if top_up["word"]["needed"] > 0:
+            selected_keys = {row.get("normalized_key") for row in selected_words}
+            extra_words = select_gemini_bank_top_up_items("word", top_up["word"]["needed"], selected_keys)
+            selected_words.extend(extra_words)
+            reserved.extend(extra_words)
+            top_up["word"]["added"] = len(extra_words)
+        if top_up["verb"]["needed"] > 0:
+            selected_keys = {row.get("normalized_key") for row in selected_verbs}
+            extra_verbs = select_gemini_bank_top_up_items("verb", top_up["verb"]["needed"], selected_keys)
+            selected_verbs.extend(extra_verbs)
+            reserved.extend(extra_verbs)
+            top_up["verb"]["added"] = len(extra_verbs)
         if not selected_grammar:
-            raise ValueError("gemini_bank_insufficient:grammar")
+            top_up["grammar_warning"].append("gemini_bank_grammar_empty")
+            print("[gemini-finalize] grammar_warning=gemini_bank_grammar_empty")
+        if len(selected_words) < requested_words:
+            print(f"[gemini-finalize] insufficient item_type=word selected={len(selected_words)} requested={requested_words}")
+            raise ValueError("gemini_bank_insufficient:word")
+        if len(selected_verbs) < requested_verbs:
+            print(f"[gemini-finalize] insufficient item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
+            raise ValueError("gemini_bank_insufficient:verb")
         bank_refill = {
             "word": vocab_stage.get("refill", {}) if isinstance(vocab_stage, dict) else {},
             "verb": verbs_stage.get("refill", {}) if isinstance(verbs_stage, dict) else {},
@@ -6415,8 +6544,6 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "grammar": grammar_quota,
         }
         material = build_gemini_bank_material(settings, selected_words, selected_verbs, selected_grammar, level_quota, bank_refill)
-        requested_words = int(settings.get("vocab_count") or 0)
-        requested_verbs = int(settings.get("verb_count") or 0)
         actual_words = len(material.get("vocab") or [])
         actual_verbs = len(material.get("verbs") or [])
         count_validation = {
@@ -6457,8 +6584,12 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
                 "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
+                "top_up": top_up,
             }
         )
+        material["metadata"].setdefault("warnings", []).extend(top_up.get("grammar_warning") or [])
+        final_counts = material["metadata"].get("selected_counts_by_level", {})
+        print(f"[gemini-finalize] final selected word={actual_words} verb={actual_verbs} grammar={len(material.get('grammar_points') or [])}")
         save_info = save_material_for_date(
             job.get("material_date") or get_today_taipei_date(),
             material,
@@ -6485,6 +6616,8 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "generation_source": "gemini_api",
             "resolved_settings": material["metadata"].get("resolved_settings", {}),
             "count_validation": count_validation,
+            "top_up": top_up,
+            "warnings": material["metadata"].get("warnings", []),
             "selection_log_warnings": save_info.get("selection_log_warnings", []),
             "elapsed_ms": elapsed_ms,
         }, 200
@@ -6500,7 +6633,8 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "ok": False,
             "error": error_code,
             "stage": "finalize",
-            "reason": "unused candidate pool is insufficient and refill failed" if error_code == "gemini_bank_insufficient" else reason,
+            "reason": "bank cannot satisfy requested word/verb count after one top-up" if error_code == "gemini_bank_insufficient" else reason,
+            "missing": [str(exc).split(":", 1)[1]] if error_code == "gemini_bank_insufficient" and ":" in str(exc) else [],
             "elapsed_ms": elapsed_ms,
         }, 200
 
@@ -14757,7 +14891,8 @@ def api_generate_gemini_step():
             item_type = str(data.get("item_type") or "").strip().lower()
             jlpt_level = str(data.get("jlpt_level") or data.get("level") or "").strip().upper()
             count = min(GEMINI_BANK_REFILL_BATCH_SIZE, max(1, int(data.get("count") or GEMINI_BANK_REFILL_BATCH_SIZE)))
-            if item_type not in {"word", "verb", "grammar"} or jlpt_level not in LEVELS:
+            valid_levels = [*LEVELS, "SNS"] if item_type == "word" else LEVELS
+            if item_type not in {"word", "verb", "grammar"} or jlpt_level not in valid_levels:
                 return jsonify(
                     {
                         "ok": False,
