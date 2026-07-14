@@ -1122,14 +1122,14 @@
         clearTimeout(timer);
       }
       if (!useSample && generationMode === "gemini" && result.job_id) {
-        for (const stage of ["vocab", "verbs", "grammar", "finalize"]) {
+        const stages = Array.isArray(result.stages) && result.stages.length
+          ? result.stages
+          : ["word:N5", "verb:N5", "grammar:N5", "finalize"];
+        for (const stage of stages) {
           const stageLabels = {
-            vocab: "Gemini staged generation: vocabulary...",
-            verbs: "Gemini staged generation: verbs...",
-            grammar: "Gemini staged generation: grammar...",
-            finalize: "Gemini staged generation: finalizing material..."
+            finalize: "Gemini item bank: finalizing material..."
           };
-          msg.innerText = stageLabels[stage] || `Gemini stage: ${stage}`;
+          msg.innerText = stageLabels[stage] || `Gemini item bank: ${stage}...`;
           result = await api("/api/generate/gemini-step", {
             method: "POST",
             body: JSON.stringify({ job_id: result.job_id, stage })
