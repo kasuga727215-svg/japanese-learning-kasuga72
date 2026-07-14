@@ -3939,6 +3939,8 @@ GEMINI_JOB_COLUMNS = [
     "vocab_json",
     "verbs_json",
     "grammar_json",
+    "planned_steps_json",
+    "completed_steps_json",
     "error_message",
     "created_at",
     "updated_at",
@@ -3966,12 +3968,16 @@ def ensure_gemini_generation_jobs_store():
                             vocab_json TEXT NOT NULL DEFAULT '[]',
                             verbs_json TEXT NOT NULL DEFAULT '[]',
                             grammar_json TEXT NOT NULL DEFAULT '{}',
+                            planned_steps_json TEXT NOT NULL DEFAULT '[]',
+                            completed_steps_json TEXT NOT NULL DEFAULT '[]',
                             error_message TEXT DEFAULT '',
                             created_at TIMESTAMPTZ NOT NULL,
                             updated_at TIMESTAMPTZ NOT NULL
                         )
                         """
                     )
+                    cur.execute("ALTER TABLE gemini_generation_jobs ADD COLUMN IF NOT EXISTS planned_steps_json TEXT NOT NULL DEFAULT '[]'")
+                    cur.execute("ALTER TABLE gemini_generation_jobs ADD COLUMN IF NOT EXISTS completed_steps_json TEXT NOT NULL DEFAULT '[]'")
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_status ON gemini_generation_jobs(status)")
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_date ON gemini_generation_jobs(material_date)")
                 conn.commit()
@@ -3989,12 +3995,19 @@ def ensure_gemini_generation_jobs_store():
                         vocab_json TEXT NOT NULL DEFAULT '[]',
                         verbs_json TEXT NOT NULL DEFAULT '[]',
                         grammar_json TEXT NOT NULL DEFAULT '{}',
+                        planned_steps_json TEXT NOT NULL DEFAULT '[]',
+                        completed_steps_json TEXT NOT NULL DEFAULT '[]',
                         error_message TEXT DEFAULT '',
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
                     )
                     """
                 )
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(gemini_generation_jobs)").fetchall()}
+                if "planned_steps_json" not in columns:
+                    conn.execute("ALTER TABLE gemini_generation_jobs ADD COLUMN planned_steps_json TEXT NOT NULL DEFAULT '[]'")
+                if "completed_steps_json" not in columns:
+                    conn.execute("ALTER TABLE gemini_generation_jobs ADD COLUMN completed_steps_json TEXT NOT NULL DEFAULT '[]'")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_status ON gemini_generation_jobs(status)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_generation_jobs_date ON gemini_generation_jobs(material_date)")
                 conn.commit()
@@ -4009,7 +4022,7 @@ def gemini_job_json(value, fallback):
         return fallback
 
 
-def create_gemini_generation_job(settings, material_date=None):
+def create_gemini_generation_job(settings, material_date=None, planned_steps=None):
     ensure_gemini_generation_jobs_store()
     job_id = uuid.uuid4().hex
     date_iso = canonical_material_date(material_date or get_today_taipei_date())
@@ -4023,6 +4036,8 @@ def create_gemini_generation_job(settings, material_date=None):
         "vocab_json": "[]",
         "verbs_json": "[]",
         "grammar_json": "{}",
+        "planned_steps_json": json.dumps(planned_steps or [], ensure_ascii=False),
+        "completed_steps_json": "[]",
         "error_message": "",
         "created_at": now,
         "updated_at": now,
@@ -4089,6 +4104,45 @@ def update_gemini_generation_job(job_id, **fields):
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             conn.execute(f"UPDATE gemini_generation_jobs SET {assignments} WHERE job_id = :job_id", payload)
             conn.commit()
+
+
+def gemini_refill_step_key(item_type, level):
+    return f"{str(item_type or '').strip().lower()}:{normalize_gemini_bank_level(level, str(item_type or '').strip().lower())}"
+
+
+def gemini_step_key_from_payload(step):
+    if not isinstance(step, dict):
+        return ""
+    if str(step.get("stage") or "").strip().lower() != "refill":
+        return ""
+    item_type = str(step.get("item_type") or "").strip().lower()
+    level = str(step.get("jlpt_level") or step.get("level") or "").strip().upper()
+    if item_type not in {"word", "verb", "grammar"}:
+        return ""
+    return gemini_refill_step_key(item_type, level)
+
+
+def gemini_planned_refill_step_keys(job):
+    steps = gemini_job_json(job.get("planned_steps_json"), [])
+    keys = [gemini_step_key_from_payload(step) for step in steps if isinstance(step, dict)]
+    return [key for key in keys if key]
+
+
+def gemini_completed_step_keys(job):
+    completed = gemini_job_json(job.get("completed_steps_json"), [])
+    return [str(item) for item in completed if item]
+
+
+def mark_gemini_generation_step_completed(job_id, item_type, level):
+    job = load_gemini_generation_job(job_id)
+    if not job:
+        return []
+    key = gemini_refill_step_key(item_type, level)
+    completed = gemini_completed_step_keys(job)
+    if key not in completed:
+        completed.append(key)
+        update_gemini_generation_job(job_id, completed_steps_json=json.dumps(completed, ensure_ascii=False))
+    return completed
 
 
 GEMINI_BANK_COLUMNS = [
@@ -6418,6 +6472,16 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
     if not item_type:
         return {"ok": False, "error": "unsupported_gemini_stage", "stage": stage, "reason": "unsupported stage"}, 400
     level = normalize_gemini_bank_level(level, item_type)
+    planned_keys = gemini_planned_refill_step_keys(job)
+    step_key = gemini_refill_step_key(item_type, level)
+    if planned_keys and step_key not in planned_keys:
+        return {
+            "ok": False,
+            "error": "gemini_unplanned_step_rejected",
+            "stage": stage,
+            "reason": "Use planned refill steps returned by /api/generate?mode=gemini",
+            "received_step": step_key,
+        }, 200
     settings = gemini_job_settings(job)
     started = time.perf_counter()
     print(f"[gemini-stage] start job_id={job_id} stage={stage} timeout_seconds={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
@@ -6438,7 +6502,9 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
         )
         next_stage = ""
         count = int(refill.get("inserted") or 0)
+        completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(f"[gemini-step-runner] completed stage=refill item_type={item_type} level={level}")
         print(f"[gemini-stage] saved job_id={job_id} stage={stage} count={count} elapsed_ms={elapsed_ms}")
         return {
             "ok": True,
@@ -6448,6 +6514,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "next_stage": next_stage,
             "count": count,
             "refill": refill,
+            "completed_steps": completed_steps,
             "elapsed_ms": elapsed_ms,
         }, 200
     except Exception as exc:
@@ -6482,6 +6549,19 @@ def finalize_gemini_generation_job(job_id, app_url=None):
     print(f"[gemini-stage] finalize job_id={job_id}")
     reserved = []
     try:
+        planned_steps = gemini_planned_refill_step_keys(job)
+        completed_steps = gemini_completed_step_keys(job)
+        missing_steps = [step for step in planned_steps if step not in completed_steps]
+        print(f"[gemini-finalize] completed_steps={completed_steps}")
+        print(f"[gemini-finalize] missing_steps={missing_steps}")
+        if missing_steps:
+            return {
+                "ok": False,
+                "error": "gemini_bank_steps_incomplete",
+                "stage": "finalize",
+                "reason": "planned refill steps are not complete",
+                "missing_steps": missing_steps,
+            }, 200
         settings = gemini_job_settings(job)
         vocab_stage = gemini_job_json(job.get("vocab_json"), {})
         verbs_stage = gemini_job_json(job.get("verbs_json"), {})
@@ -14650,9 +14730,9 @@ def api_generate():
                 print("[material-generator] mode=gemini start")
                 print("[feature-boundary] daily_material mode=gemini use gemini item bank")
                 settings, settings_source, _db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
-                job = create_gemini_generation_job(settings, material_date=get_today_taipei_date())
                 stages = gemini_bank_stage_plan(settings)
                 steps = gemini_bank_step_plan(settings)
+                job = create_gemini_generation_job(settings, material_date=get_today_taipei_date(), planned_steps=steps)
                 return jsonify(
                     {
                         "ok": True,
@@ -14884,6 +14964,16 @@ def api_generate_gemini_step():
         stage = str(data.get("stage") or "").strip().lower()
         if not job_id:
             return jsonify({"ok": False, "error": "missing_job_id", "reason": "job_id is required"}), 400
+        if stage in {"vocab", "verbs", "grammar"}:
+            print(f"[gemini-step-runner] rejected legacy_stage={stage}")
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "gemini_legacy_stage_rejected",
+                    "reason": "Use planned refill steps returned by /api/generate?mode=gemini",
+                    "received_stage": stage,
+                }
+            ), 200
         if stage == "finalize":
             payload, status_code = finalize_gemini_generation_job(job_id, app_url=request.host_url.rstrip("/"))
             return jsonify(payload), status_code
@@ -14901,6 +14991,7 @@ def api_generate_gemini_step():
                         "reason": "refill step requires item_type and jlpt_level",
                     }
                 ), 400
+            print(f"[gemini-step-runner] executing stage=refill item_type={item_type} level={jlpt_level} count={count}")
             payload, status_code = run_gemini_generation_stage(
                 job_id,
                 f"{item_type}:{jlpt_level}",

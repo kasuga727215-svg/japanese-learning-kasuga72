@@ -1122,14 +1122,13 @@
         clearTimeout(timer);
       }
       if (!useSample && generationMode === "gemini" && result.job_id) {
-        const steps = Array.isArray(result.steps) && result.steps.length
-          ? result.steps
-          : (Array.isArray(result.stages) && result.stages.length
-            ? result.stages.map((stage) => ({ stage }))
-            : [{ stage: "refill", item_type: "word", jlpt_level: "N5", count: 3 }, { stage: "refill", item_type: "verb", jlpt_level: "N5", count: 3 }, { stage: "refill", item_type: "grammar", jlpt_level: "N5", count: 3 }, { stage: "finalize" }]);
+        if (!Array.isArray(result.steps) || !result.steps.length) {
+          throw new Error("Gemini item bank job did not return planned steps.");
+        }
+        const steps = result.steps;
         for (const step of steps) {
-          const stage = typeof step === "string" ? step : step.stage;
-          const stepPayload = typeof step === "string" ? { job_id: result.job_id, stage: step } : { job_id: result.job_id, ...step };
+          const stage = step.stage;
+          const stepPayload = { job_id: result.job_id, ...step };
           msg.innerText = stage === "finalize"
             ? "Gemini item bank: finalizing material..."
             : `Gemini item bank: ${stepPayload.item_type || "refill"}:${stepPayload.jlpt_level || ""}...`;
