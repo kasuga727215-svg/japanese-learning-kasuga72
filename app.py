@@ -111,8 +111,9 @@ GEMINI_MODEL_CANDIDATES = os.environ.get(
     "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
 ).strip()
 GEMINI_BILLING_BLOCK_SECONDS = read_int_env("GEMINI_BILLING_BLOCK_SECONDS", 600, 60, 86400)
-TG_TOKEN = os.environ.get("TG_TOKEN", "").strip()
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID", "").strip()
+TG_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_TOKEN", "")).strip()
+TG_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID", "")).strip()
+TELEGRAM_REMINDER_SECRET = os.environ.get("TELEGRAM_REMINDER_SECRET", "").strip()
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
@@ -3916,6 +3917,121 @@ def save_settings_file(settings):
         f"fill_count={current.get('fill_count')}"
     )
     return current
+
+
+REMINDER_DAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+REMINDER_DEFAULT_MESSAGE = "せにせに，今天也來學一點日文吧。\n不用一次很多，持續才是最強的。"
+
+
+def reminder_time_options():
+    return [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)]
+
+
+REMINDER_TIME_OPTIONS = set(reminder_time_options())
+
+
+def raw_app_settings():
+    ensure_settings_store()
+    if DATABASE_URL:
+        return load_postgres_settings()
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    return dict(rows)
+
+
+def save_app_setting_values(values):
+    ensure_settings_store()
+    payload = {key: str(value) for key, value in (values or {}).items()}
+    if not payload:
+        return
+    with sqlite3.connect(SQLITE_SETTINGS_FILE) as conn:
+        conn.executemany(
+            """
+            INSERT INTO settings (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            list(payload.items()),
+        )
+        conn.commit()
+    if DATABASE_URL and not save_postgres_settings(payload):
+        raise RuntimeError("postgres_settings_save_failed")
+
+
+def normalize_reminder_days(value):
+    if isinstance(value, str):
+        raw = [item.strip().upper() for item in re.split(r"[,\s]+", value) if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw = [str(item or "").strip().upper() for item in value]
+    else:
+        raw = []
+    days = [day for day in REMINDER_DAYS if day in raw]
+    return days or REMINDER_DAYS[:]
+
+
+def normalize_reminder_times(value):
+    if isinstance(value, str):
+        raw = [item.strip() for item in value.split(",") if item.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        raw = [str(item or "").strip() for item in value]
+    else:
+        raw = []
+    seen = []
+    for item in raw:
+        if item not in REMINDER_TIME_OPTIONS:
+            raise ValueError(f"invalid_reminder_time:{item}")
+        if item not in seen:
+            seen.append(item)
+    return seen or ["09:00", "21:00"]
+
+
+def normalize_reminder_settings(raw):
+    raw = raw or {}
+    enabled_value = raw.get("enabled", raw.get("telegram_reminder_enabled", "false"))
+    message = str(raw.get("message", raw.get("telegram_reminder_message", REMINDER_DEFAULT_MESSAGE)) or "").strip()
+    if len(message) > 500:
+        raise ValueError("reminder_message_too_long")
+    return {
+        "enabled": boolish(enabled_value),
+        "times": normalize_reminder_times(raw.get("times", raw.get("telegram_reminder_times", "09:00,21:00"))),
+        "timezone": str(raw.get("timezone", raw.get("telegram_reminder_timezone", "Asia/Taipei")) or "Asia/Taipei").strip() or "Asia/Taipei",
+        "days": normalize_reminder_days(raw.get("days", raw.get("telegram_reminder_days", ",".join(REMINDER_DAYS)))),
+        "message": message or REMINDER_DEFAULT_MESSAGE,
+        "last_sent_key": str(raw.get("last_sent_key", raw.get("telegram_reminder_last_sent_key", "")) or ""),
+        "last_sent_at": str(raw.get("last_sent_at", raw.get("telegram_reminder_last_sent_at", "")) or ""),
+    }
+
+
+def load_telegram_reminder_settings():
+    raw = raw_app_settings()
+    return normalize_reminder_settings(raw)
+
+
+def save_telegram_reminder_settings(settings):
+    normalized = normalize_reminder_settings(settings)
+    save_app_setting_values(
+        {
+            "telegram_reminder_enabled": "true" if normalized["enabled"] else "false",
+            "telegram_reminder_times": ",".join(normalized["times"]),
+            "telegram_reminder_timezone": normalized["timezone"],
+            "telegram_reminder_days": ",".join(normalized["days"]),
+            "telegram_reminder_message": normalized["message"],
+        }
+    )
+    return load_telegram_reminder_settings()
+
+
+def reminder_day_code(dt):
+    return REMINDER_DAYS[dt.weekday()]
+
+
+def reminder_slot_time(dt):
+    minute = 30 if dt.minute >= 30 else 0
+    return f"{dt.hour:02d}:{minute:02d}"
+
+
+def send_telegram_reminder_message(message):
+    return send_telegram_message(html.escape(message).replace("\n", "\n"), timeout_seconds=5)
 
 
 def migrations_allowed_now():
@@ -14581,6 +14697,70 @@ def api_save_settings():
         print(f"[settings-save] failed reason={exc}")
         print(traceback.format_exc())
         return jsonify({"ok": False, "error": "settings_save_failed", "reason": str(exc)}), 200
+
+
+@app.get("/api/telegram/reminder-settings")
+def api_telegram_reminder_settings():
+    try:
+        return jsonify({"ok": True, "settings": load_telegram_reminder_settings(), "time_options": reminder_time_options()})
+    except Exception as exc:
+        print(f"[telegram-reminder] settings_load_failed reason={exc}")
+        return jsonify({"ok": False, "error": "reminder_settings_load_failed", "reason": str(exc)}), 200
+
+
+@app.post("/api/telegram/reminder-settings")
+def api_save_telegram_reminder_settings():
+    try:
+        saved = save_telegram_reminder_settings(request.get_json(silent=True) or {})
+        return jsonify({"ok": True, "settings": saved, "time_options": reminder_time_options()})
+    except Exception as exc:
+        print(f"[telegram-reminder] settings_save_failed reason={exc}")
+        return jsonify({"ok": False, "error": "reminder_settings_save_failed", "reason": str(exc)}), 200
+
+
+@app.post("/api/telegram/test-reminder")
+def api_test_telegram_reminder():
+    try:
+        payload = request.get_json(silent=True) or {}
+        settings = normalize_reminder_settings({**raw_app_settings(), **payload}) if payload else load_telegram_reminder_settings()
+        send_telegram_reminder_message(settings["message"])
+        return jsonify({"ok": True, "sent": True, "reason": "test_reminder_sent"})
+    except Exception as exc:
+        print(f"[telegram-reminder] test_failed reason={exc}")
+        return jsonify({"ok": False, "error": "telegram_reminder_test_failed", "reason": str(exc)}), 200
+
+
+@app.route("/api/telegram/reminder-run", methods=["GET", "POST"])
+def api_telegram_reminder_run():
+    try:
+        if TELEGRAM_REMINDER_SECRET and request.args.get("secret") != TELEGRAM_REMINDER_SECRET:
+            return jsonify({"ok": False, "error": "unauthorized"}), 401
+        settings = load_telegram_reminder_settings()
+        if not settings["enabled"]:
+            return jsonify({"ok": True, "sent": False, "reason": "disabled"}), 200
+        tz = ZoneInfo(settings.get("timezone") or "Asia/Taipei")
+        now = datetime.now(tz)
+        slot = reminder_slot_time(now)
+        if slot not in settings["times"]:
+            return jsonify({"ok": True, "sent": False, "reason": "not_due_yet", "slot": slot}), 200
+        if reminder_day_code(now) not in settings["days"]:
+            return jsonify({"ok": True, "sent": False, "reason": "not_due_yet", "slot": slot}), 200
+        sent_key = f"{now.date().isoformat()}|{slot}"
+        if settings.get("last_sent_key") == sent_key:
+            return jsonify({"ok": True, "sent": False, "reason": "already_sent", "sent_key": sent_key}), 200
+        send_telegram_reminder_message(settings["message"])
+        sent_at = datetime.now(timezone.utc).isoformat()
+        save_app_setting_values(
+            {
+                "telegram_reminder_last_sent_key": sent_key,
+                "telegram_reminder_last_sent_at": sent_at,
+            }
+        )
+        print(f"[telegram-reminder] sent sent_key={sent_key}")
+        return jsonify({"ok": True, "sent": True, "reason": "reminder_sent", "sent_key": sent_key}), 200
+    except Exception as exc:
+        print(f"[telegram-reminder] run_failed reason={exc}")
+        return jsonify({"ok": False, "error": "telegram_reminder_run_failed", "reason": str(exc)}), 200
 
 
 @app.get("/api/archive-dates")

@@ -478,6 +478,45 @@
       <div id="save-msg" class="mt-3"></div>
     </div>
     <div class="card p-4">
+      <h4 class="mb-2" style="color:var(--primary);">Telegram 學習提醒</h4>
+      <p class="text-muted mb-3">此功能僅發送 Telegram 學習提醒，不會生成教材，也不會呼叫 Gemini API。</p>
+      <div class="row g-3">
+        <div class="col-md-3">
+          <label class="form-label">啟用提醒</label>
+          <select id="telegram-reminder-enabled" class="form-control">
+            <option value="false">關</option>
+            <option value="true">開</option>
+          </select>
+        </div>
+        <div class="col-md-9">
+          <label class="form-label">提醒時間</label>
+          <div id="telegram-reminder-times" class="d-flex flex-wrap gap-2"></div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">提醒星期</label>
+          <select id="telegram-reminder-days-mode" class="form-control" onchange="syncReminderDayMode()">
+            <option value="daily">每日</option>
+            <option value="weekday">平日</option>
+            <option value="custom">自訂</option>
+          </select>
+          <div id="telegram-reminder-days" class="d-flex flex-wrap gap-2 mt-2"></div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label">最後發送時間</label>
+          <div id="telegram-reminder-last-sent" class="form-control" style="min-height:42px;">尚未發送</div>
+        </div>
+        <div class="col-12">
+          <label class="form-label">提醒訊息</label>
+          <textarea id="telegram-reminder-message" class="form-control" rows="3" maxlength="500"></textarea>
+        </div>
+      </div>
+      <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
+        <button class="neon-btn" onclick="saveTelegramReminderSettings()" id="telegram-reminder-save-btn">儲存提醒設定</button>
+        <button class="neon-btn" onclick="testTelegramReminder()" id="telegram-reminder-test-btn">測試 Telegram 提醒</button>
+      </div>
+      <div id="telegram-reminder-msg" class="mt-3"></div>
+    </div>
+    <div class="card p-4">
       <h4 class="mb-2" style="color:var(--primary);">單字出現設置</h4>
       <p class="text-muted mb-3">先用出現週期判斷該類是否可進候選池，再用單份教材筆數上限控制本次最多抽幾筆。</p>
       <div class="rules-toolbar">
@@ -782,11 +821,12 @@
       document.getElementById("content-loader").style.display = "block";
     });
     const settingsPromise = loadSettings().catch(() => {});
+    const reminderPromise = loadTelegramReminderSettings().catch(() => {});
     const dashboardPromise = loadDashboard().catch(() => {});
     const rulesPromise = loadVocabRules().catch(() => {
       document.getElementById("vocab-rules-container").innerHTML = "<div class='error-text'>單字出現規則暫時無法載入。</div>";
     });
-    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, dashboardPromise, rulesPromise]);
+    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, reminderPromise, dashboardPromise, rulesPromise]);
     perfLog("frontend_bootstrap", bootStarted);
   };
 
@@ -808,6 +848,119 @@
     );
     applyControlCenterSettings(settings, "GET /api/settings");
     perfLog("settings", started);
+  }
+
+  function reminderTimeOptions() {
+    const options = [];
+    for (let hour = 0; hour < 24; hour += 1) {
+      for (const minute of [0, 30]) {
+        options.push(`${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`);
+      }
+    }
+    return options;
+  }
+
+  function renderReminderTimeOptions(selected = []) {
+    const container = document.getElementById("telegram-reminder-times");
+    if (!container) return;
+    const selectedSet = new Set(selected);
+    container.innerHTML = reminderTimeOptions().map((time) => `
+      <label class="form-check-label">
+        <input class="form-check-input me-1 telegram-reminder-time" type="checkbox" value="${time}" ${selectedSet.has(time) ? "checked" : ""}>${time}
+      </label>
+    `).join("");
+  }
+
+  function renderReminderDayOptions(selected = []) {
+    const container = document.getElementById("telegram-reminder-days");
+    if (!container) return;
+    const days = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"];
+    const labels = { MON: "一", TUE: "二", WED: "三", THU: "四", FRI: "五", SAT: "六", SUN: "日" };
+    const selectedSet = new Set(selected);
+    container.innerHTML = days.map((day) => `
+      <label class="form-check-label">
+        <input class="form-check-input me-1 telegram-reminder-day" type="checkbox" value="${day}" ${selectedSet.has(day) ? "checked" : ""}>${labels[day]}
+      </label>
+    `).join("");
+  }
+
+  function syncReminderDayMode() {
+    const mode = document.getElementById("telegram-reminder-days-mode")?.value || "daily";
+    const days = {
+      daily: ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+      weekday: ["MON", "TUE", "WED", "THU", "FRI"],
+    }[mode];
+    if (days) renderReminderDayOptions(days);
+  }
+
+  function reminderDayMode(days = []) {
+    const key = [...days].sort().join(",");
+    if (key === "FRI,MON,SAT,SUN,THU,TUE,WED") return "daily";
+    if (key === "FRI,MON,THU,TUE,WED") return "weekday";
+    return "custom";
+  }
+
+  function collectTelegramReminderSettings() {
+    return {
+      enabled: (document.getElementById("telegram-reminder-enabled")?.value || "false") === "true",
+      times: [...document.querySelectorAll(".telegram-reminder-time:checked")].map((input) => input.value),
+      timezone: "Asia/Taipei",
+      days: [...document.querySelectorAll(".telegram-reminder-day:checked")].map((input) => input.value),
+      message: document.getElementById("telegram-reminder-message")?.value || "",
+    };
+  }
+
+  function applyTelegramReminderSettings(settings = {}) {
+    document.getElementById("telegram-reminder-enabled").value = settings.enabled ? "true" : "false";
+    renderReminderTimeOptions(settings.times || ["09:00", "21:00"]);
+    renderReminderDayOptions(settings.days || ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]);
+    document.getElementById("telegram-reminder-days-mode").value = reminderDayMode(settings.days || []);
+    document.getElementById("telegram-reminder-message").value = settings.message || "";
+    document.getElementById("telegram-reminder-last-sent").innerText = settings.last_sent_at || settings.last_sent_key || "尚未發送";
+  }
+
+  async function loadTelegramReminderSettings() {
+    const result = await api("/api/telegram/reminder-settings");
+    applyTelegramReminderSettings(result.settings || {});
+  }
+
+  async function saveTelegramReminderSettings() {
+    const btn = document.getElementById("telegram-reminder-save-btn");
+    const msg = document.getElementById("telegram-reminder-msg");
+    btn.disabled = true;
+    try {
+      const result = await api("/api/telegram/reminder-settings", {
+        method: "POST",
+        body: JSON.stringify(collectTelegramReminderSettings())
+      });
+      applyTelegramReminderSettings(result.settings || {});
+      msg.className = "mt-3 success-text";
+      msg.innerText = "Telegram 學習提醒設定已儲存。";
+    } catch (error) {
+      msg.className = "mt-3 error-text";
+      msg.innerText = error.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function testTelegramReminder() {
+    const btn = document.getElementById("telegram-reminder-test-btn");
+    const msg = document.getElementById("telegram-reminder-msg");
+    btn.disabled = true;
+    try {
+      await api("/api/telegram/test-reminder", {
+        method: "POST",
+        body: JSON.stringify(collectTelegramReminderSettings())
+      });
+      msg.className = "mt-3 success-text";
+      msg.innerText = "測試 Telegram 提醒已送出。";
+    } catch (error) {
+      msg.className = "mt-3 error-text";
+      msg.innerText = error.message;
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function saveSettingsUI() {
