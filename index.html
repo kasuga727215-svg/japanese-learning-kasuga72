@@ -1333,19 +1333,32 @@
             console.error(`[gemini-ui] legacy stage blocked stage=${stage}`);
             throw new Error(`gemini_legacy_stage_blocked:${stage}`);
           }
-          const stepPayload = { job_id: result.job_id, ...step };
-          console.log(
-            `[gemini-ui] running step stage=${stepPayload.stage}` +
-            ` item_type=${stepPayload.item_type || ""}` +
-            ` level=${stepPayload.jlpt_level || ""}`
-          );
-          msg.innerText = stage === "finalize"
-            ? "Gemini item bank: finalizing material..."
-            : `Gemini item bank: ${stepPayload.item_type || "refill"}:${stepPayload.jlpt_level || ""}...`;
-          result = await api("/api/generate/gemini-step", {
-            method: "POST",
-            body: JSON.stringify(stepPayload)
-          });
+          let repeatStep = true;
+          let repeatCount = 0;
+          while (repeatStep) {
+            repeatCount += 1;
+            if (repeatCount > 30) {
+              throw new Error("gemini_step_repeat_limit_reached");
+            }
+            const stepPayload = { job_id: result.job_id, ...step };
+            console.log(
+              `[gemini-ui] running step stage=${stepPayload.stage}` +
+              ` item_type=${stepPayload.item_type || ""}` +
+              ` level=${stepPayload.jlpt_level || ""}` +
+              ` repeat=${repeatCount}`
+            );
+            msg.innerText = stage === "finalize"
+              ? "Gemini item bank: finalizing material..."
+              : `Gemini item bank: ${stepPayload.item_type || "refill"}:${stepPayload.jlpt_level || ""}...`;
+            result = await api("/api/generate/gemini-step", {
+              method: "POST",
+              body: JSON.stringify(stepPayload)
+            });
+            repeatStep = Boolean(result.continue_same_step);
+            if (repeatStep) {
+              msg.innerText = `Gemini item bank: ${stepPayload.item_type}:${stepPayload.jlpt_level} ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+            }
+          }
         }
       }
       const validation = result.count_validation || {};
