@@ -4544,20 +4544,54 @@ def upsert_gemini_bank_items(items):
 
 
 def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, requested_count=None):
-    if not GEMINI_API_KEY:
-        raise RuntimeError("gemini_generation_not_available")
+    return ensure_gemini_bank_level_capacity_for_generation(
+        item_type,
+        level,
+        min_unused_per_level=min_unused_per_level,
+        requested_count=requested_count,
+    )
+
+
+def ensure_gemini_bank_level_capacity_for_generation(
+    item_type,
+    level,
+    min_unused_per_level=None,
+    requested_count=None,
+    required_for_generation=None,
+):
     ensure_gemini_item_bank_store()
     level = normalize_gemini_bank_level(level, item_type)
     before = gemini_bank_count_unused(item_type, level)
-    minimum = int(min_unused_per_level)
-    needed = max(0, minimum - before)
-    print(f"[gemini-bank] check item_type={item_type} level={level} unused={before} min={minimum}")
+    if required_for_generation is not None:
+        required = max(0, int(required_for_generation or 0))
+        needed = max(0, required - before)
+        print(f"[gemini-bank] generation_need item_type={item_type} level={level} unused={before} required={required}")
+        if needed <= 0:
+            print(f"[gemini-bank] skip refill item_type={item_type} level={level} reason=enough_for_generation")
+            return {
+                "before_unused": before,
+                "required_for_generation": required,
+                "requested": 0,
+                "inserted": 0,
+                "skipped": 0,
+                "after_unused": before,
+                "skipped_refill": True,
+                "reason": "enough_for_generation",
+            }
+    else:
+        minimum = int(min_unused_per_level)
+        needed = max(0, minimum - before)
+        print(f"[gemini-bank] check item_type={item_type} level={level} unused={before} min={minimum}")
+        if needed <= 0:
+            return {"before_unused": before, "requested": 0, "inserted": 0, "skipped": 0, "after_unused": before, "skipped_refill": True}
     if needed <= 0:
         return {"before_unused": before, "requested": 0, "inserted": 0, "skipped": 0, "after_unused": before, "skipped_refill": True}
+    if not GEMINI_API_KEY:
+        raise RuntimeError("gemini_generation_not_available")
     step_limit = GEMINI_BANK_REFILL_BATCH_SIZE
     if requested_count is not None:
         step_limit = min(step_limit, max(1, int(requested_count or 1)))
-    request_count = min(step_limit, needed)
+    request_count = min(step_limit, 3, needed)
     print(f"[gemini-bank] refill start item_type={item_type} level={level} count={request_count} timeout={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
     try:
         prompt = build_gemini_bank_prompt(item_type, level, request_count)
@@ -4604,6 +4638,25 @@ def build_level_quota(target_levels, total_count, item_type="word"):
     if sns_quota:
         quota["SNS"] = sns_quota
     return {key: value for key, value in quota.items() if value > 0}
+
+
+def gemini_generation_level_quota(settings, item_type):
+    settings = normalize_settings(settings or {})
+    target_levels = settings_target_levels(settings)
+    jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
+    if item_type == "word":
+        return build_level_quota(target_levels, int(settings.get("vocab_count") or 0), item_type="word")
+    if item_type == "verb":
+        return build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0), item_type="verb")
+    if item_type == "grammar":
+        return dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    return {}
+
+
+def gemini_required_for_generation(settings, item_type, level):
+    quota = gemini_generation_level_quota(settings, item_type)
+    normalized_level = normalize_gemini_bank_level(level, item_type)
+    return int(quota.get(normalized_level) or 0)
 
 
 def gemini_bank_stage_plan(settings):
@@ -6603,7 +6656,13 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
     print(f"[gemini-stage] start job_id={job_id} stage={stage} timeout_seconds={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
     update_gemini_generation_job(job_id, status="running", current_stage=stage, error_message="")
     try:
-        refill = ensure_gemini_bank_level_capacity(item_type, level, GEMINI_BANK_MIN_UNUSED[item_type], requested_count=requested_count)
+        required_for_generation = gemini_required_for_generation(settings, item_type, level)
+        refill = ensure_gemini_bank_level_capacity_for_generation(
+            item_type,
+            level,
+            requested_count=requested_count,
+            required_for_generation=required_for_generation,
+        )
         field_name = {"word": "vocab_json", "verb": "verbs_json", "grammar": "grammar_json"}[item_type]
         cache = gemini_job_json(job.get(field_name), {})
         if not isinstance(cache, dict):
@@ -6637,15 +6696,49 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         reason = classify_gemini_daily_material_error(exc)
         message = f"{reason}:{str(exc)[:240]}"
-        update_gemini_generation_job(job_id, status="running", current_stage=stage, error_message=message)
-        print(f"[gemini-stage] failed job_id={job_id} stage={stage} error={message} elapsed_ms={elapsed_ms}")
-        error_code = "gemini_bank_refill_timeout" if reason == "timeout" else "gemini_stage_failed"
-        response_reason = "Gemini bank refill exceeded time budget" if reason == "timeout" else reason
+        warning_code = "gemini_bank_refill_timeout" if reason == "timeout" else "gemini_bank_refill_failed"
+        field_name = {"word": "vocab_json", "verb": "verbs_json", "grammar": "grammar_json"}[item_type]
+        cache = gemini_job_json(job.get(field_name), {})
+        if not isinstance(cache, dict):
+            cache = {}
+        warnings = cache.get("warnings") if isinstance(cache.get("warnings"), list) else []
+        warning_entry = {
+            "warning": warning_code,
+            "item_type": item_type,
+            "jlpt_level": level,
+            "reason": reason,
+            "message": str(exc)[:240],
+            "continued": True,
+        }
+        warnings.append(warning_entry)
+        cache["warnings"] = warnings
+        refill_cache = cache.get("refill") if isinstance(cache.get("refill"), dict) else {}
+        refill_cache[level] = {
+            "warning": warning_code,
+            "reason": reason,
+            "message": str(exc)[:240],
+            "continued": True,
+            "requested": int(requested_count or 0),
+        }
+        cache["refill"] = refill_cache
+        update_gemini_generation_job(
+            job_id,
+            status="running",
+            current_stage=f"{stage}_warning",
+            error_message=message,
+            **{field_name: json.dumps(cache, ensure_ascii=False)},
+        )
+        completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
+        print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true")
+        print(f"[gemini-step-runner] continue after refill warning item_type={item_type} level={level}")
         return {
-            "ok": False,
-            "error": error_code,
+            "ok": True,
             "stage": stage,
-            "reason": response_reason,
+            "item_type": item_type,
+            "jlpt_level": level,
+            "warning": warning_code,
+            "continued": True,
+            "completed_steps": completed_steps,
             "elapsed_ms": elapsed_ms,
         }, 200
 
@@ -6734,6 +6827,10 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "verb": verbs_stage.get("refill", {}) if isinstance(verbs_stage, dict) else {},
             "grammar": grammar_stage.get("refill", {}) if isinstance(grammar_stage, dict) else {},
         }
+        bank_warnings = []
+        for stage_cache in (vocab_stage, verbs_stage, grammar_stage):
+            if isinstance(stage_cache, dict) and isinstance(stage_cache.get("warnings"), list):
+                bank_warnings.extend(stage_cache.get("warnings") or [])
         level_quota = {
             "word": word_quota,
             "verb": verb_quota,
@@ -6781,9 +6878,14 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
                 "top_up": top_up,
+                "gemini_bank_warnings": bank_warnings,
             }
         )
         material["metadata"].setdefault("warnings", []).extend(top_up.get("grammar_warning") or [])
+        if bank_warnings:
+            material["metadata"].setdefault("warnings", []).extend(
+                sorted({str(item.get("warning") or "gemini_bank_refill_warning") for item in bank_warnings if isinstance(item, dict)})
+            )
         final_counts = material["metadata"].get("selected_counts_by_level", {})
         print(f"[gemini-finalize] final selected word={actual_words} verb={actual_verbs} grammar={len(material.get('grammar_points') or [])}")
         save_info = save_material_for_date(
@@ -6814,6 +6916,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "count_validation": count_validation,
             "top_up": top_up,
             "warnings": material["metadata"].get("warnings", []),
+            "gemini_bank_warnings": bank_warnings,
             "selection_log_warnings": save_info.get("selection_log_warnings", []),
             "elapsed_ms": elapsed_ms,
         }, 200
