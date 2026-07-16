@@ -1322,6 +1322,8 @@
         if (!Array.isArray(result.steps) || !result.steps.length) {
           throw new Error("gemini_steps_missing");
         }
+        const jobId = result.job_id;
+        console.log(`[gemini-ui] job_id initialized=${jobId}`);
         const steps = result.steps;
         const legacyStages = new Set(["vocab", "verbs", "grammar"]);
         for (const step of steps) {
@@ -1340,9 +1342,13 @@
             if (repeatCount > 30) {
               throw new Error("gemini_step_repeat_limit_reached");
             }
-            const stepPayload = { job_id: result.job_id, ...step };
+            if (!jobId) {
+              console.error("[gemini-ui] missing job_id before step");
+              throw new Error("missing_job_id");
+            }
+            const stepPayload = { job_id: jobId, ...step };
             console.log(
-              `[gemini-ui] running step stage=${stepPayload.stage}` +
+              `[gemini-ui] running step job_id=${jobId} stage=${stepPayload.stage}` +
               ` item_type=${stepPayload.item_type || ""}` +
               ` level=${stepPayload.jlpt_level || ""}` +
               ` repeat=${repeatCount}`
@@ -1355,8 +1361,17 @@
               body: JSON.stringify(stepPayload)
             });
             repeatStep = Boolean(result.continue_same_step);
+            if (result.warning) {
+              console.warn(
+                `[gemini-ui] step warning job_id=${jobId}` +
+                ` warning=${result.warning}` +
+                ` continue_same_step=${repeatStep}`
+              );
+            }
             if (repeatStep) {
               msg.innerText = `Gemini item bank: ${stepPayload.item_type}:${stepPayload.jlpt_level} ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+              console.log(`[gemini-ui] retry same step job_id=${jobId} item_type=${stepPayload.item_type || ""} level=${stepPayload.jlpt_level || ""}`);
+              await new Promise((resolve) => setTimeout(resolve, 500));
             }
           }
         }

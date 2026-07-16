@@ -7003,24 +7003,31 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             return {
                 "ok": False,
                 "error": "gemini_bank_refill_exhausted",
+                "job_id": job_id,
+                "stage": stage,
                 "item_type": item_type,
                 "jlpt_level": level,
                 "current_stock": current_stock,
                 "target_stock": target_stock,
+                "fresh_stock": current_stock,
+                "target_fresh_stock": target_stock,
+                "pool_ready": False,
+                "continue_same_step": False,
                 "attempt_count": attempt_count + 1,
                 "reason": "Gemini repeatedly returned duplicates or could not refill this pool",
                 "elapsed_ms": elapsed_ms,
             }, 200
-        completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
+        completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
         return {
             "ok": True,
+            "job_id": job_id,
             "stage": stage,
             "item_type": item_type,
             "jlpt_level": level,
             "warning": warning_code,
             "continued": True,
             "pool_ready": False,
-            "continue_same_step": False,
+            "continue_same_step": True,
             "current_stock": current_stock,
             "target_stock": target_stock,
             "fresh_stock": current_stock,
