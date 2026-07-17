@@ -1339,8 +1339,8 @@
           let repeatCount = 0;
           while (repeatStep) {
             repeatCount += 1;
-            if (repeatCount > 30) {
-              throw new Error("gemini_step_repeat_limit_reached");
+            if (repeatCount > 0 && repeatCount % 20 === 0) {
+              console.warn(`[gemini-ui] long-running refill job_id=${jobId} stage=${stage} repeat=${repeatCount}`);
             }
             if (!jobId) {
               console.error("[gemini-ui] missing job_id before step");
@@ -1365,11 +1365,16 @@
               console.warn(
                 `[gemini-ui] step warning job_id=${jobId}` +
                 ` warning=${result.warning}` +
-                ` continue_same_step=${repeatStep}`
+                ` continue_same_step=${repeatStep}` +
+                ` strategy=${result.strategy || ""}` +
+                ` strategy_rotated=${Boolean(result.strategy_rotated)}`
               );
             }
             if (repeatStep) {
-              msg.innerText = `Gemini item bank: ${stepPayload.item_type}:${stepPayload.jlpt_level} ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+              const progressText = `Gemini item bank: ${stepPayload.item_type}:${stepPayload.jlpt_level} ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+              msg.innerText = result.warning || result.strategy_rotated
+                ? `${progressText} - adjusting generation strategy and continuing...`
+                : progressText;
               console.log(`[gemini-ui] retry same step job_id=${jobId} item_type=${stepPayload.item_type || ""} level=${stepPayload.jlpt_level || ""}`);
               await new Promise((resolve) => setTimeout(resolve, 500));
             }
