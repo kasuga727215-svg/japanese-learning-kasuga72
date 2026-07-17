@@ -107,6 +107,14 @@ GEMINI_BANK_TARGET_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_TARGET_WORD_PER_LE
 GEMINI_BANK_TARGET_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_TARGET_VERB_PER_LEVEL", 30, 1, 200)
 GEMINI_BANK_TARGET_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_TARGET_GRAMMAR_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_TARGET_SNS = read_int_env("GEMINI_BANK_TARGET_SNS", 20, 1, 100)
+FIXED_DAILY_WORD_COUNT = 8
+FIXED_DAILY_VERB_COUNT = 5
+FIXED_DAILY_GRAMMAR_COUNT = 5
+GEMINI_BANK_MANUAL_BUFFER_GENERATIONS = read_int_env("GEMINI_BANK_MANUAL_BUFFER_GENERATIONS", 2, 1, 10)
+GEMINI_BANK_MANUAL_MIN_WORD_FRESH_PER_LEVEL = read_int_env("GEMINI_BANK_MANUAL_MIN_WORD_FRESH_PER_LEVEL", 3, 1, 50)
+GEMINI_BANK_MANUAL_MIN_VERB_FRESH_PER_LEVEL = read_int_env("GEMINI_BANK_MANUAL_MIN_VERB_FRESH_PER_LEVEL", 2, 1, 50)
+GEMINI_BANK_MANUAL_MIN_GRAMMAR_FRESH_PER_LEVEL = read_int_env("GEMINI_BANK_MANUAL_MIN_GRAMMAR_FRESH_PER_LEVEL", 1, 1, 30)
+GEMINI_BANK_MANUAL_MIN_SNS_FRESH = read_int_env("GEMINI_BANK_MANUAL_MIN_SNS_FRESH", 2, 1, 30)
 GEMINI_BANK_MAX_REFILL_ATTEMPTS_PER_POOL = read_int_env("GEMINI_BANK_MAX_REFILL_ATTEMPTS_PER_POOL", 20, 1, 100)
 GEMINI_BANK_ALLOW_RECENT_REUSE = os.environ.get("GEMINI_BANK_ALLOW_RECENT_REUSE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -525,12 +533,12 @@ COLUMNS = [
 DEFAULT_SETTINGS = {
     "target_level": "N3",
     "target_levels": "[\"N3\"]",
-    "vocab_count": "15",
-    "verb_count": "10",
+    "vocab_count": str(FIXED_DAILY_WORD_COUNT),
+    "verb_count": str(FIXED_DAILY_VERB_COUNT),
     "mcq_count": "5",
     "fill_count": "5",
     "grammar_level": "N5",
-    "grammar_count": "3",
+    "grammar_count": str(FIXED_DAILY_GRAMMAR_COUNT),
 }
 
 VOCAB_RULE_GROUPS = {
@@ -668,7 +676,7 @@ GRAMMAR_LEVEL_FALLBACKS = {
     "N1": ["N1", "N2", "N3"],
 }
 DEFAULT_GRAMMAR_COUNT_BY_LEVEL = {"N5": 3, "N4": 2, "N3": 2, "N2": 1, "N1": 1}
-LOCAL_FIXED_GRAMMAR_QUOTA = {"N1": 1, "N2": 1, "N3": 1, "N4": 2, "N5": 2}
+LOCAL_FIXED_GRAMMAR_QUOTA = {"N1": 1, "N2": 1, "N3": 1, "N4": 1, "N5": 1}
 LOCAL_FIXED_GRAMMAR_TOTAL = sum(LOCAL_FIXED_GRAMMAR_QUOTA.values())
 GRAMMAR_ADJACENT_FALLBACKS = {
     "N5": ["N5", "N4"],
@@ -904,6 +912,20 @@ def settings_target_levels(settings):
     return normalize_target_levels((settings or {}).get("target_levels"), (settings or {}).get("target_level"))
 
 
+def fixed_generation_counts():
+    return {
+        "vocab_count": str(FIXED_DAILY_WORD_COUNT),
+        "verb_count": str(FIXED_DAILY_VERB_COUNT),
+        "grammar_count": str(FIXED_DAILY_GRAMMAR_COUNT),
+    }
+
+
+def enforce_fixed_generation_counts(settings):
+    data = dict(settings or {})
+    data.update(fixed_generation_counts())
+    return data
+
+
 def target_level_rule_keys(settings):
     keys = []
     for level in settings_target_levels(settings):
@@ -947,7 +969,7 @@ def normalize_settings(raw):
         ("verb_count", int(DEFAULT_SETTINGS["verb_count"]), 0, 20),
         ("mcq_count", 5, 0, 30),
         ("fill_count", 5, 0, 30),
-        ("grammar_count", 3, 0, 10),
+        ("grammar_count", FIXED_DAILY_GRAMMAR_COUNT, 0, 10),
     ]:
         try:
             value = int(settings[key])
@@ -955,7 +977,7 @@ def normalize_settings(raw):
             value = default
         settings[key] = str(max(min_value, min(value, max_value)))
 
-    return settings
+    return enforce_fixed_generation_counts(settings)
 
 
 def request_settings_overrides(raw):
@@ -4903,6 +4925,12 @@ def build_level_quota(target_levels, total_count, item_type="word"):
     return {key: value for key, value in quota.items() if value > 0}
 
 
+def fixed_grammar_quota_for_settings(settings):
+    target_levels = settings_target_levels(settings)
+    jlpt_levels = [level for level in target_levels if level in LEVELS] or [primary_target_level(target_levels, (settings or {}).get("target_level"))]
+    return build_level_quota(jlpt_levels, FIXED_DAILY_GRAMMAR_COUNT, item_type="grammar")
+
+
 def gemini_generation_level_quota(settings, item_type):
     settings = normalize_settings(settings or {})
     target_levels = settings_target_levels(settings)
@@ -4912,11 +4940,11 @@ def gemini_generation_level_quota(settings, item_type):
     if item_type == "verb":
         return build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0), item_type="verb")
     if item_type == "grammar":
-        return dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+        return fixed_grammar_quota_for_settings(settings)
     return {}
 
 
-def gemini_bank_target_stock(item_type, level):
+def gemini_bank_static_target_stock(item_type, level):
     normalized_level = normalize_gemini_bank_level(level, item_type)
     if item_type == "word" and normalized_level == "SNS":
         return GEMINI_BANK_TARGET_SNS
@@ -4927,6 +4955,31 @@ def gemini_bank_target_stock(item_type, level):
     if item_type == "grammar":
         return GEMINI_BANK_TARGET_GRAMMAR_PER_LEVEL
     return 0
+
+
+def gemini_bank_manual_min_fresh(item_type, level):
+    normalized_level = normalize_gemini_bank_level(level, item_type)
+    if item_type == "word" and normalized_level == "SNS":
+        return GEMINI_BANK_MANUAL_MIN_SNS_FRESH
+    if item_type == "word":
+        return GEMINI_BANK_MANUAL_MIN_WORD_FRESH_PER_LEVEL
+    if item_type == "verb":
+        return GEMINI_BANK_MANUAL_MIN_VERB_FRESH_PER_LEVEL
+    if item_type == "grammar":
+        return GEMINI_BANK_MANUAL_MIN_GRAMMAR_FRESH_PER_LEVEL
+    return 0
+
+
+def gemini_bank_manual_target_stock(settings, item_type, level):
+    required = gemini_required_for_generation(settings, item_type, level)
+    minimum = gemini_bank_manual_min_fresh(item_type, level)
+    return max(required * GEMINI_BANK_MANUAL_BUFFER_GENERATIONS, minimum)
+
+
+def gemini_bank_target_stock(item_type, level, settings=None, manual=True):
+    if manual and settings is not None:
+        return gemini_bank_manual_target_stock(settings, item_type, level)
+    return gemini_bank_static_target_stock(item_type, level)
 
 
 def gemini_required_for_generation(settings, item_type, level):
@@ -4954,7 +5007,7 @@ def gemini_bank_step_plan(settings):
     steps = []
     def add_step(item_type, level):
         normalized_level = normalize_gemini_bank_level(level, item_type)
-        target_stock = gemini_bank_target_stock(item_type, normalized_level)
+        target_stock = gemini_bank_target_stock(item_type, normalized_level, settings=settings)
         fresh_stock = gemini_bank_count_fresh_stock(item_type, normalized_level)
         active_total = gemini_bank_count_active_total(item_type, normalized_level)
         missing_count = max(0, target_stock - fresh_stock)
@@ -4980,7 +5033,7 @@ def gemini_bank_step_plan(settings):
         add_step("word", "SNS")
     for level in jlpt_levels:
         add_step("verb", level)
-    for level in reversed(LEVELS):
+    for level in fixed_grammar_quota_for_settings(settings):
         add_step("grammar", level)
     steps.append({"stage": "finalize"})
     print(f"[gemini-plan] target_levels={','.join(target_levels)}")
@@ -5263,8 +5316,8 @@ def build_gemini_bank_material(settings, selected_words, selected_verbs, selecte
             "source_summary": {"gemini_bank": 1},
             "generated_at": utc_now_iso(),
             "grammar_mode": "fixed_quota",
-            "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
-            "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+            "grammar_quota": level_quota.get("grammar") or fixed_grammar_quota_for_settings(settings),
+            "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
             "grammar_total_actual": len(grammar_points),
         },
     }
@@ -5291,7 +5344,7 @@ def generate_daily_material_from_gemini_bank(posted_settings=None, app_url=None)
     verb_count = int(settings.get("verb_count") or 0)
     word_quota = build_level_quota(target_levels, word_count)
     verb_quota = build_level_quota(jlpt_levels, verb_count)
-    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_quota = fixed_grammar_quota_for_settings(settings)
     print(
         "[gemini-bank] start "
         f"target_levels={','.join(target_levels)} word_count={word_count} verb_count={verb_count}"
@@ -5346,10 +5399,10 @@ def generate_daily_material_from_gemini_bank(posted_settings=None, app_url=None)
                         "choice_count": int(settings.get("mcq_count") or 0),
                         "fill_count": int(settings.get("fill_count") or 0),
                         "grammar_level": "fixed_quota",
-                        "grammar_count": LOCAL_FIXED_GRAMMAR_TOTAL,
+                        "grammar_count": FIXED_DAILY_GRAMMAR_COUNT,
                         "grammar_mode": "fixed_quota",
-                        "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
-                        "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+                        "grammar_quota": grammar_quota,
+                        "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                     },
                 }
             )
@@ -6381,7 +6434,7 @@ def build_gemini_daily_material_prompt(settings):
     target_levels = settings_target_levels(settings)
     word_count = int(settings.get("vocab_count") or 0)
     verb_count = int(settings.get("verb_count") or 0)
-    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_quota = fixed_grammar_quota_for_settings(settings)
     grammar_total = int(sum(grammar_quota.values()))
     schema = {
         "level": settings.get("target_level", "N5"),
@@ -6483,7 +6536,7 @@ def build_gemini_stage_prompt(stage, settings):
     fallback_level = settings.get("target_level", "N5")
     word_count = int(settings.get("vocab_count") or 0)
     verb_count = int(settings.get("verb_count") or 0)
-    grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+    grammar_quota = fixed_grammar_quota_for_settings(settings)
     grammar_total = int(sum(grammar_quota.values()))
     common_rules = (
         "Return JSON only. Do not use Markdown fences. "
@@ -6867,8 +6920,8 @@ def adapt_gemini_daily_material(raw_payload, settings):
             "source_summary": {"gemini": 1},
             "generated_at": utc_now_iso(),
             "grammar_mode": "fixed_quota",
-            "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
-            "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+            "grammar_quota": fixed_grammar_quota_for_settings(settings),
+            "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
             "grammar_total_actual": len(grammar_points),
         },
     }
@@ -6974,7 +7027,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
     previous_refill = refill_cache.get(level) if isinstance(refill_cache.get(level), dict) else {}
     attempt_count = int(previous_refill.get("attempt_count") or 0)
     duplicate_streak = int(previous_refill.get("duplicate_streak") or 0)
-    target_stock = int(gemini_bank_target_stock(item_type, level))
+    target_stock = int(gemini_bank_target_stock(item_type, level, settings=settings))
     try:
         refill = ensure_gemini_bank_level_capacity_for_generation(
             item_type,
@@ -7158,7 +7211,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
         word_quota = build_level_quota(target_levels, int(settings.get("vocab_count") or 0), item_type="word")
         verb_quota = build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0), item_type="verb")
-        grammar_quota = dict(LOCAL_FIXED_GRAMMAR_QUOTA)
+        grammar_quota = fixed_grammar_quota_for_settings(settings)
         print(f"[gemini-plan] target_levels={','.join(target_levels)}")
         print(f"[gemini-plan] word_quota={word_quota}")
         print(f"[gemini-plan] verb_quota={verb_quota}")
@@ -7246,15 +7299,15 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                     "choice_count": int(settings.get("mcq_count") or 0),
                     "fill_count": int(settings.get("fill_count") or 0),
                     "grammar_level": "fixed_quota",
-                    "grammar_count": LOCAL_FIXED_GRAMMAR_TOTAL,
+                    "grammar_count": FIXED_DAILY_GRAMMAR_COUNT,
                     "grammar_mode": "fixed_quota",
-                    "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
-                    "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+                    "grammar_quota": grammar_quota,
+                    "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                 },
                 "count_validation": count_validation,
                 "grammar_mode": "fixed_quota",
-                "grammar_quota": dict(LOCAL_FIXED_GRAMMAR_QUOTA),
-                "grammar_total_target": LOCAL_FIXED_GRAMMAR_TOTAL,
+                "grammar_quota": grammar_quota,
+                "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
                 "top_up": top_up,
                 "gemini_bank_warnings": bank_warnings,

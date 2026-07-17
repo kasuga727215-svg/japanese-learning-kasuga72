@@ -487,15 +487,13 @@
             <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="N1">N1</label>
             <label class="form-check-label"><input class="form-check-input me-1" type="checkbox" value="SNS">SNS 詞類</label>
           </div>
-          <div class="setting-help">可複選 JLPT 等級與 SNS 詞類；本地教材只會從已勾選且已啟用的單字類型中抽選。文法等級在下方獨立設定。</div>
+          <div class="setting-help">可複選 JLPT 等級與 SNS 詞類；SNS 只適用單字，動詞與文法會從已啟用的 JLPT 等級分配。</div>
         </div>
-        <div class="col-md-4">
-          <label class="control-label" for="word_count">單字數量</label>
-          <input type="number" id="word_count" class="form-control" min="1" max="20" step="1" value="15">
-        </div>
-        <div class="col-md-4">
-          <label class="control-label" for="verb_count">動詞數量</label>
-          <input type="number" id="verb_count" class="form-control" min="1" max="20" step="1" value="10">
+        <div class="col-md-8">
+          <label class="control-label">本次固定生成</label>
+          <div class="setting-help">
+            單字 8 個、動詞 5 個、文法 5 個。為了確保每次點擊都能穩定生成，單次教材數量已固定；題庫會逐次累積，不會一次大量補庫。
+          </div>
         </div>
         <div class="col-md-6">
           <label class="control-label">選擇題數量 <span class="range-value" id="mcq-value">5</span></label>
@@ -507,7 +505,7 @@
         </div>
         <div class="col-12">
           <label class="form-label">每日文法固定抽選</label>
-          <div class="setting-help">N1、N2、N3 各 1 個；N4、N5 各 2 個。總計最多 7 個，題庫不足時會自動略過不足等級。</div>
+          <div class="setting-help">文法固定 5 個；若 N1、N2、N3、N4、N5 都啟用，則各 1 個。若只啟用部分等級，會只在啟用等級中分配。</div>
         </div>
       </div>
       <div class="settings-actions d-flex gap-3 mt-4 flex-wrap">
@@ -628,6 +626,12 @@
   async function api(url, options = {}) {
     return safeFetchJson(url, options);
   }
+
+  const FIXED_GENERATION_COUNTS = Object.freeze({
+    word_count: 8,
+    verb_count: 5,
+    grammar_count: 5
+  });
 
   async function apiWithTimeout(url, timeoutMs = 5000) {
     const controller = new AbortController();
@@ -755,8 +759,8 @@
   function collectControlCenterSettings() {
     const targetLevels = selectedTargetLevelsFromDom();
     const targetLevel = targetLevels.find(level => level !== "SNS") || "N5";
-    const wordCount = readIntSetting("word_count", 15, 1, 20);
-    const verbCount = readIntSetting("verb_count", 10, 1, 20);
+    const wordCount = FIXED_GENERATION_COUNTS.word_count;
+    const verbCount = FIXED_GENERATION_COUNTS.verb_count;
     const choiceCount = readIntSetting("setting-mcq", 5, 0, 30);
     const fillCount = readIntSetting("setting-fill", 5, 0, 30);
     return {
@@ -765,6 +769,7 @@
       vocab_count: wordCount,
       word_count: wordCount,
       verb_count: verbCount,
+      grammar_count: FIXED_GENERATION_COUNTS.grammar_count,
       mcq_count: choiceCount,
       choice_count: choiceCount,
       fill_count: fillCount
@@ -803,8 +808,9 @@
     return {
       target_level: targetLevels.find(level => level !== "SNS") || "N5",
       target_levels: targetLevels,
-      word_count: readIntSettingValue(raw.word_count ?? raw.vocab_count, 15, 1, 20),
-      verb_count: readIntSettingValue(raw.verb_count, 10, 1, 20),
+      word_count: FIXED_GENERATION_COUNTS.word_count,
+      verb_count: FIXED_GENERATION_COUNTS.verb_count,
+      grammar_count: FIXED_GENERATION_COUNTS.grammar_count,
       choice_count: readIntSettingValue(raw.choice_count ?? raw.mcq_count, 5, 0, 30),
       fill_count: readIntSettingValue(raw.fill_count, 5, 0, 30)
     };
@@ -821,18 +827,14 @@
       `choice_count=${choiceCount} fill_count=${fillCount} target_levels=${normalized.target_levels.join(",")}`
     );
     setTargetLevelCheckboxes(normalized.target_levels);
-    const wordInput = document.getElementById("word_count");
-    const verbInput = document.getElementById("verb_count");
     const mcqInput = document.getElementById("setting-mcq");
     const fillInput = document.getElementById("setting-fill");
-    if (wordInput) wordInput.value = String(wordCount);
-    if (verbInput) verbInput.value = String(verbCount);
     if (mcqInput) mcqInput.value = String(choiceCount);
     if (fillInput) fillInput.value = String(fillCount);
     syncRangeLabels();
     console.debug(
-      `[settings-hydrate] applied word_count=${wordInput?.value || ""} ` +
-      `verb_count=${verbInput?.value || ""} target_levels=${selectedTargetLevelsFromDom().join(",")}`
+      `[settings-hydrate] applied fixed word_count=${wordCount} ` +
+      `verb_count=${verbCount} target_levels=${selectedTargetLevelsFromDom().join(",")}`
     );
   }
 
