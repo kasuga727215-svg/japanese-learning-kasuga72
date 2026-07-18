@@ -128,6 +128,7 @@ GEMINI_BILLING_BLOCK_SECONDS = read_int_env("GEMINI_BILLING_BLOCK_SECONDS", 600,
 TG_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_TOKEN", "")).strip()
 TG_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID", "")).strip()
 TELEGRAM_REMINDER_SECRET = os.environ.get("TELEGRAM_REMINDER_SECRET", "").strip()
+TELEGRAM_REMINDER_TOLERANCE_MINUTES = read_int_env("TELEGRAM_REMINDER_TOLERANCE_MINUTES", 5, 0, 29)
 APP_URL = os.environ.get("APP_URL", "http://127.0.0.1:5000").rstrip("/")
 CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 DASHBOARD_CACHE_TTL_SECONDS = int(os.environ.get("DASHBOARD_CACHE_TTL_SECONDS", "90"))
@@ -4058,8 +4059,73 @@ def reminder_slot_time(dt):
     return f"{dt.hour:02d}:{minute:02d}"
 
 
+def reminder_time_to_minutes(value):
+    hour, minute = [int(part) for part in str(value or "").split(":", 1)]
+    return hour * 60 + minute
+
+
+def reminder_window_match(now, reminder_times, tolerance_minutes=None):
+    tolerance = max(0, int(TELEGRAM_REMINDER_TOLERANCE_MINUTES if tolerance_minutes is None else tolerance_minutes))
+    now_label = f"{now.hour:02d}:{now.minute:02d}"
+    now_minutes = now.hour * 60 + now.minute
+    due = []
+    missed = []
+    for reminder_time in reminder_times or []:
+        try:
+            reminder_minutes = reminder_time_to_minutes(reminder_time)
+        except (TypeError, ValueError):
+            continue
+        delta = now_minutes - reminder_minutes
+        if 0 <= delta <= tolerance:
+            due.append((delta, reminder_time))
+        elif tolerance < delta < 30:
+            missed.append((delta, reminder_time))
+    if due:
+        delta, matched_time = sorted(due, key=lambda item: item[0])[0]
+        return {
+            "status": "due",
+            "matched_time": matched_time,
+            "now": now_label,
+            "delta_minutes": delta,
+            "tolerance_minutes": tolerance,
+        }
+    if missed:
+        delta, matched_time = sorted(missed, key=lambda item: item[0])[0]
+        return {
+            "status": "missed_window",
+            "matched_time": matched_time,
+            "now": now_label,
+            "delta_minutes": delta,
+            "tolerance_minutes": tolerance,
+        }
+    return {
+        "status": "not_due_yet",
+        "matched_time": "",
+        "now": now_label,
+        "tolerance_minutes": tolerance,
+    }
+
+
+def telegram_reminder_open_url():
+    if APP_URL and "127.0.0.1" not in APP_URL and "localhost" not in APP_URL:
+        return f"{APP_URL.rstrip('/')}/"
+    if has_request_context():
+        return f"{request.host_url.rstrip('/')}/"
+    return f"{APP_URL.rstrip('/')}/"
+
+
 def send_telegram_reminder_message(message):
-    return send_telegram_message(html.escape(message).replace("\n", "\n"), timeout_seconds=5)
+    reply_markup = {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "打開今日教材",
+                    "url": telegram_reminder_open_url(),
+                }
+            ]
+        ]
+    }
+    return send_telegram_message(html.escape(message).replace("\n", "\n"), timeout_seconds=5, reply_markup=reply_markup)
 
 
 def migrations_allowed_now():
@@ -13256,14 +13322,15 @@ def build_telegram_notification(material, date, app_url=None):
     )
 
 
-def send_telegram_message(text, timeout_seconds=5):
+def send_telegram_message(text, timeout_seconds=5, reply_markup=None):
     if not TG_TOKEN or not TG_CHAT_ID:
         raise RuntimeError("Telegram Token 或 Chat ID 尚未設定。")
 
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode(
-        {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
-    ).encode("utf-8")
+    payload_data = {"chat_id": TG_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": "true"}
+    if reply_markup:
+        payload_data["reply_markup"] = json.dumps(reply_markup, ensure_ascii=False)
+    payload = urllib.parse.urlencode(payload_data).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST")
     with urllib.request.urlopen(req, timeout=timeout_seconds) as response:
         data = json.loads(response.read().decode("utf-8"))
@@ -15275,14 +15342,52 @@ def api_telegram_reminder_run():
             return jsonify({"ok": True, "sent": False, "reason": "disabled"}), 200
         tz = ZoneInfo(settings.get("timezone") or "Asia/Taipei")
         now = datetime.now(tz)
-        slot = reminder_slot_time(now)
-        if slot not in settings["times"]:
-            return jsonify({"ok": True, "sent": False, "reason": "not_due_yet", "slot": slot}), 200
+        match = reminder_window_match(now, settings["times"])
+        if match["status"] == "missed_window":
+            return jsonify(
+                {
+                    "ok": True,
+                    "sent": False,
+                    "reason": "missed_window",
+                    "matched_time": match["matched_time"],
+                    "now": match["now"],
+                    "tolerance_minutes": match["tolerance_minutes"],
+                }
+            ), 200
+        if match["status"] != "due":
+            return jsonify(
+                {
+                    "ok": True,
+                    "sent": False,
+                    "reason": "not_due_yet",
+                    "now": match["now"],
+                    "tolerance_minutes": match["tolerance_minutes"],
+                }
+            ), 200
+        matched_time = match["matched_time"]
         if reminder_day_code(now) not in settings["days"]:
-            return jsonify({"ok": True, "sent": False, "reason": "not_due_yet", "slot": slot}), 200
-        sent_key = f"{now.date().isoformat()}|{slot}"
+            return jsonify(
+                {
+                    "ok": True,
+                    "sent": False,
+                    "reason": "not_due_yet",
+                    "matched_time": matched_time,
+                    "now": match["now"],
+                    "tolerance_minutes": match["tolerance_minutes"],
+                }
+            ), 200
+        sent_key = f"{now.date().isoformat()}|{matched_time}"
         if settings.get("last_sent_key") == sent_key:
-            return jsonify({"ok": True, "sent": False, "reason": "already_sent", "sent_key": sent_key}), 200
+            return jsonify(
+                {
+                    "ok": True,
+                    "sent": False,
+                    "reason": "already_sent",
+                    "sent_key": sent_key,
+                    "matched_time": matched_time,
+                    "now": match["now"],
+                }
+            ), 200
         send_telegram_reminder_message(settings["message"])
         sent_at = datetime.now(timezone.utc).isoformat()
         save_app_setting_values(
@@ -15292,7 +15397,16 @@ def api_telegram_reminder_run():
             }
         )
         print(f"[telegram-reminder] sent sent_key={sent_key}")
-        return jsonify({"ok": True, "sent": True, "reason": "reminder_sent", "sent_key": sent_key}), 200
+        return jsonify(
+            {
+                "ok": True,
+                "sent": True,
+                "reason": "reminder_sent",
+                "sent_key": sent_key,
+                "matched_time": matched_time,
+                "now": match["now"],
+            }
+        ), 200
     except Exception as exc:
         print(f"[telegram-reminder] run_failed reason={exc}")
         return jsonify({"ok": False, "error": "telegram_reminder_run_failed", "reason": str(exc)}), 200
