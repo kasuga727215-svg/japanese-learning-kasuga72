@@ -4931,6 +4931,12 @@ def ensure_gemini_bank_level_capacity_for_generation(
             else:
                 print(f"[gemini-bank] pool_ready item_type={item_type} level={level} fresh_stock={after_stock} target_fresh={target}")
             warning = "gemini_bank_duplicate_batch" if inserted == 0 and skipped > 0 else ""
+            grammar_warning = ""
+            if item_type == "grammar" and not pool_ready:
+                best_effort_reason = "duplicate" if inserted == 0 and skipped > 0 else "partial"
+                grammar_warning = "grammar_refill_best_effort_skipped"
+                pool_ready = True
+                print(f"[gemini-bank] grammar best_effort skip item_type=grammar level={level} reason={best_effort_reason}")
             return {
                 "active_total": after_active_total,
                 "fresh_stock": before,
@@ -4941,11 +4947,13 @@ def ensure_gemini_bank_level_capacity_for_generation(
                 "skipped": skipped,
                 "fresh_stock_after": after_stock,
                 "pool_ready": pool_ready,
-                "continue_same_step": not pool_ready,
+                "continue_same_step": False if grammar_warning else not pool_ready,
                 "skipped_refill": False,
                 "attempt_count": int(attempt_count or 0) + 1,
                 "duplicate_streak": int(duplicate_streak or 0) + 1 if inserted == 0 and skipped > 0 else 0,
                 "warning": warning,
+                "grammar_warning": grammar_warning,
+                "reason": best_effort_reason if grammar_warning else "",
                 "strategy": strategy.get("strategy"),
                 "strategy_index": strategy.get("strategy_index"),
                 "strategy_attempt": strategy.get("strategy_attempt"),
@@ -7181,6 +7189,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
         active_total = gemini_bank_count_active_total(item_type, level)
         refill_cache[level] = {
             "warning": warning_code,
+            "grammar_warning": "grammar_refill_best_effort_skipped" if item_type == "grammar" else "",
             "reason": reason,
             "message": str(exc)[:240],
             "continued": True,
@@ -7189,23 +7198,36 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "target_fresh_stock": target_stock,
             "active_total": active_total,
             "missing_count": max(0, target_stock - current_stock),
-            "pool_ready": False,
+            "pool_ready": item_type == "grammar",
+            "continue_same_step": item_type != "grammar",
             "attempt_count": attempt_count + 1,
             "duplicate_streak": duplicate_streak,
             "strategy": previous_refill.get("strategy"),
             "strategy_rotated": False,
         }
         cache["refill"] = refill_cache
-        update_gemini_generation_job(
-            job_id,
-            status="running",
-            current_stage=f"{stage}_warning",
-            error_message=message,
-            **{field_name: json.dumps(cache, ensure_ascii=False)},
-        )
-        print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true")
-        print(f"[gemini-step-runner] continue after refill warning item_type={item_type} level={level}")
-        completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
+        if item_type == "grammar":
+            update_gemini_generation_job(
+                job_id,
+                status="running",
+                current_stage=f"{stage}_done",
+                error_message="",
+                **{field_name: json.dumps(cache, ensure_ascii=False)},
+            )
+            completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
+            print(f"[gemini-bank] grammar best_effort skip item_type=grammar level={level} reason={reason}")
+            print(f"[gemini-step-runner] completed stage=refill item_type=grammar level={level} warning={warning_code}")
+        else:
+            update_gemini_generation_job(
+                job_id,
+                status="running",
+                current_stage=f"{stage}_warning",
+                error_message=message,
+                **{field_name: json.dumps(cache, ensure_ascii=False)},
+            )
+            print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true")
+            print(f"[gemini-step-runner] continue after refill warning item_type={item_type} level={level}")
+            completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
         return {
             "ok": True,
             "job_id": job_id,
@@ -7213,9 +7235,10 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "item_type": item_type,
             "jlpt_level": level,
             "warning": warning_code,
+            "grammar_warning": "grammar_refill_best_effort_skipped" if item_type == "grammar" else "",
             "continued": True,
-            "pool_ready": False,
-            "continue_same_step": True,
+            "pool_ready": item_type == "grammar",
+            "continue_same_step": item_type != "grammar",
             "current_stock": current_stock,
             "target_stock": target_stock,
             "fresh_stock": current_stock,
@@ -7245,19 +7268,25 @@ def finalize_gemini_generation_job(job_id, app_url=None):
     started = time.perf_counter()
     print(f"[gemini-stage] finalize job_id={job_id}")
     reserved = []
+    finalize_warnings = []
     try:
         planned_steps = gemini_planned_refill_step_keys(job)
         completed_steps = gemini_completed_step_keys(job)
         missing_steps = [step for step in planned_steps if step not in completed_steps]
+        missing_required_steps = [step for step in missing_steps if not step.startswith("grammar:")]
+        missing_grammar_steps = [step for step in missing_steps if step.startswith("grammar:")]
         print(f"[gemini-finalize] completed_steps={completed_steps}")
         print(f"[gemini-finalize] missing_steps={missing_steps}")
-        if missing_steps:
+        if missing_grammar_steps:
+            finalize_warnings.append("gemini_bank_grammar_steps_incomplete")
+            print(f"[gemini-finalize] grammar_warning=gemini_bank_grammar_steps_incomplete missing_steps={missing_grammar_steps}")
+        if missing_required_steps:
             return {
                 "ok": False,
                 "error": "gemini_bank_steps_incomplete",
                 "stage": "finalize",
                 "reason": "planned refill steps are not complete",
-                "missing_steps": missing_steps,
+                "missing_steps": missing_required_steps,
             }, 200
         not_ready = gemini_bank_not_ready_pools(job)
         if not_ready:
@@ -7297,6 +7326,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         top_up = {
             "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
             "verb": {"needed": max(0, requested_verbs - len(selected_verbs)), "added": 0},
+            "grammar": {"needed": max(0, sum(grammar_quota.values()) - len(selected_grammar)), "added": 0},
             "grammar_warning": [],
         }
         if top_up["word"]["needed"] > 0:
@@ -7311,9 +7341,19 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             selected_verbs.extend(extra_verbs)
             reserved.extend(extra_verbs)
             top_up["verb"]["added"] = len(extra_verbs)
+        if top_up["grammar"]["needed"] > 0:
+            selected_keys = {row.get("normalized_key") for row in selected_grammar}
+            extra_grammar = select_gemini_bank_top_up_items("grammar", top_up["grammar"]["needed"], selected_keys)
+            selected_grammar.extend(extra_grammar)
+            reserved.extend(extra_grammar)
+            top_up["grammar"]["added"] = len(extra_grammar)
+            top_up["grammar"]["needed"] = max(0, sum(grammar_quota.values()) - len(selected_grammar))
         if not selected_grammar:
             top_up["grammar_warning"].append("gemini_bank_grammar_empty")
             print("[gemini-finalize] grammar_warning=gemini_bank_grammar_empty")
+        elif len(selected_grammar) < sum(grammar_quota.values()):
+            top_up["grammar_warning"].append("gemini_bank_grammar_insufficient")
+            print(f"[gemini-finalize] grammar_warning=gemini_bank_grammar_insufficient selected={len(selected_grammar)} requested={sum(grammar_quota.values())}")
         if len(selected_words) < requested_words:
             print(f"[gemini-finalize] insufficient item_type=word selected={len(selected_words)} requested={requested_words}")
             raise ValueError("gemini_bank_insufficient:word")
@@ -7380,6 +7420,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             }
         )
         material["metadata"].setdefault("warnings", []).extend(top_up.get("grammar_warning") or [])
+        material["metadata"].setdefault("warnings", []).extend(finalize_warnings)
         if bank_warnings:
             material["metadata"].setdefault("warnings", []).extend(
                 sorted({str(item.get("warning") or "gemini_bank_refill_warning") for item in bank_warnings if isinstance(item, dict)})

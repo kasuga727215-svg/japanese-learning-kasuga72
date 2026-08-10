@@ -1363,7 +1363,16 @@
               body: JSON.stringify(stepPayload)
             });
             repeatStep = Boolean(result.continue_same_step);
-            if (result.warning) {
+            if (result.grammar_warning) {
+              repeatStep = false;
+              console.warn(
+                `[gemini-ui] step warning ignored_as_non_fatal` +
+                ` item_type=${result.item_type || stepPayload.item_type || ""}` +
+                ` level=${result.jlpt_level || stepPayload.jlpt_level || ""}` +
+                ` warning=${result.grammar_warning}`
+              );
+              msg.innerText = `文法 ${result.jlpt_level || stepPayload.jlpt_level || ""} 補庫暫時未完成，已略過並繼續生成。`;
+            } else if (result.warning) {
               console.warn(
                 `[gemini-ui] step warning job_id=${jobId}` +
                 ` warning=${result.warning}` +
