@@ -382,9 +382,32 @@
     .rule-chip { display: inline-block; color: #ffd6f6; border: 1px solid rgba(255,0,255,.35); background: rgba(255,0,255,.1); border-radius: 999px; padding: 2px 8px; font-size: .78rem; font-weight: 700; margin-left: 6px; }
     .rule-small-label { color: #9fe8ff; font-size: .82rem; font-weight: 700; margin-bottom: 3px; }
     .rule-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .history-panel { background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,.45); margin-bottom: 20px; }
+    .history-subtitle { color: #dffcff; line-height: 1.6; }
+    .history-type-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+    .history-type-btn { min-height: 38px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-color); border-radius: 999px; padding: 7px 14px; font-weight: 800; }
+    .history-type-btn.active,
+    .history-type-btn:hover { color: var(--bg-color); background: var(--primary); border-color: var(--primary); }
+    .history-controls { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 14px; }
+    .history-summary { color: #dffcff; font-weight: 700; margin-bottom: 12px; }
+    .history-list { display: grid; grid-template-columns: 1fr; gap: 12px; }
+    .history-item { border: 1px solid rgba(102,209,255,.24); border-radius: 8px; padding: 14px; background: rgba(13,14,21,.72); overflow-wrap: anywhere; word-wrap: break-word; }
+    .history-item-title { color: var(--primary); font-size: 1.08rem; font-weight: 900; line-height: 1.35; }
+    .history-meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .history-badge { color: #dffcff; border: 1px solid var(--border-color); border-radius: 999px; padding: 2px 8px; font-size: .78rem; font-weight: 700; }
+    .history-field { color: var(--text-color); margin-top: 6px; line-height: 1.55; }
+    .history-label { color: #9fe8ff; font-weight: 800; }
+    .history-dates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .history-date-chip { border: 1px solid var(--border-color); background: transparent; color: var(--primary); border-radius: 999px; padding: 3px 8px; font-weight: 700; }
+    .history-date-chip:hover { background: var(--primary); color: var(--bg-color); }
+    .history-forms { margin-top: 8px; color: var(--text-color); }
+    .history-forms summary { color: var(--primary); cursor: pointer; font-weight: 800; }
+    .history-pager { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
     @media (min-width: 768px) {
       .rules-toolbar { grid-template-columns: 1fr auto auto auto; align-items: center; }
       .rule-controls { grid-template-columns: repeat(6, minmax(96px, 1fr)); align-items: end; }
+      .history-controls { grid-template-columns: minmax(220px, 1fr) 150px 190px auto; align-items: end; }
+      .history-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 768px) {
       .app-shell { width: min(100% - 20px, 1320px); }
@@ -405,13 +428,11 @@
 <div class="app-shell mt-4">
   <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
     <h1 class="app-title mb-0">日語學習自動化系統</h1>
-    <select id="dateSelect" class="form-select" style="max-width:240px" onchange="loadSpecificDate()">
-      <option value="">選擇歷史日期</option>
-    </select>
   </div>
 
   <ul class="main-nav nav nav-pills mb-4 justify-content-center">
     <li class="nav-item"><button class="nav-link active" onclick="showTab(event, 'tab-daily')">每日教材</button></li>
+    <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-history')">歷史資料</button></li>
     <li class="nav-item"><button class="nav-link" onclick="startQuiz(event)">累計測驗</button></li>
     <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-settings')">控制中心</button></li>
     <li class="nav-item"><a class="nav-link" href="/verb-practice">動詞練習</a></li>
@@ -463,6 +484,55 @@
         <div id="example-list"></div>
       </div>
     </div>
+  </div>
+
+  <div id="tab-history" class="content-tab" style="display:none;">
+    <section class="history-panel p-4">
+      <h4 class="mb-2" style="color:var(--primary);">歷史資料區</h4>
+      <p class="history-subtitle mb-3">已依照每日教材紀錄，整理所有曾出現過的單字、動詞與文法，方便集中複習。</p>
+      <div class="history-type-tabs" id="history-type-tabs">
+        <button class="history-type-btn active" data-history-type="all" onclick="setHistoryType('all')">全部</button>
+        <button class="history-type-btn" data-history-type="word" onclick="setHistoryType('word')">單字</button>
+        <button class="history-type-btn" data-history-type="verb" onclick="setHistoryType('verb')">動詞</button>
+        <button class="history-type-btn" data-history-type="grammar" onclick="setHistoryType('grammar')">文法</button>
+      </div>
+      <div class="history-controls">
+        <div>
+          <label class="form-label" for="history-search">搜尋關鍵字</label>
+          <input id="history-search" class="form-control" placeholder="搜尋日文、中文或讀音..." onkeydown="handleHistorySearchKey(event)">
+        </div>
+        <div>
+          <label class="form-label" for="history-level">JLPT 等級</label>
+          <select id="history-level" class="form-select" onchange="refreshHistoryItems()">
+            <option value="all">全部</option>
+            <option value="N5">N5</option>
+            <option value="N4">N4</option>
+            <option value="N3">N3</option>
+            <option value="N2">N2</option>
+            <option value="N1">N1</option>
+            <option value="SNS">SNS</option>
+          </select>
+        </div>
+        <div>
+          <label class="form-label" for="history-sort">排序</label>
+          <select id="history-sort" class="form-select" onchange="refreshHistoryItems()">
+            <option value="last_seen_desc">最新出現</option>
+            <option value="last_seen_asc">最舊出現</option>
+            <option value="seen_count_desc">出現次數</option>
+            <option value="level">JLPT 等級</option>
+          </select>
+        </div>
+        <button class="neon-btn" onclick="refreshHistoryItems()">搜尋</button>
+      </div>
+      <div id="history-summary" class="history-summary"></div>
+      <div id="history-loader" class="text-muted">正在整理歷史資料...</div>
+      <div id="history-items" class="history-list"></div>
+      <div class="history-pager">
+        <button class="neon-btn" id="history-prev" onclick="changeHistoryPage(-1)">上一頁</button>
+        <span id="history-page-info" class="history-summary"></span>
+        <button class="neon-btn" id="history-next" onclick="changeHistoryPage(1)">下一頁</button>
+      </div>
+    </section>
   </div>
 
   <div id="tab-quiz" class="content-tab" style="display:none;">
@@ -581,6 +651,7 @@
   let archiveDatesCache = { expiresAt: 0, dates: null };
   let vocabRulesPayload = { groups: [] };
   const ARCHIVE_DATES_CACHE_MS = 60000;
+  const historyState = { type: "all", level: "all", q: "", sort: "last_seen_desc", limit: 50, offset: 0, total: 0, loaded: false };
 
   function escapeHtml(value) {
     return String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
@@ -861,7 +932,6 @@
     const bootStarted = performance.now();
     const params = new URLSearchParams(window.location.search);
     const initialMaterialKey = params.get("material_key");
-    const archivePromise = loadArchiveList().catch(() => {});
     const materialPromise = (initialMaterialKey ? loadMaterialByDate(initialMaterialKey) : loadDaily()).catch(() => {
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
       document.getElementById("content-loader").style.display = "block";
@@ -872,15 +942,29 @@
     const rulesPromise = loadVocabRules().catch(() => {
       document.getElementById("vocab-rules-container").innerHTML = "<div class='error-text'>單字出現規則暫時無法載入。</div>";
     });
-    await Promise.allSettled([archivePromise, materialPromise, settingsPromise, reminderPromise, dashboardPromise, rulesPromise]);
+    await Promise.allSettled([materialPromise, settingsPromise, reminderPromise, dashboardPromise, rulesPromise]);
     perfLog("frontend_bootstrap", bootStarted);
   };
 
   function showTab(event, id) {
     document.querySelectorAll(".content-tab").forEach(t => t.style.display = "none");
     document.querySelectorAll(".nav-link").forEach(l => l.classList.remove("active"));
-    document.getElementById(id).style.display = "block";
-    if (event) event.currentTarget.classList.add("active");
+    const tab = document.getElementById(id);
+    if (!tab) return;
+    tab.style.display = "block";
+    if (event) {
+      event.currentTarget.classList.add("active");
+    } else {
+      document.querySelectorAll(".nav-link").forEach(link => {
+        const action = link.getAttribute("onclick") || "";
+        if (action.includes(`'${id}'`) || action.includes(`"${id}"`)) {
+          link.classList.add("active");
+        }
+      });
+    }
+    if (id === "tab-history" && !historyState.loaded) {
+      loadHistoryItems(true).catch(() => {});
+    }
   }
 
   async function loadSettings() {
@@ -1441,7 +1525,8 @@
 
   function renderArchiveList(payload) {
     const select = document.getElementById("dateSelect");
-    select.innerHTML = '<option value="">選擇歷史日期</option>';
+    if (!select) return;
+    select.innerHTML = '<option value="">歷史日期</option>';
     const groups = Array.isArray(payload) ? payload : (payload?.dates || []);
     groups.forEach(item => {
       if (typeof item === "string") {
@@ -1464,6 +1549,7 @@
 
   async function loadArchiveList(force = false) {
     const select = document.getElementById("dateSelect");
+    if (!select) return { ok: true, dates: [] };
     const now = Date.now();
     if (!force && archiveDatesCache.dates && archiveDatesCache.expiresAt > now) {
       renderArchiveList(archiveDatesCache.dates);
@@ -1555,10 +1641,187 @@
 
   async function loadSpecificDate() {
     const select = document.getElementById("dateSelect");
+    if (!select) return;
     const value = select.value;
     if (!value) return;
     const materialKey = select.selectedOptions[0]?.dataset?.materialKey || "";
     await loadMaterialByDate(materialKey || value);
+  }
+
+  function setHistoryType(type) {
+    historyState.type = type || "all";
+    historyState.offset = 0;
+    document.querySelectorAll("[data-history-type]").forEach(button => {
+      button.classList.toggle("active", button.dataset.historyType === historyState.type);
+    });
+    loadHistoryItems(true).catch(() => {});
+  }
+
+  function handleHistorySearchKey(event) {
+    if (event.key === "Enter") refreshHistoryItems();
+  }
+
+  function refreshHistoryItems() {
+    historyState.q = document.getElementById("history-search")?.value || "";
+    historyState.level = document.getElementById("history-level")?.value || "all";
+    historyState.sort = document.getElementById("history-sort")?.value || "last_seen_desc";
+    historyState.offset = 0;
+    loadHistoryItems(true).catch(() => {});
+  }
+
+  function changeHistoryPage(delta) {
+    const nextOffset = historyState.offset + (delta * historyState.limit);
+    if (nextOffset < 0 || nextOffset >= historyState.total) return;
+    historyState.offset = nextOffset;
+    loadHistoryItems(false).catch(() => {});
+  }
+
+  async function loadHistoryItems(reset = false) {
+    if (reset) historyState.offset = 0;
+    const loader = document.getElementById("history-loader");
+    const list = document.getElementById("history-items");
+    if (!loader || !list) return;
+    loader.style.display = "block";
+    loader.className = "text-muted";
+    loader.innerText = "正在整理歷史資料...";
+    list.innerHTML = "";
+    const params = new URLSearchParams({
+      type: historyState.type,
+      level: historyState.level,
+      q: historyState.q,
+      sort: historyState.sort,
+      limit: String(historyState.limit),
+      offset: String(historyState.offset)
+    });
+    try {
+      const data = await api(`/api/history/items?${params.toString()}`);
+      historyState.loaded = true;
+      historyState.total = Number(data.total || 0);
+      renderHistorySummary(data.summary || {});
+      renderHistoryItems(data.items || []);
+      renderHistoryPager();
+      loader.style.display = "none";
+    } catch (error) {
+      loader.className = "error-text";
+      loader.innerText = "歷史資料讀取失敗，請稍後再試。";
+      renderHistorySummary({});
+      renderHistoryPager();
+    }
+  }
+
+  function renderHistorySummary(summary) {
+    const target = document.getElementById("history-summary");
+    if (!target) return;
+    target.innerText = `已整理：單字 ${summary.word || 0}、動詞 ${summary.verb || 0}、文法 ${summary.grammar || 0}`;
+  }
+
+  function renderHistoryPager() {
+    const prev = document.getElementById("history-prev");
+    const next = document.getElementById("history-next");
+    const info = document.getElementById("history-page-info");
+    const start = historyState.total ? historyState.offset + 1 : 0;
+    const end = Math.min(historyState.offset + historyState.limit, historyState.total);
+    if (prev) prev.disabled = historyState.offset <= 0;
+    if (next) next.disabled = historyState.offset + historyState.limit >= historyState.total;
+    if (info) info.innerText = `${start} - ${end} / ${historyState.total}`;
+  }
+
+  function historyBadges(item) {
+    const badges = [];
+    if (item.jlpt_level) badges.push(item.jlpt_level);
+    if (item.category) badges.push(item.category);
+    if (item.part_of_speech) badges.push(item.part_of_speech);
+    badges.push(`出現 ${item.seen_count || 0} 次`);
+    return `<div class="history-meta">${badges.map(text => `<span class="history-badge">${escapeHtml(text)}</span>`).join("")}</div>`;
+  }
+
+  function historySeenDates(records) {
+    const items = Array.isArray(records) ? records : [];
+    if (!items.length) return "";
+    return `
+      <div class="history-dates">
+        ${items.map(record => {
+          const key = encodeURIComponent(record.material_key || "");
+          const label = record.display_date || record.material_date || "";
+          return `<button class="history-date-chip" onclick="openHistoryMaterial('${key}')">${escapeHtml(label)}</button>`;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  function renderHistoryVerbForms(forms) {
+    const entries = Object.entries(forms || {}).filter(([, value]) => String(value || "").trim());
+    if (!entries.length) return "";
+    return `
+      <details class="history-forms">
+        <summary>動詞變化</summary>
+        ${entries.map(([key, value]) => `<div class="history-field"><span class="history-label">${escapeHtml(key)}：</span>${escapeHtml(value)}</div>`).join("")}
+      </details>
+    `;
+  }
+
+  function renderHistoryItem(item) {
+    if (item.type === "verb") {
+      const title = item.dictionary_form || item.surface || "動詞";
+      return `
+        <article class="history-item">
+          <div class="history-item-title">${escapeHtml(title)}${item.reading_hiragana ? `（${escapeHtml(item.reading_hiragana)}）` : ""}</div>
+          ${historyBadges(item)}
+          ${item.meaning_zh ? `<div class="history-field"><span class="history-label">意思：</span>${escapeHtml(item.meaning_zh)}</div>` : ""}
+          ${item.verb_type || item.verb_group ? `<div class="history-field"><span class="history-label">類型：</span>${escapeHtml(item.verb_type || item.verb_group)}</div>` : ""}
+          ${item.example_sentence ? `<div class="history-field"><span class="history-label">例句：</span>${escapeHtml(item.example_sentence)}</div>` : ""}
+          ${item.example_translation_zh ? `<div class="history-field"><span class="history-label">翻譯：</span>${escapeHtml(item.example_translation_zh)}</div>` : ""}
+          <div class="history-field"><span class="history-label">首次 / 最近：</span>${escapeHtml(item.first_seen_date || "")} / ${escapeHtml(item.last_seen_date || "")}</div>
+          ${renderHistoryVerbForms(item.forms)}
+          ${historySeenDates(item.seen_records)}
+        </article>
+      `;
+    }
+    if (item.type === "grammar") {
+      const title = item.display_name || item.title || item.grammar_key || "文法";
+      return `
+        <article class="history-item">
+          <div class="history-item-title">${escapeHtml(title)}</div>
+          ${historyBadges(item)}
+          ${item.meaning_zh ? `<div class="history-field"><span class="history-label">意思：</span>${escapeHtml(item.meaning_zh)}</div>` : ""}
+          ${item.connection ? `<div class="history-field"><span class="history-label">接續：</span>${escapeHtml(item.connection)}</div>` : ""}
+          ${item.structure_formula ? `<div class="history-field"><span class="history-label">句型：</span>${escapeHtml(item.structure_formula)}</div>` : ""}
+          ${item.usage_summary_zh ? `<div class="history-field"><span class="history-label">用法：</span>${escapeHtml(item.usage_summary_zh)}</div>` : ""}
+          ${item.example_japanese ? `<div class="history-field"><span class="history-label">例句：</span>${escapeHtml(item.example_japanese)}</div>` : ""}
+          ${item.example_hiragana ? `<div class="history-field"><span class="history-label">假名：</span>${escapeHtml(item.example_hiragana)}</div>` : ""}
+          ${item.example_zh ? `<div class="history-field"><span class="history-label">翻譯：</span>${escapeHtml(item.example_zh)}</div>` : ""}
+          <div class="history-field"><span class="history-label">首次 / 最近：</span>${escapeHtml(item.first_seen_date || "")} / ${escapeHtml(item.last_seen_date || "")}</div>
+          ${historySeenDates(item.seen_records)}
+        </article>
+      `;
+    }
+    return `
+      <article class="history-item">
+        <div class="history-item-title">${escapeHtml(item.word || "單字")}${item.reading ? `（${escapeHtml(item.reading)}）` : ""}</div>
+        ${historyBadges(item)}
+        ${item.meaning ? `<div class="history-field"><span class="history-label">意思：</span>${escapeHtml(item.meaning)}</div>` : ""}
+        ${item.example_sentence ? `<div class="history-field"><span class="history-label">例句：</span>${escapeHtml(item.example_sentence)}</div>` : ""}
+        ${item.example_translation_zh ? `<div class="history-field"><span class="history-label">翻譯：</span>${escapeHtml(item.example_translation_zh)}</div>` : ""}
+        <div class="history-field"><span class="history-label">首次 / 最近：</span>${escapeHtml(item.first_seen_date || "")} / ${escapeHtml(item.last_seen_date || "")}</div>
+        ${historySeenDates(item.seen_records)}
+      </article>
+    `;
+  }
+
+  function renderHistoryItems(items) {
+    const list = document.getElementById("history-items");
+    if (!list) return;
+    if (!items.length) {
+      list.innerHTML = "<div class='error-text'>目前尚無歷史資料，請先生成每日教材。</div>";
+      return;
+    }
+    list.innerHTML = items.map(renderHistoryItem).join("");
+  }
+
+  async function openHistoryMaterial(encodedMaterialKey) {
+    const materialKey = decodeURIComponent(encodedMaterialKey || "");
+    if (!materialKey) return;
+    await loadMaterialByDate(materialKey);
   }
 
   function renderGrammarPoints(points) {

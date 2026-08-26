@@ -15850,6 +15850,336 @@ def api_archive_dates():
     return jsonify(payload)
 
 
+def history_material_rows(max_rows=5000):
+    ensure_database()
+    limit = max(1, min(int(max_rows or 5000), 20000))
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT material_key, material_date, date, version_no, material_json, created_at
+                    FROM materials
+                    WHERE COALESCE(material_json, '') <> ''
+                    ORDER BY COALESCE(material_date, CURRENT_DATE) ASC, version_no ASC, id ASC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+        return [
+            {
+                "material_key": row[0] or "",
+                "material_date": row[1] or row[2] or row[5] or "",
+                "date": row[2] or "",
+                "version_no": row[3] or 1,
+                "material_json": row[4] or "",
+                "created_at": row[5] or "",
+            }
+            for row in rows
+        ]
+    df = read_database()
+    if df.empty or "material_json" not in df.columns:
+        return []
+    material_rows = df[df["material_json"].astype(str).str.strip() != ""].tail(limit)
+    return [
+        {
+            "material_key": row.get("material_key", "") or "",
+            "material_date": row.get("material_date", "") or row.get("date", "") or row.get("created_at", "") or "",
+            "date": row.get("date", "") or "",
+            "version_no": row.get("version_no", 1) or 1,
+            "material_json": row.get("material_json", "") or "",
+            "created_at": row.get("created_at", "") or "",
+        }
+        for _, row in material_rows.iterrows()
+    ]
+
+
+def history_display_text(item):
+    return (
+        item.get("word")
+        or item.get("dictionary_form")
+        or item.get("surface")
+        or item.get("display_name")
+        or item.get("title")
+        or item.get("grammar_key")
+        or ""
+    )
+
+
+def history_seen_key(material_key, material_date):
+    return str(material_key or material_date or "").strip()
+
+
+def history_level_matches(item, level_filter):
+    level = str(level_filter or "all").strip().upper()
+    if level in {"", "ALL"}:
+        return True
+    item_level = str(item.get("jlpt_level") or "").strip().upper()
+    category = str(item.get("category") or "").strip().upper()
+    if level == "SNS":
+        return item_level == "SNS" or category == "SNS"
+    return item_level == level
+
+
+def history_query_matches(item, query):
+    text = str(query or "").strip().casefold()
+    if not text:
+        return True
+    haystack = " ".join(
+        str(value or "")
+        for value in (
+            item.get("word"),
+            item.get("reading"),
+            item.get("meaning"),
+            item.get("surface"),
+            item.get("dictionary_form"),
+            item.get("reading_hiragana"),
+            item.get("meaning_zh"),
+            item.get("title"),
+            item.get("display_name"),
+            item.get("grammar_key"),
+            item.get("example_sentence"),
+            item.get("example_translation_zh"),
+            item.get("example_japanese"),
+            item.get("example_hiragana"),
+            item.get("example_zh"),
+        )
+    ).casefold()
+    return text in haystack
+
+
+def history_add_item(aggregated, item_type, key, item, material_date, material_key, version_no):
+    normalized = normalize_vocab_key(key or history_display_text(item))
+    if not normalized:
+        return
+    aggregate_key = f"{item_type}:{normalized}"
+    date_iso = canonical_material_date(material_date)
+    try:
+        version_no = int(version_no or 1)
+    except (TypeError, ValueError):
+        version_no = 1
+    material_key = material_key or build_material_key(date_iso, version_no)
+    seen_record_key = history_seen_key(material_key, date_iso)
+    if aggregate_key not in aggregated:
+        payload = dict(item)
+        payload.update(
+            {
+                "type": item_type,
+                "key": normalized,
+                "first_seen_date": date_iso,
+                "last_seen_date": date_iso,
+                "seen_count": 0,
+                "seen_dates": [],
+                "seen_records": [],
+            }
+        )
+        aggregated[aggregate_key] = payload
+    target = aggregated[aggregate_key]
+    if not target.get("_seen_record_keys"):
+        target["_seen_record_keys"] = set()
+    if seen_record_key in target["_seen_record_keys"]:
+        return
+    target["_seen_record_keys"].add(seen_record_key)
+    target["seen_count"] += 1
+    if not target.get("first_seen_date") or date_iso < target["first_seen_date"]:
+        target["first_seen_date"] = date_iso
+    if not target.get("last_seen_date") or date_iso > target["last_seen_date"]:
+        target["last_seen_date"] = date_iso
+    if date_iso not in target["seen_dates"]:
+        target["seen_dates"].append(date_iso)
+    target["seen_records"].append(
+        {
+            "material_date": date_iso,
+            "display_date": material_date_display(date_iso),
+            "material_key": material_key,
+            "version_no": version_no,
+        }
+    )
+
+
+def history_word_item(raw):
+    word = first_text(raw, ["word", "surface", "term", "vocab_word"])
+    return {
+        "word": word,
+        "reading": first_text(raw, ["reading", "reading_hiragana", "kana", "vocab_reading"]),
+        "meaning": first_text(raw, ["meaning", "meaning_zh", "vocab_meaning"]) or "尚未建立中文意思",
+        "part_of_speech": first_text(raw, ["part_of_speech", "pos"]),
+        "jlpt_level": first_text(raw, ["jlpt_level", "target_level", "level"]),
+        "category": first_text(raw, ["category"]) or "general",
+        "source": first_text(raw, ["source"]),
+        "normalized_key": normalize_vocab_key(first_text(raw, ["normalized_key", "normalized_term"]) or word),
+        "example_sentence": first_text(raw, ["example_sentence", "example_japanese"]),
+        "example_translation_zh": first_text(raw, ["example_translation_zh", "example_zh", "example_chinese", "example_translation"]),
+    }
+
+
+def history_verb_item(raw):
+    normalized = normalize_material_verb_schema(raw)
+    surface = first_text(normalized, ["dictionary_form", "surface", "base", "word"]) or first_text(raw, ["dictionary_form", "surface", "base_form", "base", "word"])
+    return {
+        "surface": normalized.get("surface") or surface,
+        "dictionary_form": normalized.get("dictionary_form") or surface,
+        "reading_hiragana": normalized.get("reading_hiragana") or first_text(raw, ["reading_hiragana", "reading", "kana"]),
+        "meaning_zh": normalized.get("meaning_zh") or first_text(raw, ["meaning_zh", "meaning", "vocab_meaning"]),
+        "verb_group": normalized.get("verb_group") or first_text(raw, ["verb_group", "group"]),
+        "verb_type": normalized.get("verb_type") or first_text(raw, ["verb_type", "verb_group_label"]),
+        "jlpt_level": normalized.get("jlpt_level") or first_text(raw, ["jlpt_level", "target_level", "level"]),
+        "part_of_speech": normalized.get("part_of_speech") or "動詞",
+        "normalized_key": normalize_vocab_key(normalized.get("normalized_key") or first_text(raw, ["normalized_key"]) or surface),
+        "forms": normalized.get("forms") or {},
+        "example_sentence": first_text(raw, ["example_sentence", "example_japanese"]),
+        "example_translation_zh": first_text(raw, ["example_translation_zh", "example_zh", "example_chinese", "example_translation"]),
+    }
+
+
+def history_grammar_item(raw):
+    title = first_text(raw, ["title", "display_name", "grammar_key"])
+    return {
+        "grammar_key": first_text(raw, ["grammar_key"]) or normalize_vocab_key(title),
+        "title": title,
+        "display_name": first_text(raw, ["display_name"]) or title,
+        "jlpt_level": first_text(raw, ["jlpt_level", "target_level", "level"]),
+        "meaning_zh": first_text(raw, ["meaning_zh", "meaning", "exp"]),
+        "connection": first_text(raw, ["connection"]),
+        "structure_formula": first_text(raw, ["structure_formula", "pattern"]),
+        "usage_summary_zh": first_text(raw, ["usage_summary_zh", "usage_summary", "usage"]),
+        "usage_detail_zh": first_text(raw, ["usage_detail_zh"]),
+        "example_japanese": first_text(raw, ["example_japanese", "example_sentence", "jp"]),
+        "example_hiragana": first_text(raw, ["example_hiragana", "reading_hiragana"]),
+        "example_zh": first_text(raw, ["example_zh", "example_translation_zh", "cn"]),
+        "note_zh": first_text(raw, ["note_zh"]),
+        "learning_tip_zh": first_text(raw, ["learning_tip_zh"]),
+        "common_mistake_zh": first_text(raw, ["common_mistake_zh"]),
+    }
+
+
+def build_history_items_payload(item_type_filter="all", level_filter="all", query="", sort="last_seen_desc", limit=50, offset=0):
+    aggregated = {}
+    for row in history_material_rows():
+        try:
+            payload = json.loads(row.get("material_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        material_date = row.get("material_date") or payload.get("material_date") or payload.get("date") or row.get("created_at")
+        material_key = row.get("material_key") or payload.get("material_key")
+        version_no = row.get("version_no") or payload.get("version_no") or 1
+
+        word_items = payload.get("vocab") or payload.get("vocabulary") or []
+        if isinstance(word_items, list):
+            for raw in word_items:
+                if not isinstance(raw, dict):
+                    continue
+                item = history_word_item(raw)
+                history_add_item(aggregated, "word", item.get("normalized_key") or item.get("word"), item, material_date, material_key, version_no)
+
+        verb_items = payload.get("verbs") or []
+        if isinstance(verb_items, list):
+            for raw in verb_items:
+                if not isinstance(raw, dict):
+                    continue
+                item = history_verb_item(raw)
+                history_add_item(
+                    aggregated,
+                    "verb",
+                    item.get("normalized_key") or item.get("dictionary_form") or item.get("surface"),
+                    item,
+                    material_date,
+                    material_key,
+                    version_no,
+                )
+
+        grammar_items = payload.get("grammar_points") or []
+        if not grammar_items and isinstance(payload.get("grammar"), dict):
+            grammar = payload.get("grammar") or {}
+            examples = grammar.get("examples") if isinstance(grammar.get("examples"), list) else []
+            first_example = examples[0] if examples and isinstance(examples[0], dict) else {}
+            grammar_items = [
+                {
+                    "title": grammar.get("title", ""),
+                    "meaning_zh": grammar.get("exp", ""),
+                    "example_japanese": first_example.get("jp", ""),
+                    "example_zh": first_example.get("cn", ""),
+                }
+            ]
+        if isinstance(grammar_items, list):
+            for raw in grammar_items:
+                if not isinstance(raw, dict):
+                    continue
+                item = history_grammar_item(raw)
+                history_add_item(
+                    aggregated,
+                    "grammar",
+                    item.get("grammar_key") or item.get("title") or item.get("display_name"),
+                    item,
+                    material_date,
+                    material_key,
+                    version_no,
+                )
+
+    all_items = []
+    for item in aggregated.values():
+        item.pop("_seen_record_keys", None)
+        item["seen_dates"] = sorted(item.get("seen_dates") or [])
+        item["seen_records"] = sorted(item.get("seen_records") or [], key=lambda record: record.get("material_date", ""))
+        all_items.append(item)
+
+    base_filtered = [
+        item
+        for item in all_items
+        if history_level_matches(item, level_filter) and history_query_matches(item, query)
+    ]
+    summary = {
+        "word": sum(1 for item in base_filtered if item.get("type") == "word"),
+        "verb": sum(1 for item in base_filtered if item.get("type") == "verb"),
+        "grammar": sum(1 for item in base_filtered if item.get("type") == "grammar"),
+    }
+    item_type = str(item_type_filter or "all").strip().lower()
+    if item_type != "all":
+        base_filtered = [item for item in base_filtered if item.get("type") == item_type]
+
+    level_rank = {"N5": 1, "N4": 2, "N3": 3, "N2": 4, "N1": 5, "SNS": 6}
+    if sort == "last_seen_asc":
+        base_filtered.sort(key=lambda item: (item.get("last_seen_date") or "", history_display_text(item)))
+    elif sort == "seen_count_desc":
+        base_filtered.sort(key=lambda item: (-int(item.get("seen_count") or 0), item.get("last_seen_date") or "", history_display_text(item)))
+    elif sort == "level":
+        base_filtered.sort(key=lambda item: (level_rank.get(str(item.get("jlpt_level") or "").upper(), 99), item.get("type") or "", history_display_text(item)))
+    else:
+        base_filtered.sort(key=lambda item: (item.get("last_seen_date") or "", history_display_text(item)), reverse=True)
+
+    total = len(base_filtered)
+    limit = max(1, min(int(limit or 50), 100))
+    offset = max(0, int(offset or 0))
+    return {
+        "ok": True,
+        "items": base_filtered[offset : offset + limit],
+        "total": total,
+        "summary": summary,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@app.get("/api/history/items")
+def api_history_items():
+    try:
+        item_type = request.args.get("type", "all")
+        if str(item_type).lower() not in {"all", "word", "verb", "grammar"}:
+            item_type = "all"
+        level = request.args.get("level", "all")
+        query = request.args.get("q", "")
+        sort = request.args.get("sort", "last_seen_desc")
+        limit = request.args.get("limit", 50)
+        offset = request.args.get("offset", 0)
+        return jsonify(build_history_items_payload(item_type, level, query, sort, limit, offset))
+    except Exception as exc:
+        print(f"[history-items] failed reason={exc}")
+        return jsonify({"ok": False, "error": "history_items_failed", "reason": str(exc), "items": [], "total": 0, "summary": {"word": 0, "verb": 0, "grammar": 0}}), 200
+
+
 @app.get("/api/materials")
 def api_materials():
     started = time.perf_counter()
