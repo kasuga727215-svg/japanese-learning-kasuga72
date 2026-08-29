@@ -6990,6 +6990,23 @@ def classify_gemini_daily_material_error(error):
     return classify_gemini_error(error)
 
 
+def gemini_quota_exceeded_payload(job_id="", stage="", item_type="", level="", elapsed_ms=0):
+    return {
+        "ok": False,
+        "error": "gemini_quota_exceeded",
+        "reason": "Gemini API quota or monthly spending cap has been reached",
+        "message": "Gemini API 額度或本月支出上限已達到，請到 Google AI Studio / Google Cloud 調整額度，或等下個月重置後再生成。",
+        "action_required": True,
+        "retryable": False,
+        "continue_same_step": False,
+        "job_id": job_id,
+        "stage": stage,
+        "item_type": item_type,
+        "jlpt_level": level,
+        "elapsed_ms": elapsed_ms,
+    }
+
+
 def simple_text(value):
     return str(value or "").strip()
 
@@ -7338,6 +7355,13 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
     if not job:
         return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
     if job.get("status") == "failed":
+        if "gemini_quota_exceeded" in str(job.get("error_message") or ""):
+            return gemini_quota_exceeded_payload(
+                job_id=job_id,
+                stage=job.get("current_stage") or stage,
+                item_type=item_type or "",
+                level=level or "",
+            ), 200
         return {
             "ok": False,
             "error": "gemini_stage_failed",
@@ -7449,6 +7473,25 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
                 "reason": "Gemini daily material generator is not configured",
                 "elapsed_ms": elapsed_ms,
             }, 200
+        if reason in {"quota_exceeded", "prepayment_depleted"}:
+            update_gemini_generation_job(
+                job_id,
+                status="failed",
+                current_stage=stage,
+                error_message="gemini_quota_exceeded",
+            )
+            print(
+                "[gemini-step-runner] fatal quota_exceeded "
+                f"job_id={job_id} stage={stage} item_type={item_type} level={level} "
+                "retryable=false continued=false"
+            )
+            return gemini_quota_exceeded_payload(
+                job_id=job_id,
+                stage=stage,
+                item_type=item_type,
+                level=level,
+                elapsed_ms=elapsed_ms,
+            ), 200
         warning_code = "gemini_bank_refill_timeout" if reason == "timeout" else "gemini_bank_refill_failed"
         warnings = cache.get("warnings") if isinstance(cache.get("warnings"), list) else []
         warning_entry = {
@@ -16424,6 +16467,13 @@ def api_generate():
                 ), 200
         if normalize_generation_mode(mode) == "gemini":
             reason = classify_gemini_daily_material_error(e)
+            if reason in {"quota_exceeded", "prepayment_depleted"}:
+                return jsonify(
+                    gemini_quota_exceeded_payload(
+                        stage="api_generate_gemini",
+                        elapsed_ms=round((time.monotonic() - manual_started) * 1000),
+                    )
+                ), 200
             if reason == "timeout":
                 return jsonify(
                     {

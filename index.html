@@ -403,6 +403,7 @@
     .history-forms { margin-top: 8px; color: var(--text-color); }
     .history-forms summary { color: var(--primary); cursor: pointer; font-weight: 800; }
     .history-pager { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .material-view-banner { color: #dffcff; border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; background: rgba(255,255,255,.04); font-weight: 700; }
     @media (min-width: 768px) {
       .rules-toolbar { grid-template-columns: 1fr auto auto auto; align-items: center; }
       .rule-controls { grid-template-columns: repeat(6, minmax(96px, 1fr)); align-items: end; }
@@ -431,10 +432,10 @@
   </div>
 
   <ul class="main-nav nav nav-pills mb-4 justify-content-center">
-    <li class="nav-item"><button class="nav-link active" onclick="showTab(event, 'tab-daily')">每日教材</button></li>
-    <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-history')">歷史資料</button></li>
-    <li class="nav-item"><button class="nav-link" onclick="startQuiz(event)">累計測驗</button></li>
-    <li class="nav-item"><button class="nav-link" onclick="showTab(event, 'tab-settings')">控制中心</button></li>
+    <li class="nav-item"><button class="nav-link active" data-tab-target="tab-daily" onclick="showTodayTab(event)">每日教材</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab-target="tab-history" onclick="showTab(event, 'tab-history')">歷史資料</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab-target="tab-quiz" onclick="startQuiz(event)">累計測驗</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab-target="tab-settings" onclick="showTab(event, 'tab-settings')">控制中心</button></li>
     <li class="nav-item"><a class="nav-link" href="/verb-practice">動詞練習</a></li>
     <li class="nav-item"><a class="nav-link" href="/mistake-review">錯題複習</a></li>
     <li class="nav-item"><a class="nav-link" href="/grammar-analyzer">文法拆解</a></li>
@@ -465,6 +466,7 @@
         <div id="dash-review" class="metric-note">目前沒有待複習錯題。</div>
       </div>
     </section>
+    <div id="material-view-banner" class="material-view-banner mb-3" style="display:none;"></div>
     <div id="content-loader" class="text-center py-5 text-muted">正在讀取今日學習材料...</div>
     <div id="material-content" style="display:none;">
       <div class="card p-3"><h5 class="fw-bold mb-3" style="color:var(--primary)">單字</h5><div id="vocab-list" class="row g-2"></div></div>
@@ -648,6 +650,7 @@
 <script>
   let currentQuiz = [];
   let currentMaterialData = null;
+  let currentMaterialViewMode = "today";
   let archiveDatesCache = { expiresAt: 0, dates: null };
   let vocabRulesPayload = { groups: [] };
   const ARCHIVE_DATES_CACHE_MS = 60000;
@@ -689,7 +692,13 @@
       throw new Error("API \u56de\u50b3\u683c\u5f0f\u932f\u8aa4\uff0c\u7121\u6cd5\u89e3\u6790 JSON\u3002");
     }
     if (!res.ok || (data && data.ok === false)) {
-      throw new Error((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+      const message = data?.error === "gemini_quota_exceeded"
+        ? "Gemini API 額度或本月支出上限已達到，請到 Google AI Studio / Google Cloud 調整額度，或等下個月重置後再生成。"
+        : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+      const error = new Error(message);
+      error.apiPayload = data;
+      error.apiError = data?.error || "";
+      throw error;
     }
     return data;
   }
@@ -728,6 +737,19 @@
     return /^\d{4}-\d{2}-\d{2}-\d+$/.test(String(value || ""));
   }
 
+  function updateMaterialUrl(materialKey = "", viewMode = "today") {
+    if (!window.history?.replaceState) return;
+    const url = new URL(window.location.href);
+    if (viewMode === "history" && materialKey) {
+      url.searchParams.set("material_key", materialKey);
+      url.searchParams.set("view", "history");
+    } else {
+      url.searchParams.delete("material_key");
+      url.searchParams.delete("view");
+    }
+    window.history.replaceState({}, "", url.toString());
+  }
+
   function recentSevenDaysFallback() {
     const days = [];
     const now = new Date();
@@ -745,7 +767,7 @@
   }
 
   function fallbackDashboardData(warning = "") {
-    const hasMaterial = Boolean(currentMaterialData);
+    const hasMaterial = Boolean(currentMaterialData) && currentMaterialViewMode === "today";
     const materialMeta = hasMaterial ? (currentMaterialData.metadata || {}) : {};
     const materialResolved = currentMaterialData?.resolved_settings || materialMeta.resolved_settings || {};
     const materialValidation = currentMaterialData?.count_validation || materialMeta.count_validation || {};
@@ -932,7 +954,12 @@
     const bootStarted = performance.now();
     const params = new URLSearchParams(window.location.search);
     const initialMaterialKey = params.get("material_key");
-    const materialPromise = (initialMaterialKey ? loadMaterialByDate(initialMaterialKey) : loadDaily()).catch(() => {
+    const explicitHistoryMode = params.get("view") === "history" && Boolean(initialMaterialKey);
+    if (initialMaterialKey && !explicitHistoryMode) {
+      console.warn(`[material-view] stale material_key ignored in today mode material_key=${initialMaterialKey}`);
+      updateMaterialUrl("", "today");
+    }
+    const materialPromise = (explicitHistoryMode ? loadMaterialByDate(initialMaterialKey, false, { viewMode: "history" }) : loadDaily()).catch(() => {
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
       document.getElementById("content-loader").style.display = "block";
     });
@@ -957,7 +984,7 @@
     } else {
       document.querySelectorAll(".nav-link").forEach(link => {
         const action = link.getAttribute("onclick") || "";
-        if (action.includes(`'${id}'`) || action.includes(`"${id}"`)) {
+        if (link.dataset.tabTarget === id || action.includes(`'${id}'`) || action.includes(`"${id}"`)) {
           link.classList.add("active");
         }
       });
@@ -965,6 +992,14 @@
     if (id === "tab-history" && !historyState.loaded) {
       loadHistoryItems(true).catch(() => {});
     }
+  }
+
+  function showTodayTab(event) {
+    showTab(event, "tab-daily");
+    loadDaily().catch(() => {
+      document.getElementById("content-loader").innerHTML = "<div class='error-text'>今日教材暫時無法讀取，請稍後重新整理。</div>";
+      document.getElementById("content-loader").style.display = "block";
+    });
   }
 
   async function loadSettings() {
@@ -1491,7 +1526,7 @@
         ? `今日教材已成功從本地詞庫建立。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。`
         : `今日教材已建立，但內容未補滿：單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。請查看 Render Logs。`;
       currentMaterialData = null;
-      await loadMaterialByDate(result.material_key || result.date || result.material_date, true);
+      await loadMaterialByDate(result.material_key || result.date || result.material_date, true, { viewMode: "today" });
       invalidateArchiveDatesCache();
       await loadArchiveList(true);
       await loadDashboard(true);
@@ -1614,16 +1649,22 @@
 
   async function loadDaily() {
     const started = performance.now();
+    currentMaterialViewMode = "today";
+    updateMaterialUrl("", "today");
     document.getElementById("content-loader").innerHTML = "正在讀取今日學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
+    const banner = document.getElementById("material-view-banner");
+    if (banner) banner.style.display = "none";
     renderMaterial(await api("/api/materials"));
     perfLog("material", started);
   }
 
-  async function loadMaterialByDate(dateOrKey, forceRefresh = false) {
+  async function loadMaterialByDate(dateOrKey, forceRefresh = false, options = {}) {
+    const viewMode = options.viewMode || "history";
+    currentMaterialViewMode = viewMode;
     showTab(null, "tab-daily");
-    document.getElementById("content-loader").innerHTML = "正在讀取剛生成的學習材料...";
+    document.getElementById("content-loader").innerHTML = viewMode === "history" ? "正在讀取歷史學習材料..." : "正在讀取今日學習材料...";
     document.getElementById("content-loader").style.display = "block";
     document.getElementById("material-content").style.display = "none";
     const query = isMaterialKey(dateOrKey)
@@ -1631,11 +1672,7 @@
       : `date=${encodeURIComponent(dateOrKey)}`;
     const cacheBust = forceRefresh ? `&_=${Date.now()}` : "";
     const data = await api(`/api/materials?${query}${cacheBust}`);
-    if (data?.material_key && window.history?.replaceState) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("material_key", data.material_key);
-      window.history.replaceState({}, "", url.toString());
-    }
+    updateMaterialUrl(data?.material_key || "", viewMode);
     renderMaterial(data);
   }
 
@@ -1645,7 +1682,7 @@
     const value = select.value;
     if (!value) return;
     const materialKey = select.selectedOptions[0]?.dataset?.materialKey || "";
-    await loadMaterialByDate(materialKey || value);
+    await loadMaterialByDate(materialKey || value, false, { viewMode: "history" });
   }
 
   function setHistoryType(type) {
@@ -1821,7 +1858,7 @@
   async function openHistoryMaterial(encodedMaterialKey) {
     const materialKey = decodeURIComponent(encodedMaterialKey || "");
     if (!materialKey) return;
-    await loadMaterialByDate(materialKey);
+    await loadMaterialByDate(materialKey, false, { viewMode: "history" });
   }
 
   function renderGrammarPoints(points) {
@@ -1910,14 +1947,24 @@
 
   function renderMaterial(data) {
     document.getElementById("content-loader").style.display = "none";
+    const banner = document.getElementById("material-view-banner");
     if (!data) {
       currentMaterialData = null;
+      if (banner) banner.style.display = "none";
       document.getElementById("content-loader").innerHTML = "<div class='error-text'>新的一天，新的進步！今日專屬教材尚未建立，快前往『控制中心』一鍵生成，為今天的日文實力充值吧！🚀</div>";
       document.getElementById("content-loader").style.display = "block";
       return;
     }
     currentMaterialData = data;
     document.getElementById("material-content").style.display = "block";
+    if (banner) {
+      if (currentMaterialViewMode === "history") {
+        banner.innerText = `正在查看歷史教材：${data.date || data.material_date || data.date_iso || ""}`;
+        banner.style.display = "block";
+      } else {
+        banner.style.display = "none";
+      }
+    }
     const vocabulary = Array.isArray(data.vocabulary) ? data.vocabulary : [];
     const verbs = Array.isArray(data.verbs) ? data.verbs : [];
     const materialMetadata = data.metadata || {};
