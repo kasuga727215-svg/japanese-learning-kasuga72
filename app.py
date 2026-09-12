@@ -101,6 +101,9 @@ GEMINI_GENERATE_TIMEOUT_SECONDS = read_int_env("GEMINI_GENERATE_TIMEOUT_SECONDS"
 GEMINI_STAGE_TIMEOUT_SECONDS = read_int_env("GEMINI_STAGE_TIMEOUT_SECONDS", 18, 5, 25)
 GEMINI_BANK_STAGE_TIMEOUT_SECONDS = read_int_env("GEMINI_BANK_STAGE_TIMEOUT_SECONDS", 15, 5, 20)
 GEMINI_BANK_REFILL_BATCH_SIZE = read_int_env("GEMINI_BANK_REFILL_BATCH_SIZE", 3, 1, 3)
+GEMINI_BANK_LIGHT_WORD_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_WORD_BATCH_SIZE", 24, 20, 30)
+GEMINI_BANK_LIGHT_VERB_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_VERB_BATCH_SIZE", 12, 10, 15)
+GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE", 4, 3, 5)
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
 GEMINI_BANK_MIN_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_VERB_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL", 10, 1, 100)
@@ -118,6 +121,7 @@ GEMINI_BANK_MANUAL_MIN_GRAMMAR_FRESH_PER_LEVEL = read_int_env("GEMINI_BANK_MANUA
 GEMINI_BANK_MANUAL_MIN_SNS_FRESH = read_int_env("GEMINI_BANK_MANUAL_MIN_SNS_FRESH", 2, 1, 30)
 GEMINI_BANK_MAX_REFILL_ATTEMPTS_PER_POOL = read_int_env("GEMINI_BANK_MAX_REFILL_ATTEMPTS_PER_POOL", 20, 1, 100)
 GEMINI_BANK_ALLOW_RECENT_REUSE = os.environ.get("GEMINI_BANK_ALLOW_RECENT_REUSE", "false").strip().lower() in {"1", "true", "yes", "on"}
+GEMINI_ENABLE_DAILY_ENRICHMENT = os.environ.get("GEMINI_ENABLE_DAILY_ENRICHMENT", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_BANK_RECENT_EXCLUSION_DAYS = read_int_env("GEMINI_BANK_RECENT_EXCLUSION_DAYS", 7, 0, 30)
 GEMINI_BANK_USAGE_BACKFILL_DAYS = read_int_env("GEMINI_BANK_USAGE_BACKFILL_DAYS", 30, 0, 365)
 
@@ -4705,7 +4709,58 @@ def gemini_bank_recent_keys_for_item_type(recent_usage, item_type):
     return {normalize_vocab_key(key) for key in (recent_usage.get(item_type) or set()) if normalize_vocab_key(key)}
 
 
+def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
+    if not isinstance(payload, dict):
+        return {}
+    if item_type == "word":
+        word = simple_text(payload.get("w") or payload.get("word") or payload.get("surface") or payload.get("term"))
+        return {
+            **payload,
+            "word": word,
+            "reading": simple_text(payload.get("r") or payload.get("reading") or payload.get("reading_hiragana")),
+            "meaning": simple_text(payload.get("m") or payload.get("meaning") or payload.get("meaning_zh")),
+            "part_of_speech": simple_text(payload.get("p") or payload.get("part_of_speech") or payload.get("pos")),
+            "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "word"),
+            "category": simple_text(payload.get("c") or payload.get("category")) or "general",
+            "normalized_key": normalize_vocab_key(payload.get("normalized_key") or word),
+            "example_sentence": simple_text(payload.get("example_sentence")),
+            "example_translation_zh": simple_text(payload.get("example_translation_zh") or payload.get("example_zh")),
+        }
+    if item_type == "verb":
+        surface = simple_text(payload.get("d") or payload.get("surface") or payload.get("dictionary_form") or payload.get("base_form"))
+        return {
+            **payload,
+            "surface": surface,
+            "dictionary_form": surface,
+            "reading_hiragana": simple_text(payload.get("r") or payload.get("reading_hiragana") or payload.get("reading")),
+            "meaning_zh": simple_text(payload.get("m") or payload.get("meaning_zh") or payload.get("meaning")),
+            "verb_group": payload.get("g") or payload.get("verb_group"),
+            "verb_type": simple_text(payload.get("t") or payload.get("verb_type")),
+            "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "verb"),
+            "normalized_key": normalize_vocab_key(payload.get("normalized_key") or surface),
+        }
+    if item_type == "grammar":
+        title = simple_text(payload.get("t") or payload.get("title") or payload.get("display_name") or payload.get("grammar_key"))
+        grammar_key = simple_text(payload.get("k") or payload.get("grammar_key")) or normalize_vocab_key(title)
+        meaning = simple_text(payload.get("m") or payload.get("meaning_zh") or payload.get("meaning"))
+        connection = simple_text(payload.get("c") or payload.get("connection") or payload.get("structure_formula") or payload.get("structure"))
+        return {
+            **payload,
+            "grammar_key": grammar_key,
+            "title": title,
+            "display_name": title,
+            "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "grammar"),
+            "grammar_type": simple_text(payload.get("grammar_type") or "grammar"),
+            "meaning_zh": meaning,
+            "connection": connection,
+            "structure_formula": connection,
+            "usage_summary_zh": simple_text(payload.get("usage_summary_zh")) or meaning,
+        }
+    return dict(payload)
+
+
 def gemini_bank_item_from_payload(item_type, payload, fallback_level):
+    payload = expand_gemini_bank_light_payload(item_type, payload, fallback_level)
     if item_type == "word":
         normalized = normalize_gemini_vocab_item(payload, fallback_level)
         display = normalized.get("word", "")
@@ -4714,7 +4769,7 @@ def gemini_bank_item_from_payload(item_type, payload, fallback_level):
         level = normalized.get("jlpt_level") or fallback_level
         category = normalized.get("category") or "general"
     elif item_type == "verb":
-        normalized = normalize_gemini_verb_item(payload, fallback_level)
+        normalized = normalize_material_verb_schema(payload)
         display = normalized.get("surface") or normalized.get("dictionary_form") or ""
         reading = normalized.get("reading_hiragana", "")
         key = normalized.get("normalized_key") or normalize_vocab_key(display)
@@ -4731,7 +4786,7 @@ def gemini_bank_item_from_payload(item_type, payload, fallback_level):
         raise ValueError(f"unsupported_bank_item_type:{item_type}")
     if not display or not key or not level:
         raise ValueError("invalid_bank_item")
-    normalized["source"] = "gemini"
+    normalized["source"] = "gemini_bank_light"
     return {
         "item_type": item_type,
         "normalized_key": key,
@@ -4739,7 +4794,7 @@ def gemini_bank_item_from_payload(item_type, payload, fallback_level):
         "reading": reading,
         "jlpt_level": normalize_gemini_level(level, fallback_level),
         "category": category,
-        "source": "gemini",
+        "source": "gemini_bank_light",
         "status": "unused",
         "payload_json": json.dumps(normalized, ensure_ascii=False),
         "used_count": 0,
@@ -4933,22 +4988,22 @@ def gemini_bank_refill_strategy(item_type, attempt_count=0, duplicate_streak=0):
 def build_gemini_bank_prompt(item_type, level, count, exclude_keys=None, strategy=None):
     if item_type == "word":
         category = "approved_slang" if level == "SNS" else "general"
-        schema = {"items": [{"word": "", "reading": "", "meaning": "", "part_of_speech": "", "jlpt_level": level, "category": category, "normalized_key": "", "example_sentence": "", "example_translation_zh": ""}]}
-        detail = "Generate approved SNS / casual Japanese expressions with safe learning notes." if level == "SNS" else "Generate useful standard Japanese vocabulary for daily learning. Avoid mechanical business compounds."
+        schema = [{"w": "", "r": "", "m": "", "p": "", "l": level, "c": category}]
+        detail = "Generate approved SNS / casual Japanese expressions." if level == "SNS" else "Generate useful standard Japanese vocabulary for daily learning. Avoid mechanical business compounds."
     elif item_type == "verb":
-        schema = {"items": [{"surface": "", "dictionary_form": "", "reading_hiragana": "", "meaning_zh": "", "verb_group": 1, "verb_type": "", "jlpt_level": level, "normalized_key": "", "forms": {"dictionary": "", "masu_stem": "", "te": "", "ta": "", "nai": "", "ba": "", "volitional": "", "potential": "", "causative": "", "passive": "", "causativePassive": ""}}]}
-        detail = "Generate real Japanese verbs only. Avoid fake noun + suru compounds. Include complete conjugation forms."
+        schema = [{"d": "", "r": "", "m": "", "g": 1, "t": "", "l": level}]
+        detail = "Generate real core Japanese verbs only. Avoid fake noun + suru compounds. Do not include conjugation tables."
     elif item_type == "grammar":
-        schema = {"items": [{"grammar_key": "", "title": "", "display_name": "", "jlpt_level": level, "grammar_type": "", "meaning_zh": "", "connection": "", "structure_formula": "", "usage_summary_zh": "", "usage_detail_zh": "", "example_japanese": "", "example_hiragana": "", "example_zh": "", "note_zh": "", "learning_tip_zh": "", "common_mistake_zh": "", "usage_items": []}]}
-        detail = "Generate concise JLPT grammar points for daily learning."
+        schema = [{"k": "", "t": "", "l": level, "m": "", "c": ""}]
+        detail = "Generate concise JLPT grammar points for daily learning. Do not include long explanations or examples."
     else:
         raise ValueError(f"unsupported_bank_item_type:{item_type}")
-    exclude = [str(key) for key in (exclude_keys or []) if key]
+    exclude = [str(key) for key in (exclude_keys or []) if key][:50]
     exclude_instruction = ""
     if exclude:
         exclude_instruction = (
-            " Do not generate any item whose normalized_key, surface, word, title, or dictionary_form matches these existing keys: "
-            f"{json.dumps(exclude[:120], ensure_ascii=False)}."
+            " Do not generate any item whose word, dictionary form, title, or key matches these existing keys: "
+            f"{json.dumps(exclude, ensure_ascii=False)}."
         )
     strategy_instruction = ""
     if isinstance(strategy, dict) and strategy.get("instruction"):
@@ -4957,20 +5012,42 @@ def build_gemini_bank_prompt(item_type, level, count, exclude_keys=None, strateg
             f"{strategy.get('instruction')} "
         )
     return (
-        "Return JSON only. Do not use Markdown. "
-        f"Generate exactly {count} {item_type} candidates for JLPT {level}. {detail} "
+        "Return a JSON array only. Do not use Markdown, comments, explanations, wrapper objects, or extra fields. "
+        f"Generate exactly {count} compact {item_type} candidates for JLPT {level}. {detail} "
         f"{strategy_instruction}"
         "Readings must be hiragana. Meanings must be Traditional Chinese. No duplicates. No empty strings. "
-        "Prioritize diverse, non-overlapping items that are different from previous outputs."
+        "Prioritize diverse, non-overlapping items that are different from previous outputs. "
+        "Do not include example sentences, long grammar details, or conjugation tables. "
         f"{exclude_instruction} "
-        f"Schema: {json.dumps(schema, ensure_ascii=False)}"
+        f"Array item schema: {json.dumps(schema, ensure_ascii=False)}"
     )
 
 
+def parse_gemini_bank_json_safely(raw_text):
+    cleaned = str(raw_text or "").strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
+    array_start = cleaned.find("[")
+    array_end = cleaned.rfind("]")
+    object_start = cleaned.find("{")
+    object_end = cleaned.rfind("}")
+    if array_start != -1 and array_end > array_start and (object_start == -1 or array_start < object_start):
+        return json.loads(cleaned[array_start : array_end + 1])
+    if object_start != -1 and object_end > object_start:
+        return json.loads(cleaned[object_start : object_end + 1])
+    raise ValueError("Gemini did not return JSON for bank items.")
+
+
 def parse_gemini_bank_items(item_type, level, raw_text):
-    parsed = parse_gemini_stage_payload(raw_text)
-    source = source_from_gemini_payload(parsed)
-    raw_items = source.get("items") or source.get("vocab") or source.get("vocabulary") or source.get("verbs") or source.get("grammar_points") or []
+    try:
+        parsed = parse_gemini_bank_json_safely(raw_text)
+    except Exception as exc:
+        raise ValueError(f"json_parse_error:{exc}") from exc
+    if isinstance(parsed, list):
+        raw_items = parsed
+    else:
+        source = source_from_gemini_payload(parsed)
+        raw_items = source.get("items") or source.get("vocab") or source.get("vocabulary") or source.get("verbs") or source.get("grammar_points") or []
     if not isinstance(raw_items, list):
         raise ValueError("invalid_bank_items")
     items = []
@@ -5071,6 +5148,16 @@ def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, re
     )
 
 
+def gemini_bank_light_refill_count(item_type, needed):
+    if item_type == "word":
+        return GEMINI_BANK_LIGHT_WORD_BATCH_SIZE
+    if item_type == "verb":
+        return GEMINI_BANK_LIGHT_VERB_BATCH_SIZE
+    if item_type == "grammar":
+        return GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE
+    return max(1, int(needed or 1))
+
+
 def ensure_gemini_bank_level_capacity_for_generation(
     item_type,
     level,
@@ -5146,21 +5233,28 @@ def ensure_gemini_bank_level_capacity_for_generation(
             f"strategy={strategy.get('strategy')} attempt_count={int(attempt_count or 0)} "
             f"duplicate_streak={int(duplicate_streak or 0)}"
         )
-    step_limit = GEMINI_BANK_REFILL_BATCH_SIZE
-    if requested_count is not None:
-        step_limit = min(step_limit, max(1, int(requested_count or 1)))
-    request_count = min(step_limit, 3, needed)
+    if target_stock is not None:
+        request_count = gemini_bank_light_refill_count(item_type, needed)
+    else:
+        step_limit = GEMINI_BANK_REFILL_BATCH_SIZE
+        if requested_count is not None:
+            step_limit = min(step_limit, max(1, int(requested_count or 1)))
+        request_count = min(step_limit, 3, needed)
     print(f"[gemini-bank] refill needed item_type={item_type} level={level} missing_fresh={needed} batch={request_count}")
     print(f"[gemini-bank] refill start item_type={item_type} level={level} count={request_count} timeout={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
     try:
-        exclude_limit = 240 if int(duplicate_streak or 0) >= 6 else 180 if int(duplicate_streak or 0) >= 3 else 120
-        exclude_keys = sorted(set(gemini_bank_existing_keys(item_type, level, limit=exclude_limit)) | set(recent_used_keys or []))
+        exclude_keys = sorted(set(gemini_bank_existing_keys(item_type, level, limit=50)))[:50]
+        print(f"[gemini-cost] mode=light_refill item_type={item_type} level={level} requested={request_count}")
+        print(f"[gemini-cost] prompt_exclude_keys={len(exclude_keys)}")
         prompt = build_gemini_bank_prompt(item_type, level, request_count, exclude_keys=exclude_keys, strategy=strategy)
+        started = time.perf_counter()
         raw_text = call_gemini(prompt, timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS)
         items = parse_gemini_bank_items(item_type, level, raw_text)
         result = upsert_gemini_bank_items(items)
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
         inserted = int(result.get("inserted") or 0)
         skipped = int(result.get("skipped") or 0)
+        print(f"[gemini-cost] inserted={inserted} skipped={skipped} elapsed_ms={elapsed_ms}")
         if target_stock is not None:
             after_stock = gemini_bank_count_fresh_stock(item_type, level, recent_used_keys=recent_used_keys)
             after_active_total = gemini_bank_count_active_total(item_type, level)
@@ -5610,10 +5704,54 @@ def bank_rows_to_payload(rows):
     return payloads
 
 
+def gemini_bank_word_payload_to_material(payload):
+    item = normalize_gemini_vocab_item(payload, payload.get("jlpt_level") or payload.get("l") or "N5")
+    return {
+        "word": item.get("word", ""),
+        "reading": item.get("reading", ""),
+        "meaning": item.get("meaning", ""),
+        "part_of_speech": item.get("part_of_speech", ""),
+        "jlpt_level": item.get("jlpt_level", ""),
+        "category": item.get("category") or "general",
+        "source": "gemini_bank_light",
+        "normalized_key": item.get("normalized_key") or normalize_vocab_key(item.get("word")),
+        "example_sentence": simple_text(payload.get("example_sentence") or payload.get("example_japanese")),
+        "example_translation_zh": simple_text(payload.get("example_translation_zh") or payload.get("example_zh")),
+    }
+
+
+def gemini_bank_verb_payload_to_material(payload):
+    item = normalize_material_verb_schema(payload)
+    item["source"] = "gemini_bank_light"
+    item["normalized_key"] = item.get("normalized_key") or normalize_vocab_key(item.get("dictionary_form") or item.get("surface"))
+    return item
+
+
+def gemini_bank_grammar_payload_to_material(payload):
+    item = normalize_gemini_grammar_point(payload, payload.get("jlpt_level") or payload.get("l") or "N5")
+    meaning = item.get("meaning_zh", "")
+    item.update(
+        {
+            "source": "gemini_bank_light",
+            "usage_summary_zh": item.get("usage_summary_zh") or meaning,
+            "usage_detail_zh": item.get("usage_detail_zh") or "",
+            "example_japanese": item.get("example_japanese") or "",
+            "example_hiragana": item.get("example_hiragana") or "",
+            "example_zh": item.get("example_zh") or "",
+            "note_zh": item.get("note_zh") or "",
+            "learning_tip_zh": item.get("learning_tip_zh") or "",
+            "common_mistake_zh": item.get("common_mistake_zh") or "",
+            "usage_items": item.get("usage_items") if isinstance(item.get("usage_items"), list) else [],
+        }
+    )
+    return item
+
+
 def build_gemini_bank_material(settings, selected_words, selected_verbs, selected_grammar, level_quota, bank_refill):
-    vocab = bank_rows_to_payload(selected_words)
-    verbs = bank_rows_to_payload(selected_verbs)
-    grammar_points = bank_rows_to_payload(selected_grammar)
+    vocab = [gemini_bank_word_payload_to_material(item) for item in bank_rows_to_payload(selected_words)]
+    verbs = [gemini_bank_verb_payload_to_material(item) for item in bank_rows_to_payload(selected_verbs)]
+    grammar_points = [gemini_bank_grammar_payload_to_material(item) for item in bank_rows_to_payload(selected_grammar)]
+    print(f"[gemini-finalize] material_from_light_bank word={len(vocab)} verb={len(verbs)} grammar={len(grammar_points)}")
     grammar = {
         "title": (grammar_points[0].get("display_name") or grammar_points[0].get("title") or "Grammar") if grammar_points else "Grammar",
         "exp": grammar_points[0].get("meaning_zh", "") if grammar_points else "",
@@ -5644,6 +5782,8 @@ def build_gemini_bank_material(settings, selected_words, selected_verbs, selecte
             "ai_used": True,
             "fallback_used": False,
             "bank_enabled": True,
+            "bank_item_mode": "light",
+            "daily_enrichment_enabled": GEMINI_ENABLE_DAILY_ENRICHMENT,
             "level_quota": level_quota,
             "selected_counts_by_level": selected_counts_by_level,
             "bank_refill": bank_refill,
@@ -10198,7 +10338,13 @@ def normalize_material_verb_schema(item):
     generated_forms = conjugate_material_verb(surface, group_for_generation) if surface and group_for_generation else {}
     if isinstance(generated_forms, dict) and generated_forms:
         merged_forms = dict(generated_forms)
-        merged_forms.update({key: value for key, value in forms_source.items() if str(value or "").strip()})
+        merged_forms.update(
+            {
+                key: value
+                for key, value in forms_source.items()
+                if str(value or "").strip() and clean_verb_form(value) != NO_VERB_FORM
+            }
+        )
         forms_source = merged_forms
     verb_type = first_text(item, ["verb_type", "verb_group_label"]) or material_verb_type_label(group_for_generation or raw_group, surface)
     jlpt_level = first_text(item, ["jlpt_level", "target_level", "level"]) or "未標記"
