@@ -101,9 +101,15 @@ GEMINI_GENERATE_TIMEOUT_SECONDS = read_int_env("GEMINI_GENERATE_TIMEOUT_SECONDS"
 GEMINI_STAGE_TIMEOUT_SECONDS = read_int_env("GEMINI_STAGE_TIMEOUT_SECONDS", 18, 5, 25)
 GEMINI_BANK_STAGE_TIMEOUT_SECONDS = read_int_env("GEMINI_BANK_STAGE_TIMEOUT_SECONDS", 15, 5, 20)
 GEMINI_BANK_REFILL_BATCH_SIZE = read_int_env("GEMINI_BANK_REFILL_BATCH_SIZE", 3, 1, 3)
-GEMINI_BANK_LIGHT_WORD_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_WORD_BATCH_SIZE", 24, 20, 30)
-GEMINI_BANK_LIGHT_VERB_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_VERB_BATCH_SIZE", 12, 10, 15)
-GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE = read_int_env("GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE", 4, 3, 5)
+GEMINI_BANK_WORD_MAX_BATCH = 10
+GEMINI_BANK_WORD_TIMEOUT_RETRY_BATCH = 4
+GEMINI_BANK_VERB_MAX_BATCH = 4
+GEMINI_BANK_VERB_TIMEOUT_RETRY_BATCH = 2
+GEMINI_BANK_GRAMMAR_MAX_BATCH = 2
+GEMINI_BANK_GRAMMAR_TIMEOUT_RETRY_BATCH = 1
+GEMINI_BANK_SNS_MAX_BATCH = 8
+GEMINI_BANK_SNS_TIMEOUT_RETRY_BATCH = 4
+GEMINI_BANK_MAX_EXCLUDE_KEYS = 20
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
 GEMINI_BANK_MIN_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_VERB_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL", 10, 1, 100)
@@ -4714,14 +4720,15 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
         return {}
     if item_type == "word":
         word = simple_text(payload.get("w") or payload.get("word") or payload.get("surface") or payload.get("term"))
+        normalized_level = normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "word")
         return {
             **payload,
             "word": word,
             "reading": simple_text(payload.get("r") or payload.get("reading") or payload.get("reading_hiragana")),
             "meaning": simple_text(payload.get("m") or payload.get("meaning") or payload.get("meaning_zh")),
             "part_of_speech": simple_text(payload.get("p") or payload.get("part_of_speech") or payload.get("pos")),
-            "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "word"),
-            "category": simple_text(payload.get("c") or payload.get("category")) or "general",
+            "jlpt_level": normalized_level,
+            "category": simple_text(payload.get("c") or payload.get("category")) or ("approved_slang" if normalized_level == "SNS" else "general"),
             "normalized_key": normalize_vocab_key(payload.get("normalized_key") or word),
             "example_sentence": simple_text(payload.get("example_sentence")),
             "example_translation_zh": simple_text(payload.get("example_translation_zh") or payload.get("example_zh")),
@@ -4987,18 +4994,17 @@ def gemini_bank_refill_strategy(item_type, attempt_count=0, duplicate_streak=0):
 
 def build_gemini_bank_prompt(item_type, level, count, exclude_keys=None, strategy=None):
     if item_type == "word":
-        category = "approved_slang" if level == "SNS" else "general"
-        schema = [{"w": "", "r": "", "m": "", "p": "", "l": level, "c": category}]
+        schema = {"items": [{"w": "料理", "r": "りょうり", "m": "料理", "p": "名詞", "l": level}]}
         detail = "Generate approved SNS / casual Japanese expressions." if level == "SNS" else "Generate useful standard Japanese vocabulary for daily learning. Avoid mechanical business compounds."
     elif item_type == "verb":
-        schema = [{"d": "", "r": "", "m": "", "g": 1, "t": "", "l": level}]
+        schema = {"items": [{"d": "育てる", "r": "そだてる", "m": "培養、養育", "g": 2, "l": level}]}
         detail = "Generate real core Japanese verbs only. Avoid fake noun + suru compounds. Do not include conjugation tables."
     elif item_type == "grammar":
-        schema = [{"k": "", "t": "", "l": level, "m": "", "c": ""}]
+        schema = {"items": [{"k": "ようにする", "t": "ようにする", "m": "盡量做到", "l": level}]}
         detail = "Generate concise JLPT grammar points for daily learning. Do not include long explanations or examples."
     else:
         raise ValueError(f"unsupported_bank_item_type:{item_type}")
-    exclude = [str(key) for key in (exclude_keys or []) if key][:50]
+    exclude = [str(key) for key in (exclude_keys or []) if key][:GEMINI_BANK_MAX_EXCLUDE_KEYS]
     exclude_instruction = ""
     if exclude:
         exclude_instruction = (
@@ -5012,15 +5018,70 @@ def build_gemini_bank_prompt(item_type, level, count, exclude_keys=None, strateg
             f"{strategy.get('instruction')} "
         )
     return (
-        "Return a JSON array only. Do not use Markdown, comments, explanations, wrapper objects, or extra fields. "
+        "Return a JSON object only with an items array. Do not use Markdown, comments, explanations, or extra fields. "
         f"Generate exactly {count} compact {item_type} candidates for JLPT {level}. {detail} "
         f"{strategy_instruction}"
         "Readings must be hiragana. Meanings must be Traditional Chinese. No duplicates. No empty strings. "
         "Prioritize diverse, non-overlapping items that are different from previous outputs. "
         "Do not include example sentences, long grammar details, or conjugation tables. "
         f"{exclude_instruction} "
-        f"Array item schema: {json.dumps(schema, ensure_ascii=False)}"
+        f"Compact JSON schema: {json.dumps(schema, ensure_ascii=False)}"
     )
+
+
+def gemini_bank_response_schema(item_type, level, count):
+    item_properties = {
+        "word": {
+            "w": {"type": "STRING"},
+            "r": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "p": {"type": "STRING"},
+            "l": {"type": "STRING"},
+        },
+        "verb": {
+            "d": {"type": "STRING"},
+            "r": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "g": {"type": "INTEGER"},
+            "l": {"type": "STRING"},
+        },
+        "grammar": {
+            "k": {"type": "STRING"},
+            "t": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "l": {"type": "STRING"},
+        },
+    }.get(item_type)
+    if not item_properties:
+        return None
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "items": {
+                "type": "ARRAY",
+                "minItems": 1,
+                "maxItems": max(1, int(count or 1)),
+                "items": {
+                    "type": "OBJECT",
+                    "properties": item_properties,
+                    "required": list(item_properties.keys()),
+                },
+            }
+        },
+        "required": ["items"],
+    }
+
+
+def gemini_bank_max_output_tokens(item_type, request_count, timeout_count=0):
+    if item_type == "word":
+        base = 900
+    elif item_type == "verb":
+        base = 700
+    else:
+        base = 600
+    if int(timeout_count or 0) > 0:
+        base = int(base * 0.7)
+    return max(256, base)
 
 
 def parse_gemini_bank_json_safely(raw_text):
@@ -5148,14 +5209,28 @@ def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, re
     )
 
 
-def gemini_bank_light_refill_count(item_type, needed):
+def gemini_bank_light_refill_count(item_type, needed, level=None, timeout_count=0):
+    needed = max(1, int(needed or 1))
+    timeout_count = max(0, int(timeout_count or 0))
+    normalized_level = normalize_gemini_bank_level(level or "", item_type) if level else ""
+    if timeout_count > 0:
+        if item_type == "word" and normalized_level == "SNS":
+            return GEMINI_BANK_SNS_TIMEOUT_RETRY_BATCH
+        if item_type == "word":
+            return GEMINI_BANK_WORD_TIMEOUT_RETRY_BATCH
+        if item_type == "verb":
+            return GEMINI_BANK_VERB_TIMEOUT_RETRY_BATCH
+        if item_type == "grammar":
+            return GEMINI_BANK_GRAMMAR_TIMEOUT_RETRY_BATCH
     if item_type == "word":
-        return GEMINI_BANK_LIGHT_WORD_BATCH_SIZE
+        if normalized_level == "SNS":
+            return min(max(needed * 2, 5), GEMINI_BANK_SNS_MAX_BATCH)
+        return min(max(needed * 2, 4), GEMINI_BANK_WORD_MAX_BATCH)
     if item_type == "verb":
-        return GEMINI_BANK_LIGHT_VERB_BATCH_SIZE
+        return min(max(needed * 2, 3), GEMINI_BANK_VERB_MAX_BATCH)
     if item_type == "grammar":
-        return GEMINI_BANK_LIGHT_GRAMMAR_BATCH_SIZE
-    return max(1, int(needed or 1))
+        return min(max(needed, 1), GEMINI_BANK_GRAMMAR_MAX_BATCH)
+    return needed
 
 
 def ensure_gemini_bank_level_capacity_for_generation(
@@ -5167,6 +5242,7 @@ def ensure_gemini_bank_level_capacity_for_generation(
     target_stock=None,
     attempt_count=0,
     duplicate_streak=0,
+    timeout_count=0,
     recent_used_keys=None,
 ):
     ensure_gemini_item_bank_store()
@@ -5226,6 +5302,30 @@ def ensure_gemini_bank_level_capacity_for_generation(
         return {"before_unused": before, "requested": 0, "inserted": 0, "skipped": 0, "after_unused": before, "skipped_refill": True}
     if not GEMINI_API_KEY:
         raise RuntimeError("gemini_generation_not_available")
+    attempt_count = max(0, int(attempt_count or 0))
+    timeout_count = max(0, int(timeout_count or 0))
+    if target_stock is not None and attempt_count >= 2:
+        print(
+            f"[gemini-bank] stop refill item_type={item_type} level={level} "
+            f"reason=max_calls_reached attempts={attempt_count} fresh_stock={before} target_fresh={target}"
+        )
+        return {
+            "active_total": active_total if target_stock is not None else None,
+            "fresh_stock": before,
+            "target_fresh_stock": target,
+            "missing_count": max(0, int((target or 0) - before)),
+            "requested": 0,
+            "inserted": 0,
+            "skipped": 0,
+            "fresh_stock_after": before,
+            "pool_ready": True,
+            "continue_same_step": False,
+            "skipped_refill": True,
+            "warning": "gemini_bank_refill_stopped_after_retries",
+            "reason": "max_calls_reached",
+            "attempt_count": attempt_count,
+            "timeout_count": timeout_count,
+        }
     strategy = gemini_bank_refill_strategy(item_type, attempt_count=attempt_count, duplicate_streak=duplicate_streak)
     if strategy.get("strategy_rotated"):
         print(
@@ -5234,7 +5334,7 @@ def ensure_gemini_bank_level_capacity_for_generation(
             f"duplicate_streak={int(duplicate_streak or 0)}"
         )
     if target_stock is not None:
-        request_count = gemini_bank_light_refill_count(item_type, needed)
+        request_count = gemini_bank_light_refill_count(item_type, needed, level=level, timeout_count=timeout_count)
     else:
         step_limit = GEMINI_BANK_REFILL_BATCH_SIZE
         if requested_count is not None:
@@ -5243,12 +5343,20 @@ def ensure_gemini_bank_level_capacity_for_generation(
     print(f"[gemini-bank] refill needed item_type={item_type} level={level} missing_fresh={needed} batch={request_count}")
     print(f"[gemini-bank] refill start item_type={item_type} level={level} count={request_count} timeout={GEMINI_BANK_STAGE_TIMEOUT_SECONDS}")
     try:
-        exclude_keys = sorted(set(gemini_bank_existing_keys(item_type, level, limit=50)))[:50]
+        exclude_limit = 10 if timeout_count > 0 else GEMINI_BANK_MAX_EXCLUDE_KEYS
+        exclude_keys = sorted(set(gemini_bank_existing_keys(item_type, level, limit=exclude_limit)))[:exclude_limit]
         print(f"[gemini-cost] mode=light_refill item_type={item_type} level={level} requested={request_count}")
         print(f"[gemini-cost] prompt_exclude_keys={len(exclude_keys)}")
         prompt = build_gemini_bank_prompt(item_type, level, request_count, exclude_keys=exclude_keys, strategy=strategy)
         started = time.perf_counter()
-        raw_text = call_gemini(prompt, timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS)
+        max_output_tokens = gemini_bank_max_output_tokens(item_type, request_count, timeout_count=timeout_count)
+        raw_text = call_gemini(
+            prompt,
+            timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
+            response_mime_type="application/json",
+            response_schema=gemini_bank_response_schema(item_type, level, request_count),
+            max_output_tokens=max_output_tokens,
+        )
         items = parse_gemini_bank_items(item_type, level, raw_text)
         result = upsert_gemini_bank_items(items)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
@@ -5285,6 +5393,7 @@ def ensure_gemini_bank_level_capacity_for_generation(
                 "continue_same_step": False if grammar_warning else not pool_ready,
                 "skipped_refill": False,
                 "attempt_count": int(attempt_count or 0) + 1,
+                "timeout_count": timeout_count,
                 "duplicate_streak": int(duplicate_streak or 0) + 1 if inserted == 0 and skipped > 0 else 0,
                 "warning": warning,
                 "grammar_warning": grammar_warning,
@@ -6788,7 +6897,14 @@ def choose_gemini_failure_reason(failures):
     return next((item.get("error_type") for item in failures or [] if isinstance(item, dict) and item.get("error_type")), "unknown_error")
 
 
-def call_gemini(prompt, model_name=None, timeout_seconds=None):
+def call_gemini(
+    prompt,
+    model_name=None,
+    timeout_seconds=None,
+    response_mime_type=None,
+    response_schema=None,
+    max_output_tokens=None,
+):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
 
@@ -6798,7 +6914,17 @@ def call_gemini(prompt, model_name=None, timeout_seconds=None):
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model_name}:generateContent?key={GEMINI_API_KEY}"
     )
-    payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+    request_payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    generation_config = {}
+    if response_mime_type:
+        generation_config["responseMimeType"] = response_mime_type
+    if response_schema:
+        generation_config["responseSchema"] = response_schema
+    if max_output_tokens:
+        generation_config["maxOutputTokens"] = int(max_output_tokens)
+    if generation_config:
+        request_payload["generationConfig"] = generation_config
+    payload = json.dumps(request_payload).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=payload,
@@ -7535,6 +7661,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
     previous_refill = refill_cache.get(level) if isinstance(refill_cache.get(level), dict) else {}
     attempt_count = int(previous_refill.get("attempt_count") or 0)
     duplicate_streak = int(previous_refill.get("duplicate_streak") or 0)
+    timeout_count = int(previous_refill.get("timeout_count") or 0)
     target_stock = int(gemini_bank_target_stock(item_type, level, settings=settings))
     backfill_gemini_bank_usage_from_materials(material_date=job.get("material_date") or get_today_taipei_date())
     recent_usage = gemini_bank_recent_usage_keys(
@@ -7550,6 +7677,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             target_stock=target_stock,
             attempt_count=attempt_count,
             duplicate_streak=duplicate_streak,
+            timeout_count=timeout_count,
             recent_used_keys=recent_keys,
         )
         refill_cache[level] = refill
@@ -7595,6 +7723,8 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "strategy_rotated": bool(refill.get("strategy_rotated")),
             "duplicate_streak": refill.get("duplicate_streak"),
             "attempt_count": refill.get("attempt_count"),
+            "timeout_count": refill.get("timeout_count"),
+            "requested": refill.get("requested"),
             "completed_steps": completed_steps,
             "elapsed_ms": elapsed_ms,
         }, 200
@@ -7634,39 +7764,49 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             ), 200
         warning_code = "gemini_bank_refill_timeout" if reason == "timeout" else "gemini_bank_refill_failed"
         warnings = cache.get("warnings") if isinstance(cache.get("warnings"), list) else []
+        next_timeout_count = timeout_count + 1 if reason == "timeout" else timeout_count
+        stop_pool = item_type == "grammar" or (reason == "timeout" and next_timeout_count >= 2)
         warning_entry = {
             "warning": warning_code,
             "item_type": item_type,
             "jlpt_level": level,
             "reason": reason,
             "message": str(exc)[:240],
-            "continued": True,
+            "continued": not stop_pool,
+            "stopped_pool": stop_pool,
         }
         warnings.append(warning_entry)
         cache["warnings"] = warnings
         refill_cache = cache.get("refill") if isinstance(cache.get("refill"), dict) else {}
         current_stock = gemini_bank_count_fresh_stock(item_type, level, recent_used_keys=recent_keys)
         active_total = gemini_bank_count_active_total(item_type, level)
+        failed_requested = gemini_bank_light_refill_count(
+            item_type,
+            max(1, target_stock - current_stock),
+            level=level,
+            timeout_count=timeout_count,
+        )
         refill_cache[level] = {
             "warning": warning_code,
             "grammar_warning": "grammar_refill_best_effort_skipped" if item_type == "grammar" else "",
             "reason": reason,
             "message": str(exc)[:240],
             "continued": True,
-            "requested": int(requested_count or 0),
+            "requested": failed_requested,
             "fresh_stock": current_stock,
             "target_fresh_stock": target_stock,
             "active_total": active_total,
             "missing_count": max(0, target_stock - current_stock),
-            "pool_ready": item_type == "grammar",
-            "continue_same_step": item_type != "grammar",
+            "pool_ready": stop_pool,
+            "continue_same_step": not stop_pool,
             "attempt_count": attempt_count + 1,
             "duplicate_streak": duplicate_streak,
+            "timeout_count": next_timeout_count,
             "strategy": previous_refill.get("strategy"),
             "strategy_rotated": False,
         }
         cache["refill"] = refill_cache
-        if item_type == "grammar":
+        if stop_pool:
             update_gemini_generation_job(
                 job_id,
                 status="running",
@@ -7675,8 +7815,11 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
                 **{field_name: json.dumps(cache, ensure_ascii=False)},
             )
             completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
-            print(f"[gemini-bank] grammar best_effort skip item_type=grammar level={level} reason={reason}")
-            print(f"[gemini-step-runner] completed stage=refill item_type=grammar level={level} warning={warning_code}")
+            if item_type == "grammar":
+                print(f"[gemini-bank] grammar best_effort skip item_type=grammar level={level} reason={reason}")
+            else:
+                print(f"[gemini-bank] refill stopped item_type={item_type} level={level} reason={reason} timeout_count={next_timeout_count}")
+            print(f"[gemini-step-runner] completed stage=refill item_type={item_type} level={level} warning={warning_code}")
         else:
             update_gemini_generation_job(
                 job_id,
@@ -7685,7 +7828,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
                 error_message=message,
                 **{field_name: json.dumps(cache, ensure_ascii=False)},
             )
-            print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true")
+            print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true timeout_count={next_timeout_count}")
             print(f"[gemini-step-runner] continue after refill warning item_type={item_type} level={level}")
             completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
         return {
@@ -7696,19 +7839,22 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "jlpt_level": level,
             "warning": warning_code,
             "grammar_warning": "grammar_refill_best_effort_skipped" if item_type == "grammar" else "",
-            "continued": True,
-            "pool_ready": item_type == "grammar",
-            "continue_same_step": item_type != "grammar",
+            "continued": not stop_pool,
+            "pool_ready": stop_pool,
+            "continue_same_step": not stop_pool,
             "current_stock": current_stock,
             "target_stock": target_stock,
             "fresh_stock": current_stock,
             "target_fresh_stock": target_stock,
             "active_total": active_total,
             "missing_count": max(0, target_stock - current_stock),
+            "requested": failed_requested,
             "attempt_count": attempt_count + 1,
             "duplicate_streak": duplicate_streak,
+            "timeout_count": next_timeout_count,
             "strategy": previous_refill.get("strategy"),
             "strategy_rotated": False,
+            "stopped_pool": stop_pool,
             "completed_steps": completed_steps,
             "elapsed_ms": elapsed_ms,
         }, 200

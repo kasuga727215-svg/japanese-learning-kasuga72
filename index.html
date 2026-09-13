@@ -1447,6 +1447,7 @@
         console.log(`[gemini-ui] job_id initialized=${jobId}`);
         const steps = result.steps;
         const legacyStages = new Set(["vocab", "verbs", "grammar"]);
+        let geminiRefillCalls = 0;
         for (const step of steps) {
           if (!step || typeof step !== "object") {
             throw new Error("gemini_invalid_step_payload");
@@ -1476,11 +1477,15 @@
             );
             msg.innerText = stage === "finalize"
               ? "Gemini item bank: finalizing material..."
-              : `Gemini item bank: ${stepPayload.item_type || "refill"}:${stepPayload.jlpt_level || ""}...`;
+              : `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type || "refill"} ${stepPayload.jlpt_level || ""}`;
             result = await api("/api/generate/gemini-step", {
               method: "POST",
               body: JSON.stringify(stepPayload)
             });
+            const requestedBatch = Number(result.requested || result.refill?.requested || 0);
+            if (stage === "refill" && requestedBatch > 0) {
+              geminiRefillCalls += 1;
+            }
             repeatStep = Boolean(result.continue_same_step);
             if (result.grammar_warning) {
               repeatStep = false;
@@ -1501,12 +1506,14 @@
               );
             }
             if (repeatStep) {
-              const progressText = `Gemini item bank: ${stepPayload.item_type}:${stepPayload.jlpt_level} ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+              const progressText = `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type} ${stepPayload.jlpt_level}。本批要求：${requestedBatch || "-"} 筆。進度 ${result.current_stock || 0} / ${result.target_stock || "?"}`;
               msg.innerText = result.warning || result.strategy_rotated
-                ? `${progressText} - adjusting generation strategy and continuing...`
+                ? `${progressText}，正在降低批次或切換策略後繼續。`
                 : progressText;
               console.log(`[gemini-ui] retry same step job_id=${jobId} item_type=${stepPayload.item_type || ""} level=${stepPayload.jlpt_level || ""}`);
               await new Promise((resolve) => setTimeout(resolve, 500));
+            } else if (stage === "refill") {
+              msg.innerText = `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type || ""} ${stepPayload.jlpt_level || ""} 完成。本批要求：${requestedBatch || 0} 筆。`;
             }
           }
         }
