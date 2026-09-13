@@ -16,7 +16,7 @@ from collections import Counter
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -786,6 +786,18 @@ def taipei_iso_now():
 
 def utc_now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def make_json_safe(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {key: make_json_safe(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [make_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [make_json_safe(item) for item in value]
+    return value
 
 
 def local_selection_cooldown_sequence():
@@ -5391,7 +5403,7 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
     ensure_gemini_item_bank_store()
     now = utc_now_iso()
     daily_batch_id = simple_text(daily_batch_id)
-    generated_for_date = canonical_material_date(generated_for_date or "") if generated_for_date else None
+    generated_for_date = make_json_safe(canonical_material_date(generated_for_date or "")) if generated_for_date else None
     generated_source = simple_text(generated_source)
     inserted = 0
     skipped = 0
@@ -7961,7 +7973,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
 
     item_type = str(step.get("item_type") or "").strip().lower()
     settings = gemini_job_settings(job)
-    material_date = job.get("material_date") or get_today_taipei_date()
+    material_date = canonical_material_date(job.get("material_date") or get_today_taipei_date())
     daily_batch_id = job_id
     field_name = {"word": "vocab_json", "verb": "verbs_json", "grammar": "grammar_json"}[item_type]
     cache = gemini_job_json(job.get(field_name), {})
@@ -8036,6 +8048,33 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 ), 200
             if reason == "timeout" and not retry and not best_effort:
                 continue
+            if reason == "json_parse_error" and not best_effort:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                update_gemini_generation_job(
+                    job_id,
+                    status="failed",
+                    current_stage=f"daily_fresh:{pack_type}",
+                    error_message="gemini_json_parse_error",
+                )
+                print(
+                    "[gemini-bank] daily_fresh failed "
+                    f"job_id={job_id} pack={pack_type} item_type={item_type} "
+                    f"reason=json_parse_error elapsed_ms={elapsed_ms}"
+                )
+                return {
+                    "ok": False,
+                    "error": "gemini_json_parse_error",
+                    "reason": "json_parse_error",
+                    "job_id": job_id,
+                    "stage": "daily_fresh",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "retryable": True,
+                    "auto_retry": False,
+                    "continue_same_step": False,
+                    "message": "Gemini 未回傳合法 JSON，請稍後重試。",
+                    "elapsed_ms": elapsed_ms,
+                }, 200
             warning = "gemini_daily_fresh_timeout" if reason == "timeout" else "gemini_daily_fresh_failed"
             if best_effort:
                 print(f"[gemini-bank] daily_fresh best_effort skip pack={pack_type} reason={reason}")
@@ -8055,10 +8094,11 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         "generated_for_date": material_date,
     }
     cache["daily_fresh"] = pack_cache
+    cache = make_json_safe(cache)
     update_gemini_generation_job(
         job_id,
         current_stage=f"daily_fresh:{pack_type}_done",
-        **{field_name: json.dumps(cache, ensure_ascii=False)},
+        **{field_name: json.dumps(cache, ensure_ascii=False, default=str)},
     )
     completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
     elapsed_ms = round((time.perf_counter() - started) * 1000)
@@ -8146,10 +8186,11 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
         )
         refill_cache[level] = refill
         cache["refill"] = refill_cache
+        cache = make_json_safe(cache)
         update_gemini_generation_job(
             job_id,
             current_stage=f"{stage}_done",
-            **{field_name: json.dumps(cache, ensure_ascii=False)},
+            **{field_name: json.dumps(cache, ensure_ascii=False, default=str)},
         )
         next_stage = ""
         count = int(refill.get("inserted") or 0)
@@ -8270,13 +8311,14 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
             "strategy_rotated": False,
         }
         cache["refill"] = refill_cache
+        cache = make_json_safe(cache)
         if stop_pool:
             update_gemini_generation_job(
                 job_id,
                 status="running",
                 current_stage=f"{stage}_done",
                 error_message="",
-                **{field_name: json.dumps(cache, ensure_ascii=False)},
+                **{field_name: json.dumps(cache, ensure_ascii=False, default=str)},
             )
             completed_steps = mark_gemini_generation_step_completed(job_id, item_type, level)
             if item_type == "grammar":
@@ -8290,7 +8332,7 @@ def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, reque
                 status="running",
                 current_stage=f"{stage}_warning",
                 error_message=message,
-                **{field_name: json.dumps(cache, ensure_ascii=False)},
+                **{field_name: json.dumps(cache, ensure_ascii=False, default=str)},
             )
             print(f"[gemini-bank] refill warning item_type={item_type} level={level} error={reason} continued=true timeout_count={next_timeout_count}")
             print(f"[gemini-step-runner] continue after refill warning item_type={item_type} level={level}")
@@ -17306,6 +17348,12 @@ def api_generate():
 
 @app.post("/api/generate/gemini-step")
 def api_generate_gemini_step():
+    data = {}
+    job_id = ""
+    stage = ""
+    pack_type = ""
+    item_type = ""
+    jlpt_level = ""
     try:
         data = request.get_json(silent=True) or {}
         job_id = str(data.get("job_id") or "").strip()
@@ -17355,13 +17403,22 @@ def api_generate_gemini_step():
         payload, status_code = run_gemini_generation_stage(job_id, stage)
         return jsonify(payload), status_code
     except Exception as exc:
-        print(f"[gemini-stage] failed job_id=unknown stage=unknown error={exc}")
+        print(
+            "[gemini-stage] failed "
+            f"job_id={job_id or 'unknown'} stage={stage or 'unknown'} "
+            f"pack_type={pack_type or ''} item_type={item_type or ''} "
+            f"level={jlpt_level or ''} error={exc}"
+        )
         print(traceback.format_exc())
         return jsonify(
             {
                 "ok": False,
                 "error": "gemini_stage_failed",
-                "stage": "unknown",
+                "job_id": job_id,
+                "stage": stage or "unknown",
+                "pack_type": pack_type,
+                "item_type": item_type,
+                "jlpt_level": jlpt_level,
                 "reason": str(exc),
             }
         ), 200
