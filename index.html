@@ -698,7 +698,9 @@
           ? "Gemini 回傳 JSON 被截斷，請稍後重試。"
           : data?.error === "gemini_json_parse_error"
             ? "Gemini 未回傳合法 JSON，請稍後重試。"
-            : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+            : data?.error === "gemini_bank_insufficient"
+              ? "題庫不足，而且本次沒有成功取得 Gemini 新鮮資料。請查看 Render Logs 中是否有 daily_fresh_call。"
+              : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
       const error = new Error(message);
       error.apiPayload = data;
       error.apiError = data?.error || "";

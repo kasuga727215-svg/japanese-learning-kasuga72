@@ -8536,9 +8536,13 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         )
         if len(selected_words) < requested_words:
             print(f"[gemini-finalize] insufficient item_type=word selected={len(selected_words)} requested={requested_words}")
+            print("[gemini-flow] bank_insufficient_at=finalize")
+            print(f"[gemini-flow] reason=word selected={len(selected_words)} requested={requested_words}")
             raise ValueError("gemini_bank_insufficient:word")
         if len(selected_verbs) < requested_verbs:
             print(f"[gemini-finalize] insufficient item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
+            print("[gemini-flow] bank_insufficient_at=finalize")
+            print(f"[gemini-flow] reason=verb selected={len(selected_verbs)} requested={requested_verbs}")
             raise ValueError("gemini_bank_insufficient:verb")
         bank_refill = {
             "word": vocab_stage.get("daily_fresh", {}) if isinstance(vocab_stage, dict) else {},
@@ -8667,6 +8671,9 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         )
         message = f"{reason}:{str(exc)[:240]}"
         update_gemini_generation_job(job_id, status="failed", current_stage="finalize", error_message=message)
+        if error_code == "gemini_bank_insufficient":
+            print("[gemini-flow] bank_insufficient_at=finalize")
+            print(f"[gemini-flow] reason={str(exc)[:240]}")
         print(f"[gemini-stage] failed job_id={job_id} stage=finalize error={message} elapsed_ms={elapsed_ms}")
         return {
             "ok": False,
@@ -17136,6 +17143,7 @@ def api_generate():
             if normalized_mode == "gemini":
                 print("[material-generator] mode=gemini start")
                 print("[feature-boundary] daily_material mode=gemini use gemini item bank")
+                print("[gemini-flow] mode=daily_fresh_jit start")
                 settings, settings_source, _db_settings = resolve_generation_settings_with_trace(data, persist=bool(data))
                 backfill_stats = backfill_gemini_bank_usage_from_materials(material_date=get_today_taipei_date())
                 recent_usage = gemini_bank_recent_usage_keys(
@@ -17145,6 +17153,9 @@ def api_generate():
                 stages = gemini_bank_stage_plan(settings)
                 steps = gemini_bank_step_plan(settings, recent_usage=recent_usage)
                 job = create_gemini_generation_job(settings, material_date=get_today_taipei_date(), planned_steps=steps)
+                print(f"[gemini-flow] daily_batch_id={job['job_id']}")
+                print(f"[gemini-flow] plan_created steps={steps}")
+                print("[gemini-flow] legacy_bank_precheck_skipped=true")
                 return jsonify(
                     {
                         "ok": True,
@@ -17407,6 +17418,7 @@ def api_generate_gemini_step():
             return jsonify(payload), status_code
         if stage == "daily_fresh":
             pack_type = str(data.get("pack_type") or "").strip().lower()
+            print(f"[gemini-flow] executing daily_fresh pack={pack_type}")
             payload, status_code = run_gemini_daily_fresh_pack(job_id, pack_type)
             return jsonify(payload), status_code
         if stage == "refill":
