@@ -694,7 +694,11 @@
     if (!res.ok || (data && data.ok === false)) {
       const message = data?.error === "gemini_quota_exceeded"
         ? "Gemini API 額度或本月支出上限已達到，請到 Google AI Studio / Google Cloud 調整額度，或等下個月重置後再生成。"
-        : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+        : data?.error === "gemini_json_truncated"
+          ? "Gemini 回傳 JSON 被截斷，請稍後重試。"
+          : data?.error === "gemini_json_parse_error"
+            ? "Gemini 未回傳合法 JSON，請稍後重試。"
+            : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
       const error = new Error(message);
       error.apiPayload = data;
       error.apiError = data?.error || "";
