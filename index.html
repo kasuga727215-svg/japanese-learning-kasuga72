@@ -700,7 +700,11 @@
             ? "Gemini 未回傳合法 JSON，請稍後重試。"
             : data?.error === "gemini_bank_insufficient"
               ? "題庫不足，而且本次沒有成功取得 Gemini 新鮮資料。請查看 Render Logs 中是否有 daily_fresh_call。"
-              : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
+              : data?.error === "daily_fresh_items_not_persisted"
+                ? "Gemini 有回傳資料，但今日批次沒有成功寫入題庫。請查看 Render Logs 的 daily_fresh parsed / upserted / daily_batch_summary。"
+                : data?.error === "daily_fresh_items_invalid"
+                  ? "Gemini 有回傳資料，但欄位格式無法轉成題庫資料。請查看 Render Logs 的 daily_fresh parsed / normalized。"
+                : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
       const error = new Error(message);
       error.apiPayload = data;
       error.apiError = data?.error || "";

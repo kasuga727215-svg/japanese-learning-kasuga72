@@ -4850,7 +4850,7 @@ def gemini_bank_item_from_payload(item_type, payload, fallback_level):
         "normalized_key": key,
         "display_text": display,
         "reading": reading,
-        "jlpt_level": normalize_gemini_level(level, fallback_level),
+        "jlpt_level": normalize_gemini_bank_level(level, item_type, fallback_level),
         "category": category,
         "source": "gemini_bank_light",
         "status": "unused",
@@ -5382,7 +5382,7 @@ def parse_gemini_bank_json_safely(raw_text):
     raise ValueError("Gemini did not return JSON for bank items.")
 
 
-def parse_gemini_bank_items(item_type, level, raw_text):
+def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
     try:
         parsed = parse_gemini_bank_json_safely(raw_text)
     except Exception as exc:
@@ -5397,18 +5397,28 @@ def parse_gemini_bank_items(item_type, level, raw_text):
         raise ValueError("invalid_bank_items")
     items = []
     seen = set()
+    stats = {"parsed": len(raw_items), "valid": 0, "invalid": 0, "duplicate": 0}
     for raw in raw_items:
         if not isinstance(raw, dict):
+            stats["invalid"] += 1
             continue
         try:
             bank_item = gemini_bank_item_from_payload(item_type, raw, level)
         except ValueError:
+            stats["invalid"] += 1
             continue
         key = bank_item["normalized_key"]
         if key in seen:
+            stats["duplicate"] += 1
             continue
         seen.add(key)
         items.append(bank_item)
+        stats["valid"] += 1
+    return items, stats
+
+
+def parse_gemini_bank_items(item_type, level, raw_text):
+    items, _stats = parse_gemini_bank_items_with_stats(item_type, level, raw_text)
     if not items:
         raise ValueError("empty_bank_items")
     return items
@@ -5416,7 +5426,7 @@ def parse_gemini_bank_items(item_type, level, raw_text):
 
 def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, generated_source=""):
     if not items:
-        return {"inserted": 0, "skipped": 0}
+        return {"inserted": 0, "skipped": 0, "duplicate": 0}
     ensure_gemini_item_bank_store()
     now = utc_now_iso()
     daily_batch_id = simple_text(daily_batch_id)
@@ -5424,10 +5434,16 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
     generated_source = simple_text(generated_source)
     inserted = 0
     skipped = 0
+    duplicate = 0
     if DATABASE_URL:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 for item in items:
+                    cur.execute(
+                        "SELECT 1 FROM gemini_item_bank WHERE item_type = %s AND normalized_key = %s",
+                        (item["item_type"], item["normalized_key"]),
+                    )
+                    existed = cur.fetchone() is not None
                     cur.execute(
                         """
                         INSERT INTO gemini_item_bank (
@@ -5436,7 +5452,21 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                             daily_batch_id, generated_for_date, generated_source
                         )
                         VALUES (%s, %s, %s, %s, %s, %s, %s, 'unused', %s, 0, NULL, NULL, %s, %s, %s, %s, %s)
-                        ON CONFLICT (item_type, normalized_key) DO NOTHING
+                        ON CONFLICT (item_type, normalized_key) DO UPDATE SET
+                            display_text = EXCLUDED.display_text,
+                            reading = EXCLUDED.reading,
+                            jlpt_level = EXCLUDED.jlpt_level,
+                            category = EXCLUDED.category,
+                            source = EXCLUDED.source,
+                            status = CASE
+                                WHEN gemini_item_bank.status = 'rejected' THEN gemini_item_bank.status
+                                ELSE 'unused'
+                            END,
+                            payload_json = EXCLUDED.payload_json,
+                            updated_at = EXCLUDED.updated_at,
+                            daily_batch_id = EXCLUDED.daily_batch_id,
+                            generated_for_date = EXCLUDED.generated_for_date,
+                            generated_source = EXCLUDED.generated_source
                         """,
                         (
                             item["item_type"],
@@ -5454,22 +5484,42 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                             generated_source,
                         ),
                     )
-                    if cur.rowcount:
-                        inserted += 1
-                    else:
+                    if existed:
+                        duplicate += 1
                         skipped += 1
+                    else:
+                        inserted += 1
             conn.commit()
     else:
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             for item in items:
-                cur = conn.execute(
+                existed = conn.execute(
+                    "SELECT 1 FROM gemini_item_bank WHERE item_type = ? AND normalized_key = ?",
+                    (item["item_type"], item["normalized_key"]),
+                ).fetchone() is not None
+                conn.execute(
                     """
-                    INSERT OR IGNORE INTO gemini_item_bank (
+                    INSERT INTO gemini_item_bank (
                         item_type, normalized_key, display_text, reading, jlpt_level, category, source,
                         status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
                         daily_batch_id, generated_for_date, generated_source
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, 0, NULL, NULL, ?, ?, ?, ?, ?)
+                    ON CONFLICT(item_type, normalized_key) DO UPDATE SET
+                        display_text = excluded.display_text,
+                        reading = excluded.reading,
+                        jlpt_level = excluded.jlpt_level,
+                        category = excluded.category,
+                        source = excluded.source,
+                        status = CASE
+                            WHEN gemini_item_bank.status = 'rejected' THEN gemini_item_bank.status
+                            ELSE 'unused'
+                        END,
+                        payload_json = excluded.payload_json,
+                        updated_at = excluded.updated_at,
+                        daily_batch_id = excluded.daily_batch_id,
+                        generated_for_date = excluded.generated_for_date,
+                        generated_source = excluded.generated_source
                     """,
                     (
                         item["item_type"],
@@ -5487,12 +5537,13 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                         generated_source,
                     ),
                 )
-                if cur.rowcount:
-                    inserted += 1
-                else:
+                if existed:
+                    duplicate += 1
                     skipped += 1
+                else:
+                    inserted += 1
             conn.commit()
-    return {"inserted": inserted, "skipped": skipped}
+    return {"inserted": inserted, "skipped": skipped, "duplicate": duplicate}
 
 
 def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, requested_count=None):
@@ -5942,7 +5993,6 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
                           AND status = ANY(%s)
                           AND jlpt_level = %s
                           AND daily_batch_id = %s
-                          AND COALESCE(used_count, 0) = 0
                           {recent_clause}
                         ORDER BY created_at ASC, id ASC
                         LIMIT %s
@@ -5975,7 +6025,6 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
                       AND status IN ({",".join(["?"] * len(GEMINI_BANK_ACTIVE_STATUSES))})
                       AND jlpt_level = ?
                       AND daily_batch_id = ?
-                      AND COALESCE(used_count, 0) = 0
                       {recent_clause}
                     ORDER BY created_at ASC, id ASC
                     LIMIT ?
@@ -5993,6 +6042,49 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
             selected.extend(dict(row) for row in rows)
         print(f"[gemini-bank] select_daily_batch item_type={item_type} level={level} selected={len(rows)} batch={daily_batch_id}")
     return selected
+
+
+def gemini_daily_batch_summary(daily_batch_id):
+    ensure_gemini_item_bank_store()
+    daily_batch_id = simple_text(daily_batch_id)
+    summary = {"word": {}, "verb": {}, "grammar": {}}
+    if not daily_batch_id:
+        return summary
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT item_type, jlpt_level, COUNT(*)
+                    FROM gemini_item_bank
+                    WHERE daily_batch_id = %s
+                      AND item_type IN ('word', 'verb', 'grammar')
+                    GROUP BY item_type, jlpt_level
+                    """,
+                    (daily_batch_id,),
+                )
+                rows = cur.fetchall()
+        for item_type, level, count in rows:
+            if item_type in summary:
+                summary[item_type][level or "__empty__"] = int(count or 0)
+        return summary
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT item_type, jlpt_level, COUNT(*) AS count
+            FROM gemini_item_bank
+            WHERE daily_batch_id = ?
+              AND item_type IN ('word', 'verb', 'grammar')
+            GROUP BY item_type, jlpt_level
+            """,
+            (daily_batch_id,),
+        ).fetchall()
+    for row in rows:
+        item_type = row["item_type"]
+        if item_type in summary:
+            summary[item_type][row["jlpt_level"] or "__empty__"] = int(row["count"] or 0)
+    return summary
 
 
 def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, recent_used_keys=None, exclude_daily_batch_id=""):
@@ -8037,9 +8129,64 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 max_output_tokens=gemini_daily_pack_max_tokens(pack_type, retry=retry),
                 temperature=0,
             )
-            items = parse_gemini_bank_items(item_type, levels[0] if levels else settings.get("target_level", "N5"), raw_text)
+            items, parse_stats = parse_gemini_bank_items_with_stats(item_type, levels[0] if levels else settings.get("target_level", "N5"), raw_text)
+            print(f"[gemini-bank] daily_fresh parsed pack={pack_type} parsed={parse_stats.get('parsed', 0)}")
+            print(
+                f"[gemini-bank] daily_fresh normalized pack={pack_type} "
+                f"valid={parse_stats.get('valid', 0)} invalid={parse_stats.get('invalid', 0)} "
+                f"duplicate={parse_stats.get('duplicate', 0)}"
+            )
+            if not items:
+                if not best_effort:
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    update_gemini_generation_job(
+                        job_id,
+                        status="failed",
+                        current_stage=f"daily_fresh:{pack_type}",
+                        error_message="daily_fresh_items_invalid",
+                    )
+                    return {
+                        "ok": False,
+                        "error": "daily_fresh_items_invalid",
+                        "reason": "Gemini returned items but none passed schema normalization",
+                        "job_id": job_id,
+                        "stage": "daily_fresh",
+                        "pack_type": pack_type,
+                        "item_type": item_type,
+                        "parse_stats": parse_stats,
+                        "retryable": True,
+                        "auto_retry": False,
+                        "continue_same_step": False,
+                        "elapsed_ms": elapsed_ms,
+                    }, 200
+                raise ValueError("empty_bank_items")
             allowed_levels = set(levels)
             items = [item for item in items if item.get("jlpt_level") in allowed_levels]
+            if not items:
+                print(f"[gemini-bank] daily_fresh normalized pack={pack_type} valid=0 invalid_reason=missing_level")
+                if not best_effort:
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    update_gemini_generation_job(
+                        job_id,
+                        status="failed",
+                        current_stage=f"daily_fresh:{pack_type}",
+                        error_message="daily_fresh_items_invalid:missing_level",
+                    )
+                    return {
+                        "ok": False,
+                        "error": "daily_fresh_items_invalid",
+                        "reason": "Gemini returned items, but none matched the requested daily fresh levels",
+                        "job_id": job_id,
+                        "stage": "daily_fresh",
+                        "pack_type": pack_type,
+                        "item_type": item_type,
+                        "parse_stats": parse_stats,
+                        "retryable": True,
+                        "auto_retry": False,
+                        "continue_same_step": False,
+                        "elapsed_ms": elapsed_ms,
+                    }, 200
+                raise ValueError("empty_bank_items")
             result = upsert_gemini_bank_items(
                 items,
                 daily_batch_id=daily_batch_id,
@@ -8048,6 +8195,17 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             )
             inserted_total += int(result.get("inserted") or 0)
             skipped_total += int(result.get("skipped") or 0)
+            print(
+                f"[gemini-bank] daily_fresh upserted pack={pack_type} "
+                f"inserted={result.get('inserted', 0)} skipped={result.get('skipped', 0)} "
+                f"duplicate={result.get('duplicate', 0)}"
+            )
+            print(
+                f"[gemini-bank] daily_fresh tagged batch_id={daily_batch_id} "
+                f"generated_for_date={material_date}"
+            )
+            if int(result.get("inserted") or 0) == 0 and int(result.get("skipped") or 0) > 0:
+                print(f"[gemini-bank] daily_fresh duplicate pack={pack_type} duplicate={result.get('duplicate', 0)}")
             break
         except Exception as exc:
             reason = classify_gemini_daily_material_error(exc)
@@ -8413,6 +8571,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
     print(f"[gemini-stage] finalize job_id={job_id}")
     reserved = []
     finalize_warnings = []
+    daily_batch_summary = {}
     try:
         planned_steps = gemini_planned_refill_step_keys(job)
         completed_steps = gemini_completed_step_keys(job)
@@ -8457,6 +8616,13 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         print(f"[gemini-plan] verb_quota={verb_quota}")
         print(f"[gemini-plan] grammar_quota={grammar_quota}")
         daily_batch_id = job_id
+        daily_batch_summary = gemini_daily_batch_summary(daily_batch_id)
+        print(
+            f"[gemini-finalize] daily_batch_summary batch_id={daily_batch_id} "
+            f"word={daily_batch_summary.get('word', {})} "
+            f"verb={daily_batch_summary.get('verb', {})} "
+            f"grammar={daily_batch_summary.get('grammar', {})}"
+        )
         selected_words = select_gemini_bank_items_by_batch("word", word_quota, daily_batch_id, recent_used_keys=recent_word_keys)
         selected_verbs = select_gemini_bank_items_by_batch("verb", verb_quota, daily_batch_id, recent_used_keys=recent_verb_keys)
         selected_grammar = select_gemini_bank_items_by_batch("grammar", grammar_quota, daily_batch_id)
@@ -8474,9 +8640,13 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         verb_daily_deficit = max(0, requested_verbs - len(selected_verbs))
         if len(selected_words) < min(GEMINI_DAILY_WORD_MIN_FRESH, requested_words) or word_daily_deficit > 2:
             print(f"[gemini-finalize] insufficient_daily_fresh item_type=word selected={len(selected_words)} requested={requested_words}")
+            if sum((daily_batch_summary.get("word") or {}).values()) == 0:
+                raise ValueError("daily_fresh_items_not_persisted:word")
             raise ValueError("gemini_daily_fresh_insufficient:word")
         if len(selected_verbs) < min(GEMINI_DAILY_VERB_MIN_FRESH, requested_verbs) or verb_daily_deficit > 2:
             print(f"[gemini-finalize] insufficient_daily_fresh item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
+            if sum((daily_batch_summary.get("verb") or {}).values()) == 0:
+                raise ValueError("daily_fresh_items_not_persisted:verb")
             raise ValueError("gemini_daily_fresh_insufficient:verb")
         top_up = {
             "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
@@ -8663,6 +8833,9 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         reason = classify_gemini_daily_material_error(exc)
         error_code = (
+            "daily_fresh_items_not_persisted"
+            if "daily_fresh_items_not_persisted" in str(exc)
+            else
             "gemini_bank_insufficient"
             if "gemini_bank_insufficient" in str(exc)
             or "gemini_daily_fresh_insufficient" in str(exc)
@@ -8679,8 +8852,10 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "ok": False,
             "error": error_code,
             "stage": "finalize",
-            "reason": "daily fresh batch and fallback bank cannot safely satisfy requested word/verb count" if error_code == "gemini_bank_insufficient" else reason,
+            "reason": "Gemini returned data but no usable daily batch items were persisted" if error_code == "daily_fresh_items_not_persisted" else "daily fresh batch and fallback bank cannot safely satisfy requested word/verb count" if error_code == "gemini_bank_insufficient" else reason,
             "missing": [str(exc).split(":", 1)[1]] if error_code == "gemini_bank_insufficient" and ":" in str(exc) else [],
+            "job_id": job_id,
+            "pack_summary": {"daily_batch_summary": daily_batch_summary or gemini_daily_batch_summary(job_id)},
             "elapsed_ms": elapsed_ms,
         }, 200
 
