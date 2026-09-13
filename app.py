@@ -7990,7 +7990,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 response_mime_type="application/json",
                 response_schema=gemini_daily_pack_schema(item_type, requested_total),
                 max_output_tokens=gemini_daily_pack_max_tokens(pack_type, retry=retry),
-                temperature=0.2,
+                temperature=0,
             )
             items = parse_gemini_bank_items(item_type, levels[0] if levels else settings.get("target_level", "N5"), raw_text)
             allowed_levels = set(levels)
@@ -8023,9 +8023,17 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 ), 200
             if reason == "timeout" and not retry and not best_effort:
                 continue
+            if reason == "json_parse_error" and not retry and not best_effort:
+                raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
+                print(
+                    "[gemini-bank] daily_fresh retry_after_json_parse_error "
+                    f"job_id={job_id} pack={pack_type} item_type={item_type} "
+                    f"raw_excerpt={raw_excerpt}"
+                )
+                continue
             if reason == "json_parse_error" and not best_effort:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
-                raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:240]
+                raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
                 update_gemini_generation_job(
                     job_id,
                     status="failed",
