@@ -1469,21 +1469,23 @@
               throw new Error("missing_job_id");
             }
             const stepPayload = { job_id: jobId, ...step };
+            const isDailyFresh = stepPayload.stage === "daily_fresh";
             console.log(
               `[gemini-ui] running step job_id=${jobId} stage=${stepPayload.stage}` +
+              ` pack_type=${stepPayload.pack_type || ""}` +
               ` item_type=${stepPayload.item_type || ""}` +
               ` level=${stepPayload.jlpt_level || ""}` +
               ` repeat=${repeatCount}`
             );
             msg.innerText = stage === "finalize"
-              ? "Gemini item bank: finalizing material..."
-              : `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type || "refill"} ${stepPayload.jlpt_level || ""}`;
+              ? "正在整理今日教材..."
+              : `正在請 Gemini 生成今日新鮮教材... 本次 Gemini 呼叫：${geminiRefillCalls + 1} / 4。目前階段：${stepPayload.pack_type || stepPayload.item_type || "補庫"}`;
             result = await api("/api/generate/gemini-step", {
               method: "POST",
               body: JSON.stringify(stepPayload)
             });
             const requestedBatch = Number(result.requested || result.refill?.requested || 0);
-            if (stage === "refill" && requestedBatch > 0) {
+            if ((stage === "refill" || isDailyFresh) && requestedBatch > 0) {
               geminiRefillCalls += 1;
             }
             repeatStep = Boolean(result.continue_same_step);
@@ -1506,14 +1508,18 @@
               );
             }
             if (repeatStep) {
-              const progressText = `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type} ${stepPayload.jlpt_level}。本批要求：${requestedBatch || "-"} 筆。進度 ${result.current_stock || 0} / ${result.target_stock || "?"}`;
+              const progressText = isDailyFresh
+                ? `本次 Gemini 呼叫：${geminiRefillCalls} / 4。目前階段：${stepPayload.pack_type || stepPayload.item_type}。本批要求：${requestedBatch || "-"} 筆。`
+                : `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type} ${stepPayload.jlpt_level}。本批要求：${requestedBatch || "-"} 筆。進度 ${result.current_stock || 0} / ${result.target_stock || "?"}`;
               msg.innerText = result.warning || result.strategy_rotated
                 ? `${progressText}，正在降低批次或切換策略後繼續。`
                 : progressText;
               console.log(`[gemini-ui] retry same step job_id=${jobId} item_type=${stepPayload.item_type || ""} level=${stepPayload.jlpt_level || ""}`);
               await new Promise((resolve) => setTimeout(resolve, 500));
-            } else if (stage === "refill") {
-              msg.innerText = `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type || ""} ${stepPayload.jlpt_level || ""} 完成。本批要求：${requestedBatch || 0} 筆。`;
+            } else if (stage === "refill" || isDailyFresh) {
+              msg.innerText = isDailyFresh
+                ? `本次 Gemini 呼叫：${geminiRefillCalls} / 4。${stepPayload.pack_type || ""} 完成，本批要求：${requestedBatch || 0} 筆。`
+                : `本次 Gemini 補庫呼叫：${geminiRefillCalls} 次。目前補庫：${stepPayload.item_type || ""} ${stepPayload.jlpt_level || ""} 完成。本批要求：${requestedBatch || 0} 筆。`;
             }
           }
         }
@@ -1529,8 +1535,10 @@
         `word_count=${actualWords}/${requestedWords} verb_count=${actualVerbs}/${requestedVerbs}`
       );
       msg.className = "mt-3 success-text";
+      const topUp = result.top_up || {};
+      const fallbackTotal = ["word", "verb", "grammar"].reduce((sum, key) => sum + Number(topUp?.[key]?.added || 0), 0);
       msg.innerText = matched
-        ? `今日教材已成功從本地詞庫建立。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。`
+        ? `今日教材已生成。單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。${fallbackTotal ? "部分項目使用既有題庫補足。" : ""}`
         : `今日教材已建立，但內容未補滿：單字 ${actualWords} / ${requestedWords}，動詞 ${actualVerbs} / ${requestedVerbs}。請查看 Render Logs。`;
       currentMaterialData = null;
       await loadMaterialByDate(result.material_key || result.date || result.material_date, true, { viewMode: "today" });

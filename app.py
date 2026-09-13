@@ -110,6 +110,8 @@ GEMINI_BANK_GRAMMAR_TIMEOUT_RETRY_BATCH = 1
 GEMINI_BANK_SNS_MAX_BATCH = 8
 GEMINI_BANK_SNS_TIMEOUT_RETRY_BATCH = 4
 GEMINI_BANK_MAX_EXCLUDE_KEYS = 20
+GEMINI_DAILY_WORD_MIN_FRESH = 5
+GEMINI_DAILY_VERB_MIN_FRESH = 3
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
 GEMINI_BANK_MIN_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_VERB_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL", 10, 1, 100)
@@ -4334,10 +4336,18 @@ def gemini_refill_step_key(item_type, level):
     return f"{str(item_type or '').strip().lower()}:{normalize_gemini_bank_level(level, str(item_type or '').strip().lower())}"
 
 
+def gemini_daily_fresh_step_key(pack_type):
+    return f"daily_fresh:{str(pack_type or '').strip().lower()}"
+
+
 def gemini_step_key_from_payload(step):
     if not isinstance(step, dict):
         return ""
-    if str(step.get("stage") or "").strip().lower() != "refill":
+    stage = str(step.get("stage") or "").strip().lower()
+    if stage == "daily_fresh":
+        pack_type = str(step.get("pack_type") or "").strip().lower()
+        return gemini_daily_fresh_step_key(pack_type) if pack_type else ""
+    if stage != "refill":
         return ""
     item_type = str(step.get("item_type") or "").strip().lower()
     level = str(step.get("jlpt_level") or step.get("level") or "").strip().upper()
@@ -4390,10 +4400,13 @@ def gemini_bank_not_ready_pools(job, recent_usage=None):
 
 
 def mark_gemini_generation_step_completed(job_id, item_type, level):
+    return mark_gemini_generation_step_completed_key(job_id, gemini_refill_step_key(item_type, level))
+
+
+def mark_gemini_generation_step_completed_key(job_id, key):
     job = load_gemini_generation_job(job_id)
     if not job:
         return []
-    key = gemini_refill_step_key(item_type, level)
     completed = gemini_completed_step_keys(job)
     if key not in completed:
         completed.append(key)
@@ -4461,6 +4474,10 @@ def ensure_gemini_item_bank_store():
                     )
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_type_status_level ON gemini_item_bank(item_type, status, jlpt_level)")
                     cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_usage ON gemini_item_bank(item_type, used_count, created_at)")
+                    cur.execute("ALTER TABLE gemini_item_bank ADD COLUMN IF NOT EXISTS daily_batch_id TEXT NOT NULL DEFAULT ''")
+                    cur.execute("ALTER TABLE gemini_item_bank ADD COLUMN IF NOT EXISTS generated_for_date DATE")
+                    cur.execute("ALTER TABLE gemini_item_bank ADD COLUMN IF NOT EXISTS generated_source TEXT NOT NULL DEFAULT ''")
+                    cur.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_daily_batch ON gemini_item_bank(daily_batch_id, item_type, jlpt_level)")
                     cur.execute("UPDATE gemini_item_bank SET status = 'unused', updated_at = %s WHERE status = 'used'", (utc_now_iso(),))
                 conn.commit()
         else:
@@ -4490,6 +4507,14 @@ def ensure_gemini_item_bank_store():
                 )
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_type_status_level ON gemini_item_bank(item_type, status, jlpt_level)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_usage ON gemini_item_bank(item_type, used_count, created_at)")
+                columns = {row[1] for row in conn.execute("PRAGMA table_info(gemini_item_bank)").fetchall()}
+                if "daily_batch_id" not in columns:
+                    conn.execute("ALTER TABLE gemini_item_bank ADD COLUMN daily_batch_id TEXT NOT NULL DEFAULT ''")
+                if "generated_for_date" not in columns:
+                    conn.execute("ALTER TABLE gemini_item_bank ADD COLUMN generated_for_date TEXT")
+                if "generated_source" not in columns:
+                    conn.execute("ALTER TABLE gemini_item_bank ADD COLUMN generated_source TEXT NOT NULL DEFAULT ''")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_gemini_item_bank_daily_batch ON gemini_item_bank(daily_batch_id, item_type, jlpt_level)")
                 conn.execute("UPDATE gemini_item_bank SET status = 'unused', updated_at = ? WHERE status = 'used'", (utc_now_iso(),))
                 conn.commit()
         _GEMINI_BANK_SCHEMA_READY = True
@@ -4730,12 +4755,19 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
             "jlpt_level": normalized_level,
             "category": simple_text(payload.get("c") or payload.get("category")) or ("approved_slang" if normalized_level == "SNS" else "general"),
             "normalized_key": normalize_vocab_key(payload.get("normalized_key") or word),
-            "example_sentence": simple_text(payload.get("example_sentence")),
-            "example_translation_zh": simple_text(payload.get("example_translation_zh") or payload.get("example_zh")),
+            "example_sentence": simple_text(payload.get("ex") or payload.get("example_sentence") or payload.get("example_japanese")),
+            "example_translation_zh": simple_text(payload.get("ex_zh") or payload.get("example_translation_zh") or payload.get("example_zh")),
         }
     if item_type == "verb":
         surface = simple_text(payload.get("d") or payload.get("surface") or payload.get("dictionary_form") or payload.get("base_form"))
-        return {
+        forms = {}
+        if simple_text(payload.get("f_te")):
+            forms["te_form"] = simple_text(payload.get("f_te"))
+        if simple_text(payload.get("f_nai")):
+            forms["nai_form"] = simple_text(payload.get("f_nai"))
+        if simple_text(payload.get("f_ta")):
+            forms["ta_form"] = simple_text(payload.get("f_ta"))
+        expanded = {
             **payload,
             "surface": surface,
             "dictionary_form": surface,
@@ -4745,7 +4777,12 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
             "verb_type": simple_text(payload.get("t") or payload.get("verb_type")),
             "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "verb"),
             "normalized_key": normalize_vocab_key(payload.get("normalized_key") or surface),
+            "example_sentence": simple_text(payload.get("ex") or payload.get("example_sentence") or payload.get("example_japanese")),
+            "example_translation_zh": simple_text(payload.get("ex_zh") or payload.get("example_translation_zh") or payload.get("example_zh")),
         }
+        if forms:
+            expanded["forms"] = forms
+        return expanded
     if item_type == "grammar":
         title = simple_text(payload.get("t") or payload.get("title") or payload.get("display_name") or payload.get("grammar_key"))
         grammar_key = simple_text(payload.get("k") or payload.get("grammar_key")) or normalize_vocab_key(title)
@@ -4762,6 +4799,8 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
             "connection": connection,
             "structure_formula": connection,
             "usage_summary_zh": simple_text(payload.get("usage_summary_zh")) or meaning,
+            "example_japanese": simple_text(payload.get("ex") or payload.get("example_japanese")),
+            "example_zh": simple_text(payload.get("ex_zh") or payload.get("example_zh") or payload.get("example_translation_zh")),
         }
     return dict(payload)
 
@@ -5084,6 +5123,222 @@ def gemini_bank_max_output_tokens(item_type, request_count, timeout_count=0):
     return max(256, base)
 
 
+def quota_with_small_overage(quota, max_total, add_backup=True):
+    clean_quota = {level: max(0, int(count or 0)) for level, count in (quota or {}).items() if int(count or 0) > 0}
+    requested = dict(clean_quota)
+    if add_backup:
+        for level in clean_quota:
+            if sum(requested.values()) >= max_total:
+                break
+            requested[level] = requested.get(level, 0) + 1
+    while sum(requested.values()) > max_total and requested:
+        for level in reversed(list(requested.keys())):
+            if requested[level] > clean_quota.get(level, 0):
+                requested[level] -= 1
+                break
+        else:
+            break
+    return {level: count for level, count in requested.items() if count > 0}
+
+
+def gemini_daily_pack_steps(settings):
+    target_levels = settings_target_levels(settings)
+    jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
+    word_quota_all = build_level_quota(target_levels, int(settings.get("vocab_count") or 0), item_type="word")
+    verb_quota = build_level_quota(jlpt_levels, int(settings.get("verb_count") or 0), item_type="verb")
+    grammar_quota = fixed_grammar_quota_for_settings(settings)
+    steps = []
+
+    basic_quota = {level: word_quota_all[level] for level in ("N5", "N4") if word_quota_all.get(level)}
+    advanced_quota = {level: word_quota_all[level] for level in ("N3", "N2", "N1", "SNS") if word_quota_all.get(level)}
+    if basic_quota:
+        steps.append(
+            {
+                "stage": "daily_fresh",
+                "pack_type": "word_basic",
+                "item_type": "word",
+                "quota_by_level": basic_quota,
+                "requested_by_level": quota_with_small_overage(basic_quota, 6, add_backup=True),
+            }
+        )
+    if advanced_quota:
+        steps.append(
+            {
+                "stage": "daily_fresh",
+                "pack_type": "word_advanced",
+                "item_type": "word",
+                "quota_by_level": advanced_quota,
+                "requested_by_level": quota_with_small_overage(advanced_quota, 6, add_backup=True),
+            }
+        )
+    if verb_quota:
+        steps.append(
+            {
+                "stage": "daily_fresh",
+                "pack_type": "verb",
+                "item_type": "verb",
+                "quota_by_level": verb_quota,
+                "requested_by_level": quota_with_small_overage(verb_quota, 8, add_backup=True),
+            }
+        )
+    if grammar_quota:
+        steps.append(
+            {
+                "stage": "daily_fresh",
+                "pack_type": "grammar",
+                "item_type": "grammar",
+                "quota_by_level": grammar_quota,
+                "requested_by_level": quota_with_small_overage(grammar_quota, 5, add_backup=False),
+                "best_effort": True,
+            }
+        )
+    steps.append({"stage": "finalize"})
+    return steps
+
+
+def gemini_daily_pack_max_tokens(pack_type, retry=False):
+    base = 800 if pack_type == "grammar" else 1000 if pack_type == "verb" else 1200
+    if retry:
+        base = int(base * 0.7)
+    return max(400, base)
+
+
+def gemini_daily_pack_schema(item_type, max_items):
+    if item_type == "word":
+        properties = {
+            "type": {"type": "STRING"},
+            "level": {"type": "STRING"},
+            "w": {"type": "STRING"},
+            "r": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "p": {"type": "STRING"},
+            "ex": {"type": "STRING"},
+            "ex_zh": {"type": "STRING"},
+        }
+    elif item_type == "verb":
+        properties = {
+            "type": {"type": "STRING"},
+            "level": {"type": "STRING"},
+            "d": {"type": "STRING"},
+            "r": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "g": {"type": "INTEGER"},
+            "f_masu": {"type": "STRING"},
+            "f_te": {"type": "STRING"},
+            "f_nai": {"type": "STRING"},
+            "f_ta": {"type": "STRING"},
+            "ex": {"type": "STRING"},
+            "ex_zh": {"type": "STRING"},
+        }
+    else:
+        properties = {
+            "type": {"type": "STRING"},
+            "level": {"type": "STRING"},
+            "k": {"type": "STRING"},
+            "t": {"type": "STRING"},
+            "m": {"type": "STRING"},
+            "c": {"type": "STRING"},
+            "ex": {"type": "STRING"},
+            "ex_zh": {"type": "STRING"},
+        }
+    return {
+        "type": "OBJECT",
+        "properties": {
+            "items": {
+                "type": "ARRAY",
+                "minItems": 1,
+                "maxItems": max(1, int(max_items or 1)),
+                "items": {
+                    "type": "OBJECT",
+                    "properties": properties,
+                    "required": list(properties.keys()),
+                },
+            }
+        },
+        "required": ["items"],
+    }
+
+
+def gemini_daily_exclude_keys_by_level(item_type, levels, recent_keys=None, max_per_level=10):
+    recent = sorted({normalize_vocab_key(key) for key in (recent_keys or set()) if normalize_vocab_key(key)})
+    payload = {}
+    for level in levels:
+        existing = sorted(set(gemini_bank_existing_keys(item_type, level, limit=max_per_level)))
+        combined = []
+        for key in [*recent, *existing]:
+            if key and key not in combined:
+                combined.append(key)
+            if len(combined) >= max_per_level:
+                break
+        payload[level] = combined
+    return payload
+
+
+def build_gemini_daily_fresh_prompt(pack_type, item_type, requested_by_level, exclude_keys_by_level):
+    if item_type == "word":
+        schema = {
+            "items": [
+                {
+                    "type": "word",
+                    "level": "N5",
+                    "w": "料理",
+                    "r": "りょうり",
+                    "m": "料理",
+                    "p": "名詞",
+                    "ex": "日本の料理が好きです。",
+                    "ex_zh": "我喜歡日本料理。",
+                }
+            ]
+        }
+        detail = "Word examples must be natural Japanese and 15-20 Japanese characters at most. Chinese translations must be 20 characters at most."
+    elif item_type == "verb":
+        schema = {
+            "items": [
+                {
+                    "type": "verb",
+                    "level": "N4",
+                    "d": "育てる",
+                    "r": "そだてる",
+                    "m": "培養、養育",
+                    "g": 2,
+                    "f_masu": "育てます",
+                    "f_te": "育てて",
+                    "f_nai": "育てない",
+                    "f_ta": "育てた",
+                    "ex": "花を育てます。",
+                    "ex_zh": "我種花。",
+                }
+            ]
+        }
+        detail = "Generate real core verbs only. Include only the four basic forms f_masu, f_te, f_nai, f_ta. Do not include passive, causative, potential, volitional, or long explanations."
+    else:
+        schema = {
+            "items": [
+                {
+                    "type": "grammar",
+                    "level": "N4",
+                    "k": "ようにする",
+                    "t": "ようにする",
+                    "m": "盡量做到",
+                    "c": "動詞辞書形 / ない形 + ようにする",
+                    "ex": "毎日勉強するようにしています。",
+                    "ex_zh": "我盡量每天讀書。",
+                }
+            ]
+        }
+        detail = "Keep grammar concise. Do not generate usage_detail, common_mistake, markdown, or long explanations."
+    total = sum(int(value or 0) for value in (requested_by_level or {}).values())
+    return (
+        "Return JSON only, as an object with an items array. Do not use Markdown or extra text. "
+        f"Daily Fresh JIT pack={pack_type}. Generate exactly this quota_by_level: "
+        f"{json.dumps(requested_by_level, ensure_ascii=False)}. Total items={total}. "
+        f"{detail} Readings must be hiragana. Meanings and translations must be Traditional Chinese. "
+        "Every item must include its requested level exactly. Avoid duplicates. "
+        f"Exclude keys by level, max per level already limited: {json.dumps(exclude_keys_by_level, ensure_ascii=False)}. "
+        f"Compact schema: {json.dumps(schema, ensure_ascii=False)}"
+    )
+
+
 def parse_gemini_bank_json_safely(raw_text):
     cleaned = str(raw_text or "").strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE).strip()
@@ -5130,11 +5385,14 @@ def parse_gemini_bank_items(item_type, level, raw_text):
     return items
 
 
-def upsert_gemini_bank_items(items):
+def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, generated_source=""):
     if not items:
         return {"inserted": 0, "skipped": 0}
     ensure_gemini_item_bank_store()
     now = utc_now_iso()
+    daily_batch_id = simple_text(daily_batch_id)
+    generated_for_date = canonical_material_date(generated_for_date or "") if generated_for_date else None
+    generated_source = simple_text(generated_source)
     inserted = 0
     skipped = 0
     if DATABASE_URL:
@@ -5145,9 +5403,10 @@ def upsert_gemini_bank_items(items):
                         """
                         INSERT INTO gemini_item_bank (
                             item_type, normalized_key, display_text, reading, jlpt_level, category, source,
-                            status, payload_json, used_count, created_at, updated_at
+                            status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
+                            daily_batch_id, generated_for_date, generated_source
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'unused', %s, 0, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'unused', %s, 0, NULL, NULL, %s, %s, %s, %s, %s)
                         ON CONFLICT (item_type, normalized_key) DO NOTHING
                         """,
                         (
@@ -5161,6 +5420,9 @@ def upsert_gemini_bank_items(items):
                             item["payload_json"],
                             now,
                             now,
+                            daily_batch_id,
+                            generated_for_date,
+                            generated_source,
                         ),
                     )
                     if cur.rowcount:
@@ -5175,9 +5437,10 @@ def upsert_gemini_bank_items(items):
                     """
                     INSERT OR IGNORE INTO gemini_item_bank (
                         item_type, normalized_key, display_text, reading, jlpt_level, category, source,
-                        status, payload_json, used_count, created_at, updated_at
+                        status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
+                        daily_batch_id, generated_for_date, generated_source
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, 0, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, 0, NULL, NULL, ?, ?, ?, ?, ?)
                     """,
                     (
                         item["item_type"],
@@ -5190,6 +5453,9 @@ def upsert_gemini_bank_items(items):
                         item["payload_json"],
                         now,
                         now,
+                        daily_batch_id,
+                        generated_for_date,
+                        generated_source,
                     ),
                 )
                 if cur.rowcount:
@@ -5507,57 +5773,16 @@ def gemini_required_for_generation(settings, item_type, level):
 
 
 def gemini_bank_stage_plan(settings):
-    target_levels = settings_target_levels(settings)
-    jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
-    stages = []
-    stages.extend(f"word:{level}" for level in jlpt_levels)
-    if "SNS" in target_levels:
-        stages.append("word:SNS")
-    stages.extend(f"verb:{level}" for level in jlpt_levels)
-    stages.extend(f"grammar:{level}" for level in reversed(LEVELS))
-    stages.append("finalize")
-    return stages
+    return [
+        step.get("pack_type") or step.get("stage")
+        for step in gemini_daily_pack_steps(settings)
+        if isinstance(step, dict)
+    ]
 
 
 def gemini_bank_step_plan(settings, recent_usage=None):
+    steps = gemini_daily_pack_steps(settings)
     target_levels = settings_target_levels(settings)
-    jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
-    steps = []
-    def add_step(item_type, level):
-        normalized_level = normalize_gemini_bank_level(level, item_type)
-        target_stock = gemini_bank_target_stock(item_type, normalized_level, settings=settings)
-        fresh_stock = gemini_bank_count_fresh_stock(
-            item_type,
-            normalized_level,
-            recent_used_keys=gemini_bank_recent_keys_for_item_type(recent_usage, item_type),
-        )
-        active_total = gemini_bank_count_active_total(item_type, normalized_level)
-        missing_count = max(0, target_stock - fresh_stock)
-        steps.append(
-            {
-                "stage": "refill",
-                "item_type": item_type,
-                "jlpt_level": normalized_level,
-                "count": GEMINI_BANK_REFILL_BATCH_SIZE,
-                "target_stock": target_stock,
-                "target_fresh_stock": target_stock,
-                "fresh_stock": fresh_stock,
-                "active_total": active_total,
-                "current_stock": fresh_stock,
-                "missing_count": missing_count,
-                "attempt_count": 0,
-                "batch_size": min(3, GEMINI_BANK_REFILL_BATCH_SIZE),
-            }
-        )
-    for level in jlpt_levels:
-        add_step("word", level)
-    if "SNS" in target_levels:
-        add_step("word", "SNS")
-    for level in jlpt_levels:
-        add_step("verb", level)
-    for level in fixed_grammar_quota_for_settings(settings):
-        add_step("grammar", level)
-    steps.append({"stage": "finalize"})
     print(f"[gemini-plan] target_levels={','.join(target_levels)}")
     print(f"[gemini-plan] steps={steps}")
     return steps
@@ -5661,13 +5886,94 @@ def select_gemini_bank_items(item_type, quota, recent_used_keys=None):
     return selected
 
 
-def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, recent_used_keys=None):
+def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_used_keys=None):
+    ensure_gemini_item_bank_store()
+    selected = []
+    now = utc_now_iso()
+    daily_batch_id = simple_text(daily_batch_id)
+    recent_keys = gemini_bank_recent_keys_for_item_type({item_type: recent_used_keys or set()}, item_type)
+    if not daily_batch_id:
+        return []
+    for level, count in quota.items():
+        if int(count or 0) <= 0:
+            continue
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    recent_clause = "AND NOT (normalized_key = ANY(%s))" if recent_keys else ""
+                    params = [item_type, list(GEMINI_BANK_ACTIVE_STATUSES), level, daily_batch_id]
+                    if recent_keys:
+                        params.append(list(recent_keys))
+                    params.append(int(count))
+                    cur.execute(
+                        f"""
+                        SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                        FROM gemini_item_bank
+                        WHERE item_type = %s
+                          AND status = ANY(%s)
+                          AND jlpt_level = %s
+                          AND daily_batch_id = %s
+                          AND COALESCE(used_count, 0) = 0
+                          {recent_clause}
+                        ORDER BY created_at ASC, id ASC
+                        LIMIT %s
+                        """,
+                        tuple(params),
+                    )
+                    rows = cur.fetchall()
+                    ids = [row[0] for row in rows]
+                    if ids:
+                        cur.execute(
+                            "UPDATE gemini_item_bank SET status = 'reserved', updated_at = %s WHERE id = ANY(%s)",
+                            (now, ids),
+                        )
+                conn.commit()
+            keys = ["id", "item_type", "normalized_key", "display_text", "reading", "jlpt_level", "category", "source", "payload_json"]
+            selected.extend(dict(zip(keys, row)) for row in rows)
+        else:
+            recent_clause = ""
+            recent_params = []
+            if recent_keys:
+                recent_clause = f"AND normalized_key NOT IN ({','.join(['?'] * len(recent_keys))})"
+                recent_params = list(recent_keys)
+            with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    f"""
+                    SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                    FROM gemini_item_bank
+                    WHERE item_type = ?
+                      AND status IN ({",".join(["?"] * len(GEMINI_BANK_ACTIVE_STATUSES))})
+                      AND jlpt_level = ?
+                      AND daily_batch_id = ?
+                      AND COALESCE(used_count, 0) = 0
+                      {recent_clause}
+                    ORDER BY created_at ASC, id ASC
+                    LIMIT ?
+                    """,
+                    (item_type, *GEMINI_BANK_ACTIVE_STATUSES, level, daily_batch_id, *recent_params, int(count)),
+                ).fetchall()
+                ids = [row["id"] for row in rows]
+                if ids:
+                    placeholders = ",".join(["?"] * len(ids))
+                    conn.execute(
+                        f"UPDATE gemini_item_bank SET status = 'reserved', updated_at = ? WHERE id IN ({placeholders})",
+                        (now, *ids),
+                    )
+                conn.commit()
+            selected.extend(dict(row) for row in rows)
+        print(f"[gemini-bank] select_daily_batch item_type={item_type} level={level} selected={len(rows)} batch={daily_batch_id}")
+    return selected
+
+
+def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, recent_used_keys=None, exclude_daily_batch_id=""):
     ensure_gemini_item_bank_store()
     limit = max(0, int(deficit or 0))
     if limit <= 0:
         return []
     excluded = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
     excluded.update(gemini_bank_recent_keys_for_item_type({item_type: recent_used_keys or set()}, item_type))
+    exclude_daily_batch_id = simple_text(exclude_daily_batch_id)
     now = utc_now_iso()
     fresh_clause_pg = "" if GEMINI_BANK_ALLOW_RECENT_REUSE else "AND (COALESCE(used_count, 0) = 0 OR last_used_at IS NULL)"
     fresh_clause_sqlite = fresh_clause_pg
@@ -5675,9 +5981,12 @@ def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, rece
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 excluded_clause = "AND NOT (normalized_key = ANY(%s))" if excluded else ""
+                batch_clause = "AND COALESCE(daily_batch_id, '') <> %s" if exclude_daily_batch_id else ""
                 params = [item_type, list(GEMINI_BANK_ACTIVE_STATUSES), LEVELS]
                 if excluded:
                     params.append(list(excluded))
+                if exclude_daily_batch_id:
+                    params.append(exclude_daily_batch_id)
                 params.append(limit)
                 cur.execute(
                     f"""
@@ -5688,6 +5997,7 @@ def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, rece
                       AND jlpt_level = ANY(%s)
                       {fresh_clause_pg}
                       {excluded_clause}
+                      {batch_clause}
                     ORDER BY (last_used_at IS NOT NULL) ASC, last_used_at ASC, used_count ASC, created_at ASC, id ASC
                     LIMIT %s
                     """,
@@ -5714,6 +6024,10 @@ def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, rece
                 excluded_placeholders = ",".join(["?"] * len(excluded))
                 excluded_clause = f"AND normalized_key NOT IN ({excluded_placeholders})"
                 params.extend(list(excluded))
+            batch_clause = ""
+            if exclude_daily_batch_id:
+                batch_clause = "AND COALESCE(daily_batch_id, '') <> ?"
+                params.append(exclude_daily_batch_id)
             params.append(limit)
             rows = conn.execute(
                 f"""
@@ -5724,6 +6038,7 @@ def select_gemini_bank_top_up_items(item_type, deficit, excluded_keys=None, rece
                   AND jlpt_level IN ({level_placeholders})
                   {fresh_clause_sqlite}
                   {excluded_clause}
+                  {batch_clause}
                 ORDER BY (last_used_at IS NOT NULL) ASC, last_used_at ASC, used_count ASC, created_at ASC, id ASC
                 LIMIT ?
                 """,
@@ -6904,6 +7219,7 @@ def call_gemini(
     response_mime_type=None,
     response_schema=None,
     max_output_tokens=None,
+    temperature=None,
 ):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
@@ -6922,6 +7238,8 @@ def call_gemini(
         generation_config["responseSchema"] = response_schema
     if max_output_tokens:
         generation_config["maxOutputTokens"] = int(max_output_tokens)
+    if temperature is not None:
+        generation_config["temperature"] = float(temperature)
     if generation_config:
         request_payload["generationConfig"] = generation_config
     payload = json.dumps(request_payload).encode("utf-8")
@@ -7616,6 +7934,152 @@ def gemini_job_settings(job):
     return normalize_settings(settings if isinstance(settings, dict) else {})
 
 
+def run_gemini_daily_fresh_pack(job_id, pack_type):
+    job = load_gemini_generation_job(job_id)
+    if not job:
+        return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
+    pack_type = str(pack_type or "").strip().lower()
+    steps = gemini_job_json(job.get("planned_steps_json"), [])
+    step = next(
+        (
+            item
+            for item in steps
+            if isinstance(item, dict)
+            and str(item.get("stage") or "").strip().lower() == "daily_fresh"
+            and str(item.get("pack_type") or "").strip().lower() == pack_type
+        ),
+        None,
+    )
+    if not step:
+        return {"ok": False, "error": "gemini_unplanned_step_rejected", "reason": "daily fresh pack is not planned", "pack_type": pack_type}, 200
+    if not GEMINI_API_KEY:
+        return {
+            "ok": False,
+            "error": "gemini_generation_not_available",
+            "reason": "Gemini daily material generator is not configured",
+        }, 200
+
+    item_type = str(step.get("item_type") or "").strip().lower()
+    settings = gemini_job_settings(job)
+    material_date = job.get("material_date") or get_today_taipei_date()
+    daily_batch_id = job_id
+    field_name = {"word": "vocab_json", "verb": "verbs_json", "grammar": "grammar_json"}[item_type]
+    cache = gemini_job_json(job.get(field_name), {})
+    if not isinstance(cache, dict):
+        cache = {}
+    pack_cache = cache.get("daily_fresh") if isinstance(cache.get("daily_fresh"), dict) else {}
+    started = time.perf_counter()
+    update_gemini_generation_job(job_id, status="running", current_stage=f"daily_fresh:{pack_type}", error_message="")
+
+    recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_BANK_RECENT_EXCLUSION_DAYS, material_date=material_date)
+    recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
+    requested_by_level = {str(level): int(count or 0) for level, count in (step.get("requested_by_level") or {}).items() if int(count or 0) > 0}
+    levels = list(requested_by_level.keys())
+    best_effort = bool(step.get("best_effort"))
+    max_attempts = 1 if best_effort else 2
+    inserted_total = 0
+    skipped_total = 0
+    last_error = ""
+    warning = ""
+    requested_total = sum(requested_by_level.values())
+
+    for attempt_index in range(max_attempts):
+        retry = attempt_index > 0
+        per_level_exclude_limit = 5 if retry else 10
+        call_quota = requested_by_level
+        if retry:
+            call_quota = quota_with_small_overage(step.get("quota_by_level") or requested_by_level, 5 if item_type == "verb" else 8 if item_type == "word" else 5, add_backup=False)
+        requested_total = sum(call_quota.values())
+        exclude_by_level = gemini_daily_exclude_keys_by_level(item_type, levels, recent_keys=recent_keys, max_per_level=per_level_exclude_limit)
+        prompt = build_gemini_daily_fresh_prompt(pack_type, item_type, call_quota, exclude_by_level)
+        print(f"[gemini-cost] daily_fresh_call type={pack_type} requested={requested_total}")
+        print(f"[gemini-cost] exclude_keys_by_level max_per_level={per_level_exclude_limit}")
+        if retry:
+            print("[gemini-cost] timeout_retry reduced=true")
+        try:
+            raw_text = call_gemini(
+                prompt,
+                timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
+                response_mime_type="application/json",
+                response_schema=gemini_daily_pack_schema(item_type, requested_total),
+                max_output_tokens=gemini_daily_pack_max_tokens(pack_type, retry=retry),
+                temperature=0.2,
+            )
+            items = parse_gemini_bank_items(item_type, levels[0] if levels else settings.get("target_level", "N5"), raw_text)
+            allowed_levels = set(levels)
+            items = [item for item in items if item.get("jlpt_level") in allowed_levels]
+            result = upsert_gemini_bank_items(
+                items,
+                daily_batch_id=daily_batch_id,
+                generated_for_date=material_date,
+                generated_source="daily_fresh_jit",
+            )
+            inserted_total += int(result.get("inserted") or 0)
+            skipped_total += int(result.get("skipped") or 0)
+            break
+        except Exception as exc:
+            reason = classify_gemini_daily_material_error(exc)
+            last_error = f"{reason}:{str(exc)[:240]}"
+            if reason in {"quota_exceeded", "prepayment_depleted"}:
+                update_gemini_generation_job(
+                    job_id,
+                    status="failed",
+                    current_stage=f"daily_fresh:{pack_type}",
+                    error_message="gemini_quota_exceeded",
+                )
+                return gemini_quota_exceeded_payload(
+                    job_id=job_id,
+                    stage=f"daily_fresh:{pack_type}",
+                    item_type=item_type,
+                    level=",".join(levels),
+                    elapsed_ms=round((time.perf_counter() - started) * 1000),
+                ), 200
+            if reason == "timeout" and not retry and not best_effort:
+                continue
+            warning = "gemini_daily_fresh_timeout" if reason == "timeout" else "gemini_daily_fresh_failed"
+            if best_effort:
+                print(f"[gemini-bank] daily_fresh best_effort skip pack={pack_type} reason={reason}")
+                break
+            print(f"[gemini-bank] daily_fresh warning pack={pack_type} reason={reason}")
+            break
+
+    pack_cache[pack_type] = {
+        "item_type": item_type,
+        "requested_by_level": requested_by_level,
+        "requested": requested_total,
+        "inserted": inserted_total,
+        "skipped": skipped_total,
+        "warning": warning,
+        "last_error": last_error,
+        "daily_batch_id": daily_batch_id,
+        "generated_for_date": material_date,
+    }
+    cache["daily_fresh"] = pack_cache
+    update_gemini_generation_job(
+        job_id,
+        current_stage=f"daily_fresh:{pack_type}_done",
+        **{field_name: json.dumps(cache, ensure_ascii=False)},
+    )
+    completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
+    elapsed_ms = round((time.perf_counter() - started) * 1000)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "daily_batch_id": daily_batch_id,
+        "stage": "daily_fresh",
+        "pack_type": pack_type,
+        "item_type": item_type,
+        "requested": requested_total,
+        "inserted": inserted_total,
+        "skipped": skipped_total,
+        "warning": warning,
+        "continued": False,
+        "continue_same_step": False,
+        "completed_steps": completed_steps,
+        "elapsed_ms": elapsed_ms,
+    }, 200
+
+
 def run_gemini_generation_stage(job_id, stage, item_type=None, level=None, requested_count=None):
     job = load_gemini_generation_job(job_id)
     if not job:
@@ -7879,8 +8343,12 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         planned_steps = gemini_planned_refill_step_keys(job)
         completed_steps = gemini_completed_step_keys(job)
         missing_steps = [step for step in planned_steps if step not in completed_steps]
-        missing_required_steps = [step for step in missing_steps if not step.startswith("grammar:")]
-        missing_grammar_steps = [step for step in missing_steps if step.startswith("grammar:")]
+        missing_required_steps = [
+            step
+            for step in missing_steps
+            if not step.startswith("grammar:") and step != "daily_fresh:grammar"
+        ]
+        missing_grammar_steps = [step for step in missing_steps if step.startswith("grammar:") or step == "daily_fresh:grammar"]
         print(f"[gemini-finalize] completed_steps={completed_steps}")
         print(f"[gemini-finalize] missing_steps={missing_steps}")
         if missing_grammar_steps:
@@ -7902,16 +8370,6 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         )
         recent_word_keys = gemini_bank_recent_keys_for_item_type(recent_usage, "word")
         recent_verb_keys = gemini_bank_recent_keys_for_item_type(recent_usage, "verb")
-        not_ready = gemini_bank_not_ready_pools(job, recent_usage=recent_usage)
-        if not_ready:
-            print(f"[gemini-finalize] not_ready={not_ready}")
-            return {
-                "ok": False,
-                "error": "gemini_bank_not_ready",
-                "stage": "finalize",
-                "reason": "required word/verb pools have not reached target stock",
-                "not_ready": not_ready,
-            }, 200
         vocab_stage = gemini_job_json(job.get("vocab_json"), {})
         verbs_stage = gemini_job_json(job.get("verbs_json"), {})
         grammar_stage = gemini_job_json(job.get("grammar_json"), {})
@@ -7924,9 +8382,10 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         print(f"[gemini-plan] word_quota={word_quota}")
         print(f"[gemini-plan] verb_quota={verb_quota}")
         print(f"[gemini-plan] grammar_quota={grammar_quota}")
-        selected_words = select_gemini_bank_items("word", word_quota, recent_used_keys=recent_word_keys)
-        selected_verbs = select_gemini_bank_items("verb", verb_quota, recent_used_keys=recent_verb_keys)
-        selected_grammar = select_gemini_bank_items("grammar", grammar_quota)
+        daily_batch_id = job_id
+        selected_words = select_gemini_bank_items_by_batch("word", word_quota, daily_batch_id, recent_used_keys=recent_word_keys)
+        selected_verbs = select_gemini_bank_items_by_batch("verb", verb_quota, daily_batch_id, recent_used_keys=recent_verb_keys)
+        selected_grammar = select_gemini_bank_items_by_batch("grammar", grammar_quota, daily_batch_id)
         reserved = [*(selected_words or []), *(selected_verbs or []), *(selected_grammar or [])]
         initial_counts = {
             "word": dict(Counter(row.get("jlpt_level", "") for row in selected_words if row.get("jlpt_level"))),
@@ -7936,6 +8395,15 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         print(f"[gemini-finalize] initial selected_counts_by_level={initial_counts}")
         requested_words = int(settings.get("vocab_count") or 0)
         requested_verbs = int(settings.get("verb_count") or 0)
+        daily_fresh_counts = {"word": len(selected_words), "verb": len(selected_verbs), "grammar": len(selected_grammar)}
+        word_daily_deficit = max(0, requested_words - len(selected_words))
+        verb_daily_deficit = max(0, requested_verbs - len(selected_verbs))
+        if len(selected_words) < min(GEMINI_DAILY_WORD_MIN_FRESH, requested_words) or word_daily_deficit > 2:
+            print(f"[gemini-finalize] insufficient_daily_fresh item_type=word selected={len(selected_words)} requested={requested_words}")
+            raise ValueError("gemini_daily_fresh_insufficient:word")
+        if len(selected_verbs) < min(GEMINI_DAILY_VERB_MIN_FRESH, requested_verbs) or verb_daily_deficit > 2:
+            print(f"[gemini-finalize] insufficient_daily_fresh item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
+            raise ValueError("gemini_daily_fresh_insufficient:verb")
         top_up = {
             "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
             "verb": {"needed": max(0, requested_verbs - len(selected_verbs)), "added": 0},
@@ -7944,19 +8412,36 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         }
         if top_up["word"]["needed"] > 0:
             selected_keys = {row.get("normalized_key") for row in selected_words}
-            extra_words = select_gemini_bank_top_up_items("word", top_up["word"]["needed"], selected_keys, recent_used_keys=recent_word_keys)
+            extra_words = select_gemini_bank_top_up_items(
+                "word",
+                top_up["word"]["needed"],
+                selected_keys,
+                recent_used_keys=recent_word_keys,
+                exclude_daily_batch_id=daily_batch_id,
+            )
             selected_words.extend(extra_words)
             reserved.extend(extra_words)
             top_up["word"]["added"] = len(extra_words)
         if top_up["verb"]["needed"] > 0:
             selected_keys = {row.get("normalized_key") for row in selected_verbs}
-            extra_verbs = select_gemini_bank_top_up_items("verb", top_up["verb"]["needed"], selected_keys, recent_used_keys=recent_verb_keys)
+            extra_verbs = select_gemini_bank_top_up_items(
+                "verb",
+                top_up["verb"]["needed"],
+                selected_keys,
+                recent_used_keys=recent_verb_keys,
+                exclude_daily_batch_id=daily_batch_id,
+            )
             selected_verbs.extend(extra_verbs)
             reserved.extend(extra_verbs)
             top_up["verb"]["added"] = len(extra_verbs)
         if top_up["grammar"]["needed"] > 0:
             selected_keys = {row.get("normalized_key") for row in selected_grammar}
-            extra_grammar = select_gemini_bank_top_up_items("grammar", top_up["grammar"]["needed"], selected_keys)
+            extra_grammar = select_gemini_bank_top_up_items(
+                "grammar",
+                top_up["grammar"]["needed"],
+                selected_keys,
+                exclude_daily_batch_id=daily_batch_id,
+            )
             selected_grammar.extend(extra_grammar)
             reserved.extend(extra_grammar)
             top_up["grammar"]["added"] = len(extra_grammar)
@@ -7982,9 +8467,9 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             print(f"[gemini-finalize] insufficient item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
             raise ValueError("gemini_bank_insufficient:verb")
         bank_refill = {
-            "word": vocab_stage.get("refill", {}) if isinstance(vocab_stage, dict) else {},
-            "verb": verbs_stage.get("refill", {}) if isinstance(verbs_stage, dict) else {},
-            "grammar": grammar_stage.get("refill", {}) if isinstance(grammar_stage, dict) else {},
+            "word": vocab_stage.get("daily_fresh", {}) if isinstance(vocab_stage, dict) else {},
+            "verb": verbs_stage.get("daily_fresh", {}) if isinstance(verbs_stage, dict) else {},
+            "grammar": grammar_stage.get("daily_fresh", {}) if isinstance(grammar_stage, dict) else {},
         }
         bank_warnings = []
         for stage_cache in (vocab_stage, verbs_stage, grammar_stage):
@@ -8016,6 +8501,8 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "ai_used": True,
                 "fallback_used": False,
                 "gemini_job_id": job_id,
+                "daily_batch_id": daily_batch_id,
+                "generated_source": "daily_fresh_jit",
                 "resolved_settings": {
                     "generation_trigger": "manual",
                     "settings_source": "request_payload",
@@ -8037,6 +8524,13 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
                 "top_up": top_up,
+                "daily_fresh_count": daily_fresh_counts,
+                "fallback_count": {
+                    "word": top_up["word"].get("added", 0),
+                    "verb": top_up["verb"].get("added", 0),
+                    "grammar": top_up["grammar"].get("added", 0),
+                },
+                "fallback_reason": "daily_batch_shortfall" if any(top_up[item].get("added", 0) for item in ("word", "verb", "grammar")) else "",
                 "gemini_bank_warnings": bank_warnings,
                 "recent_exclusion_days": GEMINI_BANK_RECENT_EXCLUSION_DAYS,
                 "recent_used_counts": {"word": len(recent_word_keys), "verb": len(recent_verb_keys)},
@@ -8051,6 +8545,8 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 sorted({str(item.get("warning") or "gemini_bank_refill_warning") for item in bank_warnings if isinstance(item, dict)})
             )
         final_counts = material["metadata"].get("selected_counts_by_level", {})
+        print(f"[gemini-finalize] daily_batch_selected word={daily_fresh_counts['word']} verb={daily_fresh_counts['verb']} grammar={daily_fresh_counts['grammar']}")
+        print(f"[gemini-finalize] fallback_selected word={top_up['word']['added']} verb={top_up['verb']['added']} grammar={top_up['grammar']['added']}")
         print(f"[gemini-finalize] final selected word={actual_words} verb={actual_verbs} grammar={len(material.get('grammar_points') or [])}")
         save_info = save_material_for_date(
             job.get("material_date") or get_today_taipei_date(),
@@ -8088,7 +8584,13 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         release_gemini_bank_items(reserved)
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         reason = classify_gemini_daily_material_error(exc)
-        error_code = "gemini_bank_insufficient" if "gemini_bank_insufficient" in str(exc) or str(exc).startswith("insufficient_") else "gemini_stage_failed"
+        error_code = (
+            "gemini_bank_insufficient"
+            if "gemini_bank_insufficient" in str(exc)
+            or "gemini_daily_fresh_insufficient" in str(exc)
+            or str(exc).startswith("insufficient_")
+            else "gemini_stage_failed"
+        )
         message = f"{reason}:{str(exc)[:240]}"
         update_gemini_generation_job(job_id, status="failed", current_stage="finalize", error_message=message)
         print(f"[gemini-stage] failed job_id={job_id} stage=finalize error={message} elapsed_ms={elapsed_ms}")
@@ -8096,7 +8598,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "ok": False,
             "error": error_code,
             "stage": "finalize",
-            "reason": "bank cannot satisfy requested word/verb count after one top-up" if error_code == "gemini_bank_insufficient" else reason,
+            "reason": "daily fresh batch and fallback bank cannot safely satisfy requested word/verb count" if error_code == "gemini_bank_insufficient" else reason,
             "missing": [str(exc).split(":", 1)[1]] if error_code == "gemini_bank_insufficient" and ":" in str(exc) else [],
             "elapsed_ms": elapsed_ms,
         }, 200
@@ -16573,6 +17075,7 @@ def api_generate():
                     {
                         "ok": True,
                         "job_id": job["job_id"],
+                        "daily_batch_id": job["job_id"],
                         "status": "running",
                         "next_stage": stages[0] if stages else "finalize",
                         "stages": stages,
@@ -16821,6 +17324,10 @@ def api_generate_gemini_step():
             ), 200
         if stage == "finalize":
             payload, status_code = finalize_gemini_generation_job(job_id, app_url=request.host_url.rstrip("/"))
+            return jsonify(payload), status_code
+        if stage == "daily_fresh":
+            pack_type = str(data.get("pack_type") or "").strip().lower()
+            payload, status_code = run_gemini_daily_fresh_pack(job_id, pack_type)
             return jsonify(payload), status_code
         if stage == "refill":
             item_type = str(data.get("item_type") or "").strip().lower()
