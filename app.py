@@ -5218,40 +5218,27 @@ def gemini_daily_pack_max_tokens(pack_type, retry=False):
 def gemini_daily_pack_schema(item_type, max_items):
     if item_type == "word":
         properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
             "w": {"type": "STRING"},
             "r": {"type": "STRING"},
             "m": {"type": "STRING"},
             "p": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
+            "l": {"type": "STRING"},
         }
     elif item_type == "verb":
         properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
             "d": {"type": "STRING"},
             "r": {"type": "STRING"},
             "m": {"type": "STRING"},
             "g": {"type": "INTEGER"},
-            "f_masu": {"type": "STRING"},
-            "f_te": {"type": "STRING"},
-            "f_nai": {"type": "STRING"},
-            "f_ta": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
+            "l": {"type": "STRING"},
         }
     else:
         properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
             "k": {"type": "STRING"},
             "t": {"type": "STRING"},
             "m": {"type": "STRING"},
+            "l": {"type": "STRING"},
             "c": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
         }
     return {
         "type": "OBJECT",
@@ -5291,54 +5278,41 @@ def build_gemini_daily_fresh_prompt(pack_type, item_type, requested_by_level, ex
         schema = {
             "items": [
                 {
-                    "type": "word",
-                    "level": "N5",
                     "w": "料理",
                     "r": "りょうり",
                     "m": "料理",
                     "p": "名詞",
-                    "ex": "日本の料理が好きです。",
-                    "ex_zh": "我喜歡日本料理。",
+                    "l": "N5",
                 }
             ]
         }
-        detail = "Word examples must be natural Japanese and 15-20 Japanese characters at most. Chinese translations must be 20 characters at most."
+        detail = "Generate compact vocabulary candidates only. Do not include examples, translations of examples, or extra fields."
     elif item_type == "verb":
         schema = {
             "items": [
                 {
-                    "type": "verb",
-                    "level": "N4",
                     "d": "育てる",
                     "r": "そだてる",
                     "m": "培養、養育",
                     "g": 2,
-                    "f_masu": "育てます",
-                    "f_te": "育てて",
-                    "f_nai": "育てない",
-                    "f_ta": "育てた",
-                    "ex": "花を育てます。",
-                    "ex_zh": "我種花。",
+                    "l": "N4",
                 }
             ]
         }
-        detail = "Generate real core verbs only. Include only the four basic forms f_masu, f_te, f_nai, f_ta. Do not include passive, causative, potential, volitional, or long explanations."
+        detail = "Generate real core verbs only. Do not include conjugation forms, examples, suru-compound nouns, or long explanations."
     else:
         schema = {
             "items": [
                 {
-                    "type": "grammar",
-                    "level": "N4",
                     "k": "ようにする",
                     "t": "ようにする",
                     "m": "盡量做到",
+                    "l": "N4",
                     "c": "動詞辞書形 / ない形 + ようにする",
-                    "ex": "毎日勉強するようにしています。",
-                    "ex_zh": "我盡量每天讀書。",
                 }
             ]
         }
-        detail = "Keep grammar concise. Do not generate usage_detail, common_mistake, markdown, or long explanations."
+        detail = "Keep grammar concise. Do not generate examples, usage_detail, common_mistake, markdown, or long explanations."
     total = sum(int(value or 0) for value in (requested_by_level or {}).values())
     return (
         "Return JSON only, as an object with an items array. Do not use Markdown or extra text. "
@@ -7994,6 +7968,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     last_error = ""
     warning = ""
     requested_total = sum(requested_by_level.values())
+    raw_text = ""
 
     for attempt_index in range(max_attempts):
         retry = attempt_index > 0
@@ -8050,6 +8025,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 continue
             if reason == "json_parse_error" and not best_effort:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
+                raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:240]
                 update_gemini_generation_job(
                     job_id,
                     status="failed",
@@ -8059,7 +8035,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 print(
                     "[gemini-bank] daily_fresh failed "
                     f"job_id={job_id} pack={pack_type} item_type={item_type} "
-                    f"reason=json_parse_error elapsed_ms={elapsed_ms}"
+                    f"reason=json_parse_error raw_excerpt={raw_excerpt} elapsed_ms={elapsed_ms}"
                 )
                 return {
                     "ok": False,
@@ -8073,6 +8049,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "auto_retry": False,
                     "continue_same_step": False,
                     "message": "Gemini 未回傳合法 JSON，請稍後重試。",
+                    "raw_error_excerpt": raw_excerpt,
                     "elapsed_ms": elapsed_ms,
                 }, 200
             warning = "gemini_daily_fresh_timeout" if reason == "timeout" else "gemini_daily_fresh_failed"
