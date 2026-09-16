@@ -704,6 +704,8 @@
                 ? "Gemini 有回傳資料，但今日批次沒有成功寫入題庫。請查看 Render Logs 的 daily_fresh parsed / upserted / daily_batch_summary。"
                 : data?.error === "daily_fresh_items_invalid"
                   ? "Gemini 有回傳資料，但欄位格式無法轉成題庫資料。請查看 Render Logs 的 daily_fresh parsed / normalized。"
+                  : data?.error === "fresh_candidate_pool_insufficient"
+                    ? "日文候選詞庫不足，請先匯入更多 JLPT / JMdict 候選詞後再生成。"
                 : ((data && (data.message || data.error)) || `API \u8acb\u6c42\u5931\u6557\uff1a${res.status}`);
       const error = new Error(message);
       error.apiPayload = data;

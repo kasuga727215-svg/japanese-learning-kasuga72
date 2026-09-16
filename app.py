@@ -132,6 +132,9 @@ GEMINI_BANK_ALLOW_RECENT_REUSE = os.environ.get("GEMINI_BANK_ALLOW_RECENT_REUSE"
 GEMINI_ENABLE_DAILY_ENRICHMENT = os.environ.get("GEMINI_ENABLE_DAILY_ENRICHMENT", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_BANK_RECENT_EXCLUSION_DAYS = read_int_env("GEMINI_BANK_RECENT_EXCLUSION_DAYS", 7, 0, 30)
 GEMINI_BANK_USAGE_BACKFILL_DAYS = read_int_env("GEMINI_BANK_USAGE_BACKFILL_DAYS", 30, 0, 365)
+GEMINI_DAILY_CANDIDATE_RECENT_DAYS = read_int_env("GEMINI_DAILY_CANDIDATE_RECENT_DAYS", 30, 7, 120)
+VOCABULARY_POOL_MIN_COMMONNESS_SCORE = float(os.environ.get("VOCABULARY_POOL_MIN_COMMONNESS_SCORE", "0.25") or 0.25)
+GEMINI_DAILY_DUPLICATE_BLACKLIST_RAW = os.environ.get("GEMINI_DAILY_DUPLICATE_BLACKLIST_KEYS", "")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash-preview").strip()
@@ -1358,6 +1361,12 @@ def migrate_vocabulary_pool_sqlite(conn):
             example_sentence TEXT DEFAULT '',
             example_translation_zh TEXT DEFAULT '',
             source TEXT DEFAULT 'manual',
+            source_name TEXT DEFAULT '',
+            source_license TEXT DEFAULT '',
+            domain_tags TEXT DEFAULT '',
+            status TEXT DEFAULT 'active',
+            frequency_rank INTEGER,
+            commonness_score REAL,
             priority INTEGER DEFAULT 1,
             is_active INTEGER DEFAULT 1,
             used_in_material_count INTEGER DEFAULT 0,
@@ -1385,6 +1394,12 @@ def migrate_vocabulary_pool_sqlite(conn):
         "example_sentence": "ALTER TABLE vocabulary_pool ADD COLUMN example_sentence TEXT DEFAULT ''",
         "example_translation_zh": "ALTER TABLE vocabulary_pool ADD COLUMN example_translation_zh TEXT DEFAULT ''",
         "source": "ALTER TABLE vocabulary_pool ADD COLUMN source TEXT DEFAULT 'manual'",
+        "source_name": "ALTER TABLE vocabulary_pool ADD COLUMN source_name TEXT DEFAULT ''",
+        "source_license": "ALTER TABLE vocabulary_pool ADD COLUMN source_license TEXT DEFAULT ''",
+        "domain_tags": "ALTER TABLE vocabulary_pool ADD COLUMN domain_tags TEXT DEFAULT ''",
+        "status": "ALTER TABLE vocabulary_pool ADD COLUMN status TEXT DEFAULT 'active'",
+        "frequency_rank": "ALTER TABLE vocabulary_pool ADD COLUMN frequency_rank INTEGER",
+        "commonness_score": "ALTER TABLE vocabulary_pool ADD COLUMN commonness_score REAL",
         "priority": "ALTER TABLE vocabulary_pool ADD COLUMN priority INTEGER DEFAULT 1",
         "is_active": "ALTER TABLE vocabulary_pool ADD COLUMN is_active INTEGER DEFAULT 1",
         "used_in_material_count": "ALTER TABLE vocabulary_pool ADD COLUMN used_in_material_count INTEGER DEFAULT 0",
@@ -1405,6 +1420,7 @@ def migrate_vocabulary_pool_sqlite(conn):
             category = COALESCE(NULLIF(category, ''), 'general'),
             cooldown_days = COALESCE(cooldown_days, 14),
             source = COALESCE(NULLIF(source, ''), 'manual'),
+            status = COALESCE(NULLIF(status, ''), 'active'),
             quality = CASE
                 WHEN quality IN ('core', 'normal', 'supplemental', 'experimental', 'rejected') AND quality != 'normal' THEN quality
                 WHEN source IN ('seed_basic', 'jlpt_seed', 'manual', 'starter_pack') OR category IN ('general', 'jlpt_core', 'daily', 'common') THEN 'core'
@@ -1431,6 +1447,8 @@ def migrate_vocabulary_pool_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_verb_group ON vocabulary_pool(verb_group)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_status ON vocabulary_pool(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_commonness ON vocabulary_pool(commonness_score)")
 
 
 def migrate_vocab_rules_sqlite(conn):
@@ -5353,6 +5371,519 @@ def build_gemini_daily_fresh_prompt(pack_type, item_type, requested_by_level, ex
     )
 
 
+DAILY_FRESH_WORD_ALLOWED_POS = {
+    "",
+    "noun",
+    "名詞",
+    "い形容詞",
+    "イ形容詞",
+    "な形容詞",
+    "ナ形容詞",
+    "形容詞",
+    "adjective",
+    "i-adjective",
+    "na-adjective",
+    "副詞",
+    "adverb",
+    "接續詞",
+    "接続詞",
+    "conjunction",
+    "sns",
+    "SNS",
+}
+DAILY_FRESH_VERB_ENDINGS = ("う", "く", "ぐ", "す", "つ", "ぬ", "ぶ", "む", "る")
+DAILY_FRESH_DEFAULT_DUPLICATE_BLACKLIST = {
+    "見る",
+    "食べる",
+    "行く",
+    "書く",
+    "読む",
+    "聞く",
+    "使う",
+    "来る",
+    "する",
+    "話す",
+    "飲む",
+    "帰る",
+    "申し込む",
+}
+DAILY_FRESH_BLOCKED_CATEGORIES = {
+    "business",
+    "advanced",
+    "generated_compound",
+    "unknown",
+    "named_entity",
+    "proper_noun",
+    "person_name",
+    "place_name",
+    "company",
+    "brand",
+    "legal",
+    "medical",
+    "finance",
+    "financial",
+    "archaic",
+    "classical",
+    "specialized",
+    "technical",
+    "sensitive",
+    "typo_or_noise",
+}
+DAILY_FRESH_BLOCKED_SOURCES = {
+    "synthetic",
+    "auto_generated",
+    "generated",
+    "seed_advanced_synthetic",
+}
+DAILY_FRESH_BLOCKED_DOMAIN_TAGS = {
+    "legal",
+    "medical",
+    "finance",
+    "financial",
+    "archaic",
+    "classical",
+    "business_specialized",
+    "proper_noun",
+    "brand",
+    "company",
+}
+
+
+def vocabulary_pool_candidate_key(row):
+    return normalize_vocab_key(first_text(row, ["normalized_key", "base_form", "surface", "term", "word"]))
+
+
+def vocabulary_pool_candidate_surface(row):
+    return first_text(row, ["surface", "base_form", "term", "word", "dictionary_form"])
+
+
+def vocabulary_pool_candidate_level(row, item_type):
+    return normalize_gemini_bank_level(first_text(row, ["jlpt_level", "level", "target_level"]), item_type)
+
+
+def gemini_daily_duplicate_blacklist_keys():
+    configured = {
+        normalize_vocab_key(key)
+        for key in re.split(r"[,|\n]+", GEMINI_DAILY_DUPLICATE_BLACKLIST_RAW or "")
+        if normalize_vocab_key(key)
+    }
+    return configured | {normalize_vocab_key(key) for key in DAILY_FRESH_DEFAULT_DUPLICATE_BLACKLIST if normalize_vocab_key(key)}
+
+
+def vocabulary_pool_candidate_inventory():
+    ensure_vocabulary_pool_store()
+    active_clause = "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1"
+    status_clause = "LOWER(COALESCE(NULLIF(status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')"
+    by_level = {level: 0 for level in ["N5", "N4", "N3", "N2", "N1"]}
+    try:
+        sql_total = f"SELECT COUNT(*) FROM vocabulary_pool WHERE {active_clause} AND {status_clause}"
+        sql_level = f"""
+            SELECT COALESCE(NULLIF(jlpt_level, ''), '__empty__') AS level, COUNT(*)
+            FROM vocabulary_pool
+            WHERE {active_clause} AND {status_clause}
+            GROUP BY COALESCE(NULLIF(jlpt_level, ''), '__empty__')
+        """
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_total)
+                    total = int(cur.fetchone()[0] or 0)
+                    cur.execute(sql_level)
+                    rows = cur.fetchall()
+        else:
+            with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+                total = int(conn.execute(sql_total).fetchone()[0] or 0)
+                rows = conn.execute(sql_level).fetchall()
+        for level, count in rows:
+            normalized = normalize_gemini_bank_level(level, "word")
+            if normalized in by_level:
+                by_level[normalized] = int(count or 0)
+        return {"total": total, "by_level": by_level}
+    except Exception as exc:
+        print(f"[vocabulary-pool] candidate_inventory failed reason={exc}")
+        return {"total": 0, "by_level": by_level, "warning": str(exc)}
+
+
+def has_variant_separator(surface):
+    return any(token in str(surface or "") for token in ["/", "／", "|", "｜"])
+
+
+def looks_like_daily_fresh_verb_surface(surface):
+    text = simple_text(surface)
+    if not text or has_variant_separator(text):
+        return False
+    if len(text) < 2:
+        return False
+    return text.endswith(DAILY_FRESH_VERB_ENDINGS)
+
+
+def is_daily_fresh_word_pool_row(row):
+    surface = vocabulary_pool_candidate_surface(row)
+    if has_variant_separator(surface):
+        return False
+    pos = first_text(row, ["part_of_speech", "pos"]).strip()
+    pos_lower = pos.lower()
+    if "動詞" in pos or pos_lower in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
+        return False
+    if not pos and looks_like_daily_fresh_verb_surface(surface):
+        return False
+    return pos in DAILY_FRESH_WORD_ALLOWED_POS or pos_lower in DAILY_FRESH_WORD_ALLOWED_POS
+
+
+def is_daily_fresh_verb_pool_row(row):
+    surface = vocabulary_pool_candidate_surface(row)
+    if not surface:
+        return False
+    if has_variant_separator(surface):
+        return False
+    pos = first_text(row, ["part_of_speech", "pos"]).strip()
+    pos_lower = pos.lower()
+    try:
+        group = int(row.get("verb_group") or 0)
+    except (TypeError, ValueError):
+        group = 0
+    if surface.endswith("する") and surface != "する":
+        category = first_text(row, ["category"]).lower()
+        source = first_text(row, ["source"]).lower()
+        if category not in {"manual_core", "jlpt_core", "general", "daily", "common"} or source in DAILY_FRESH_BLOCKED_SOURCES:
+            return False
+    return group in {1, 2, 3} or pos_lower in {"verb", "動詞"} or "動詞" in pos or (not pos and looks_like_daily_fresh_verb_surface(surface))
+
+
+def is_daily_fresh_quality_pool_row(row, item_type):
+    key = vocabulary_pool_candidate_key(row)
+    surface = vocabulary_pool_candidate_surface(row)
+    if not key or not surface:
+        return False
+    category = first_text(row, ["category"]).lower() or "general"
+    source = first_text(row, ["source"]).lower()
+    quality = first_text(row, ["quality"]).lower() or "normal"
+    status = first_text(row, ["status"]).lower() or "active"
+    tags = {tag.strip().lower() for tag in re.split(r"[,|/;\s]+", first_text(row, ["domain_tags"])) if tag.strip()}
+    if status not in {"active", "approved", "manual_core", "enabled", "unused"}:
+        return False
+    if quality in {"rejected", "experimental", "low_quality"}:
+        return False
+    if category in DAILY_FRESH_BLOCKED_CATEGORIES:
+        return False
+    if source in DAILY_FRESH_BLOCKED_SOURCES:
+        return False
+    if tags & DAILY_FRESH_BLOCKED_DOMAIN_TAGS:
+        return False
+    try:
+        score = float(row.get("commonness_score")) if row.get("commonness_score") not in (None, "") else None
+    except (TypeError, ValueError):
+        score = None
+    if score is not None and score < VOCABULARY_POOL_MIN_COMMONNESS_SCORE:
+        return False
+    if item_type == "verb":
+        return is_daily_fresh_verb_pool_row(row)
+    return is_daily_fresh_word_pool_row(row)
+
+
+def build_daily_fresh_candidate_payload(row, item_type, level):
+    surface = vocabulary_pool_candidate_surface(row)
+    key = vocabulary_pool_candidate_key(row)
+    if item_type == "verb":
+        return {
+            "level": level,
+            "d": surface,
+            "normalized_key": key,
+            "pool_id": row.get("id"),
+        }
+    return {
+        "level": level,
+        "w": surface,
+        "normalized_key": key,
+        "pool_id": row.get("id"),
+    }
+
+
+def daily_fresh_existing_bank_keys(item_type, levels):
+    ensure_gemini_item_bank_store()
+    levels = [normalize_gemini_bank_level(level, item_type) for level in levels if level]
+    if not levels:
+        return set()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT normalized_key
+                    FROM gemini_item_bank
+                    WHERE item_type = %s
+                      AND jlpt_level = ANY(%s)
+                      AND normalized_key IS NOT NULL
+                    """,
+                    (item_type, levels),
+                )
+                return {normalize_vocab_key(row[0]) for row in cur.fetchall() if row and row[0]}
+    placeholders = ",".join(["?"] * len(levels))
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+        rows = conn.execute(
+            f"""
+            SELECT normalized_key
+            FROM gemini_item_bank
+            WHERE item_type = ?
+              AND jlpt_level IN ({placeholders})
+              AND normalized_key IS NOT NULL
+            """,
+            (item_type, *levels),
+        ).fetchall()
+    return {normalize_vocab_key(row[0]) for row in rows if row and row[0]}
+
+
+def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
+    ensure_vocabulary_pool_store()
+    level = normalize_gemini_bank_level(level, item_type)
+    limit = max(1, min(int(limit or 20), 100))
+    excluded = sorted({normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)})
+    active_clause = "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1"
+    normalized_expr = "COALESCE(NULLIF(vp.normalized_key, ''), NULLIF(vp.base_form, ''), NULLIF(vp.surface, ''))"
+    where = [
+        active_clause,
+        "COALESCE(NULLIF(vp.surface, ''), NULLIF(vp.base_form, '')) IS NOT NULL",
+        "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
+        "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
+        "LOWER(COALESCE(vp.quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
+        "LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) NOT IN ('business', 'advanced', 'generated_compound', 'unknown', 'named_entity', 'proper_noun', 'person_name', 'place_name', 'company', 'brand', 'legal', 'medical', 'finance', 'financial', 'archaic', 'classical', 'specialized', 'technical', 'sensitive', 'typo_or_noise')",
+        "LOWER(COALESCE(NULLIF(vp.source, ''), 'manual')) NOT IN ('synthetic', 'auto_generated', 'generated', 'seed_advanced_synthetic')",
+        "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
+        "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = %s AND gib.normalized_key = " + normalized_expr + ")" if DATABASE_URL else "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = ? AND gib.normalized_key = " + normalized_expr + ")",
+    ]
+    params = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE, item_type]
+    if item_type == "word":
+        where.append(
+            "("
+            "COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' "
+            "OR LOWER(COALESCE(vp.part_of_speech, '')) IN ('noun', 'adjective', 'i-adjective', 'na-adjective', 'adverb', 'conjunction', 'sns') "
+            "OR COALESCE(vp.part_of_speech, '') IN ('名詞', 'い形容詞', 'イ形容詞', 'な形容詞', 'ナ形容詞', '形容詞', '副詞', '接續詞', '接続詞', 'SNS')"
+            ")"
+        )
+        where.append("COALESCE(vp.part_of_speech, '') NOT LIKE '%動詞%'")
+        where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%/%'")
+        where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%／%'")
+    elif item_type == "verb":
+        where.append(
+            "("
+            "LOWER(COALESCE(vp.part_of_speech, '')) IN ('verb', '動詞') "
+            "OR COALESCE(vp.part_of_speech, '') LIKE '%動詞%' "
+            "OR vp.verb_group IN (1, 2, 3) "
+            "OR (COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' AND ("
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%う' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%く' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぐ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%す' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%つ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぬ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぶ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%む' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%る'"
+            "))"
+            ")"
+        )
+        where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%/%'")
+        where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%／%'")
+        where.append(
+            "("
+            "COALESCE(vp.surface, vp.base_form, '') = 'する' "
+            "OR COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%する' "
+            "OR LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) IN ('manual_core', 'jlpt_core', 'general', 'daily', 'common')"
+            ")"
+        )
+    if excluded:
+        placeholders = sql_placeholders(len(excluded))
+        where.append(f"{normalized_expr} NOT IN ({placeholders})")
+        params.extend(excluded)
+    params.append(limit)
+    sql = f"""
+        SELECT *
+        FROM vocabulary_pool vp
+        WHERE {' AND '.join(where)}
+        ORDER BY
+            COALESCE(vp.used_in_material_count, 0) ASC,
+            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
+            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
+            COALESCE(vp.priority, 1) DESC,
+            {'vp.last_used_at ASC NULLS FIRST' if DATABASE_URL else "COALESCE(vp.last_used_at, '') ASC"},
+            RANDOM()
+        LIMIT {'%s' if DATABASE_URL else '?'}
+    """
+    try:
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    columns = [desc[0] for desc in cur.description]
+                    return [dict(zip(columns, row)) for row in cur.fetchall()]
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+    except Exception as exc:
+        print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
+        return []
+
+
+def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=""):
+    if item_type not in {"word", "verb"}:
+        return {"candidates_by_level": {}, "items": [], "missing": []}
+    requested_by_level = {
+        normalize_gemini_bank_level(level, item_type): int(count or 0)
+        for level, count in (requested_by_level or {}).items()
+        if int(count or 0) > 0
+    }
+    existing_bank_keys = daily_fresh_existing_bank_keys(item_type, requested_by_level.keys())
+    excluded_keys = (
+        set(existing_bank_keys)
+        | {normalize_vocab_key(key) for key in (recent_keys or set()) if normalize_vocab_key(key)}
+        | gemini_daily_duplicate_blacklist_keys()
+    )
+    selected_by_level = {}
+    selected_items = []
+    missing = []
+    seen = set()
+    for level, needed in requested_by_level.items():
+        rows = fetch_daily_fresh_candidate_rows(item_type, level, max(needed * 20, 100), excluded_keys | seen)
+        candidates = []
+        for row in rows:
+            if not is_daily_fresh_quality_pool_row(row, item_type):
+                continue
+            key = vocabulary_pool_candidate_key(row)
+            if not key or key in excluded_keys or key in seen:
+                continue
+            candidate = build_daily_fresh_candidate_payload(row, item_type, level)
+            candidates.append(candidate)
+            selected_items.append(candidate)
+            seen.add(key)
+            if len(candidates) >= needed:
+                break
+        selected_by_level[level] = candidates
+        if len(candidates) < needed:
+            missing.append({"level": level, "requested": needed, "available": len(candidates)})
+    level_counts = {level: len(items) for level, items in selected_by_level.items()}
+    selected_surfaces = [
+        candidate.get("d") if item_type == "verb" else candidate.get("w")
+        for candidate in selected_items
+    ]
+    print(f"[fresh-candidate] source=vocabulary_pool pack={pack_type or item_type} selected={len(selected_items)}")
+    print(f"[fresh-candidate] levels={level_counts}")
+    print(f"[fresh-candidate] candidates pack={pack_type or item_type} items={json.dumps(selected_surfaces, ensure_ascii=False)}")
+    if missing:
+        print(
+            f"[fresh-candidate] insufficient source=vocabulary_pool pack={pack_type or item_type} "
+            f"item_type={item_type} missing={missing}"
+        )
+    return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing}
+
+
+def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
+    flat_items = []
+    for level, candidates in (candidates_by_level or {}).items():
+        for candidate in candidates or []:
+            if item_type == "verb":
+                flat_items.append({"level": level, "d": candidate.get("d", "")})
+            else:
+                flat_items.append({"level": level, "w": candidate.get("w", "")})
+    if item_type == "verb":
+        schema = {
+            "items": [
+                {
+                    "type": "verb",
+                    "level": "N4",
+                    "d": "育てる",
+                    "r": "そだてる",
+                    "m": "養育、培養",
+                    "g": 2,
+                    "f_masu": "育てます",
+                    "f_te": "育てて",
+                    "f_nai": "育てない",
+                    "f_ta": "育てた",
+                    "ex": "花を育てます。",
+                    "ex_zh": "我種花。",
+                }
+            ]
+        }
+        item_rules = (
+            "你只負責補完指定動詞。不得新增動詞，不得替換動詞，不得改變順序。"
+            "每筆 output 的 d 必須完全等於 input 的 d。"
+            "請補 r/m/g/f_masu/f_te/f_nai/f_ta/ex/ex_zh。"
+            "若不確定正確變化，請省略該 item，不可換成其他動詞。"
+        )
+    else:
+        schema = {
+            "items": [
+                {
+                    "type": "word",
+                    "level": "N5",
+                    "w": "財布",
+                    "r": "さいふ",
+                    "m": "錢包",
+                    "p": "名詞",
+                    "ex": "財布を忘れました。",
+                    "ex_zh": "我忘了錢包。",
+                }
+            ]
+        }
+        item_rules = (
+            "你只負責補完指定單字。不得新增單字，不得替換單字，不得改變順序。"
+            "每筆 output 的 w 必須完全等於 input 的 w。"
+            "請補 r/m/p/ex/ex_zh。p 不可是動詞。若指定詞是動詞，請省略該 item，不可換成其他詞。"
+        )
+    return (
+        "Return JSON only, as an object with an items array. Do not use Markdown or extra text. "
+        f"Daily Fresh JIT enrich pack={pack_type}. mode=fixed_candidates. "
+        f"{item_rules} Readings must be hiragana. Meanings and translations must be Traditional Chinese. "
+        "If an item is unfamiliar, omit it instead of replacing it. Output may be fewer than input, but may not include unknown items. "
+        f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
+        f"Output compact schema: {json.dumps(schema, ensure_ascii=False)}"
+    )
+
+
+def filter_enriched_items_to_candidates(items, item_type, candidates):
+    candidate_by_key = {}
+    for candidate in candidates or []:
+        surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
+        key = normalize_vocab_key(candidate.get("normalized_key") or surface)
+        if key:
+            candidate_by_key[key] = candidate
+    filtered = []
+    stats = {"matched": 0, "unknown": 0, "mismatch": 0, "invalid_pos": 0}
+    for item in items or []:
+        surface = item.get("display_text") or ""
+        key = normalize_vocab_key(item.get("normalized_key") or surface)
+        candidate = candidate_by_key.get(key)
+        if not candidate:
+            stats["unknown"] += 1
+            continue
+        expected_surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
+        if surface != expected_surface:
+            stats["mismatch"] += 1
+            continue
+        payload = json.loads(item.get("payload_json") or "{}")
+        if item_type == "word":
+            pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
+            if "動詞" in pos or pos.lower() in {"verb", "verb_godan", "verb_ichidan"}:
+                stats["invalid_pos"] += 1
+                continue
+        if item_type == "verb":
+            if surface.endswith("する") and surface != "する":
+                stats["invalid_pos"] += 1
+                continue
+            required_forms = [
+                payload.get("f_masu"),
+                payload.get("f_te"),
+                payload.get("f_nai"),
+                payload.get("f_ta"),
+            ]
+            if any(not simple_text(value) or simple_text(value) == NO_VERB_FORM for value in required_forms):
+                stats["invalid_pos"] += 1
+                continue
+        item["jlpt_level"] = normalize_gemini_bank_level(candidate.get("level") or item.get("jlpt_level"), item_type)
+        filtered.append(item)
+        stats["matched"] += 1
+    return filtered, stats
+
+
 def looks_like_truncated_json(raw_text):
     cleaned = str(raw_text or "").strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE).strip()
@@ -5424,7 +5955,7 @@ def parse_gemini_bank_items(item_type, level, raw_text):
     return items
 
 
-def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, generated_source=""):
+def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, generated_source="", retag_existing=True):
     if not items:
         return {"inserted": 0, "skipped": 0, "duplicate": 0}
     ensure_gemini_item_bank_store()
@@ -5444,29 +5975,120 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                         (item["item_type"], item["normalized_key"]),
                     )
                     existed = cur.fetchone() is not None
-                    cur.execute(
+                    if existed:
+                        duplicate += 1
+                        skipped += 1
+                        if retag_existing:
+                            cur.execute(
+                                """
+                                UPDATE gemini_item_bank
+                                SET display_text = %s,
+                                    reading = %s,
+                                    jlpt_level = %s,
+                                    category = %s,
+                                    source = %s,
+                                    status = CASE WHEN status = 'rejected' THEN status ELSE 'unused' END,
+                                    payload_json = %s,
+                                    updated_at = %s,
+                                    daily_batch_id = %s,
+                                    generated_for_date = %s,
+                                    generated_source = %s
+                                WHERE item_type = %s AND normalized_key = %s
+                                """,
+                                (
+                                    item["display_text"],
+                                    item["reading"],
+                                    item["jlpt_level"],
+                                    item["category"],
+                                    item["source"],
+                                    item["payload_json"],
+                                    now,
+                                    daily_batch_id,
+                                    generated_for_date,
+                                    generated_source,
+                                    item["item_type"],
+                                    item["normalized_key"],
+                                ),
+                            )
+                    else:
+                        cur.execute(
+                            """
+                            INSERT INTO gemini_item_bank (
+                                item_type, normalized_key, display_text, reading, jlpt_level, category, source,
+                                status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
+                                daily_batch_id, generated_for_date, generated_source
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, 'unused', %s, 0, NULL, NULL, %s, %s, %s, %s, %s)
+                            """,
+                            (
+                                item["item_type"],
+                                item["normalized_key"],
+                                item["display_text"],
+                                item["reading"],
+                                item["jlpt_level"],
+                                item["category"],
+                                item["source"],
+                                item["payload_json"],
+                                now,
+                                now,
+                                daily_batch_id,
+                                generated_for_date,
+                                generated_source,
+                            ),
+                        )
+                        inserted += 1
+            conn.commit()
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            for item in items:
+                existed = conn.execute(
+                    "SELECT 1 FROM gemini_item_bank WHERE item_type = ? AND normalized_key = ?",
+                    (item["item_type"], item["normalized_key"]),
+                ).fetchone() is not None
+                if existed:
+                    duplicate += 1
+                    skipped += 1
+                    if retag_existing:
+                        conn.execute(
+                            """
+                            UPDATE gemini_item_bank
+                            SET display_text = ?,
+                                reading = ?,
+                                jlpt_level = ?,
+                                category = ?,
+                                source = ?,
+                                status = CASE WHEN status = 'rejected' THEN status ELSE 'unused' END,
+                                payload_json = ?,
+                                updated_at = ?,
+                                daily_batch_id = ?,
+                                generated_for_date = ?,
+                                generated_source = ?
+                            WHERE item_type = ? AND normalized_key = ?
+                            """,
+                            (
+                                item["display_text"],
+                                item["reading"],
+                                item["jlpt_level"],
+                                item["category"],
+                                item["source"],
+                                item["payload_json"],
+                                now,
+                                daily_batch_id,
+                                generated_for_date,
+                                generated_source,
+                                item["item_type"],
+                                item["normalized_key"],
+                            ),
+                        )
+                else:
+                    conn.execute(
                         """
                         INSERT INTO gemini_item_bank (
                             item_type, normalized_key, display_text, reading, jlpt_level, category, source,
                             status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
                             daily_batch_id, generated_for_date, generated_source
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, 'unused', %s, 0, NULL, NULL, %s, %s, %s, %s, %s)
-                        ON CONFLICT (item_type, normalized_key) DO UPDATE SET
-                            display_text = EXCLUDED.display_text,
-                            reading = EXCLUDED.reading,
-                            jlpt_level = EXCLUDED.jlpt_level,
-                            category = EXCLUDED.category,
-                            source = EXCLUDED.source,
-                            status = CASE
-                                WHEN gemini_item_bank.status = 'rejected' THEN gemini_item_bank.status
-                                ELSE 'unused'
-                            END,
-                            payload_json = EXCLUDED.payload_json,
-                            updated_at = EXCLUDED.updated_at,
-                            daily_batch_id = EXCLUDED.daily_batch_id,
-                            generated_for_date = EXCLUDED.generated_for_date,
-                            generated_source = EXCLUDED.generated_source
+                        VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, 0, NULL, NULL, ?, ?, ?, ?, ?)
                         """,
                         (
                             item["item_type"],
@@ -5484,63 +6106,6 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                             generated_source,
                         ),
                     )
-                    if existed:
-                        duplicate += 1
-                        skipped += 1
-                    else:
-                        inserted += 1
-            conn.commit()
-    else:
-        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
-            for item in items:
-                existed = conn.execute(
-                    "SELECT 1 FROM gemini_item_bank WHERE item_type = ? AND normalized_key = ?",
-                    (item["item_type"], item["normalized_key"]),
-                ).fetchone() is not None
-                conn.execute(
-                    """
-                    INSERT INTO gemini_item_bank (
-                        item_type, normalized_key, display_text, reading, jlpt_level, category, source,
-                        status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
-                        daily_batch_id, generated_for_date, generated_source
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, 0, NULL, NULL, ?, ?, ?, ?, ?)
-                    ON CONFLICT(item_type, normalized_key) DO UPDATE SET
-                        display_text = excluded.display_text,
-                        reading = excluded.reading,
-                        jlpt_level = excluded.jlpt_level,
-                        category = excluded.category,
-                        source = excluded.source,
-                        status = CASE
-                            WHEN gemini_item_bank.status = 'rejected' THEN gemini_item_bank.status
-                            ELSE 'unused'
-                        END,
-                        payload_json = excluded.payload_json,
-                        updated_at = excluded.updated_at,
-                        daily_batch_id = excluded.daily_batch_id,
-                        generated_for_date = excluded.generated_for_date,
-                        generated_source = excluded.generated_source
-                    """,
-                    (
-                        item["item_type"],
-                        item["normalized_key"],
-                        item["display_text"],
-                        item["reading"],
-                        item["jlpt_level"],
-                        item["category"],
-                        item["source"],
-                        item["payload_json"],
-                        now,
-                        now,
-                        daily_batch_id,
-                        generated_for_date,
-                        generated_source,
-                    ),
-                )
-                if existed:
-                    duplicate += 1
-                    skipped += 1
-                else:
                     inserted += 1
             conn.commit()
     return {"inserted": inserted, "skipped": skipped, "duplicate": duplicate}
@@ -6592,6 +7157,12 @@ def migrate_vocabulary_pool_postgres():
                     example_sentence TEXT DEFAULT '',
                     example_translation_zh TEXT DEFAULT '',
                     source TEXT DEFAULT 'manual',
+                    source_name TEXT DEFAULT '',
+                    source_license TEXT DEFAULT '',
+                    domain_tags TEXT DEFAULT '',
+                    status TEXT DEFAULT 'active',
+                    frequency_rank INTEGER,
+                    commonness_score REAL,
                     priority INTEGER DEFAULT 1,
                     is_active BOOLEAN DEFAULT TRUE,
                     used_in_material_count INTEGER DEFAULT 0,
@@ -6617,6 +7188,12 @@ def migrate_vocabulary_pool_postgres():
                 "example_sentence": "TEXT DEFAULT ''",
                 "example_translation_zh": "TEXT DEFAULT ''",
                 "source": "TEXT DEFAULT 'manual'",
+                "source_name": "TEXT DEFAULT ''",
+                "source_license": "TEXT DEFAULT ''",
+                "domain_tags": "TEXT DEFAULT ''",
+                "status": "TEXT DEFAULT 'active'",
+                "frequency_rank": "INTEGER",
+                "commonness_score": "REAL",
                 "priority": "INTEGER DEFAULT 1",
                 "is_active": "BOOLEAN DEFAULT TRUE",
                 "used_in_material_count": "INTEGER DEFAULT 0",
@@ -6638,6 +7215,8 @@ def migrate_vocabulary_pool_postgres():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_part_of_speech ON vocabulary_pool(part_of_speech)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_verb_group ON vocabulary_pool(verb_group)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_last_used_at ON vocabulary_pool(last_used_at)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_status ON vocabulary_pool(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vocabulary_pool_commonness ON vocabulary_pool(commonness_score)")
             now = utc_now_iso()
             cur.execute(
                 """
@@ -6648,6 +7227,7 @@ def migrate_vocabulary_pool_postgres():
                     category = COALESCE(NULLIF(category, ''), 'general'),
                     cooldown_days = COALESCE(cooldown_days, 14),
                     source = COALESCE(NULLIF(source, ''), 'manual'),
+                    status = COALESCE(NULLIF(status, ''), 'active'),
                     quality = CASE
                         WHEN quality IN ('core', 'normal', 'supplemental', 'experimental', 'rejected') AND quality != 'normal' THEN quality
                         WHEN source IN ('seed_basic', 'jlpt_seed', 'manual', 'starter_pack') OR category IN ('general', 'jlpt_core', 'daily', 'common') THEN 'core'
@@ -8094,7 +8674,8 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     started = time.perf_counter()
     update_gemini_generation_job(job_id, status="running", current_stage=f"daily_fresh:{pack_type}", error_message="")
 
-    recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_BANK_RECENT_EXCLUSION_DAYS, material_date=material_date)
+    recent_days = GEMINI_DAILY_CANDIDATE_RECENT_DAYS if item_type in {"word", "verb"} else GEMINI_BANK_RECENT_EXCLUSION_DAYS
+    recent_usage = gemini_bank_recent_usage_keys(days=recent_days, material_date=material_date)
     recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
     requested_by_level = {str(level): int(count or 0) for level, count in (step.get("requested_by_level") or {}).items() if int(count or 0) > 0}
     levels = list(requested_by_level.keys())
@@ -8106,18 +8687,96 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     warning = ""
     requested_total = sum(requested_by_level.values())
     raw_text = ""
+    candidate_plan = {"candidates_by_level": {}, "items": [], "missing": []}
+    if item_type in {"word", "verb"}:
+        inventory = vocabulary_pool_candidate_inventory()
+        inventory_levels = inventory.get("by_level") or {}
+        print(f"[vocabulary-pool] candidate_inventory total={inventory.get('total', 0)}")
+        print(
+            "[vocabulary-pool] by_level "
+            f"N5={inventory_levels.get('N5', 0)} "
+            f"N4={inventory_levels.get('N4', 0)} "
+            f"N3={inventory_levels.get('N3', 0)} "
+            f"N2={inventory_levels.get('N2', 0)} "
+            f"N1={inventory_levels.get('N1', 0)}"
+        )
+        if int(inventory.get("total") or 0) < 1000:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            update_gemini_generation_job(
+                job_id,
+                status="failed",
+                current_stage=f"daily_fresh:{pack_type}",
+                error_message="fresh_candidate_pool_insufficient",
+            )
+            return {
+                "ok": False,
+                "error": "fresh_candidate_pool_insufficient",
+                "reason": "vocabulary_pool 候選不足，請先匯入 OpenJLPT 或檢查 candidate selection 條件",
+                "job_id": job_id,
+                "stage": "daily_fresh",
+                "pack_type": pack_type,
+                "item_type": item_type,
+                "inventory": inventory,
+                "retryable": False,
+                "continue_same_step": False,
+                "elapsed_ms": elapsed_ms,
+            }, 200
+        candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+        if candidate_plan.get("missing"):
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            update_gemini_generation_job(
+                job_id,
+                status="failed",
+                current_stage=f"daily_fresh:{pack_type}",
+                error_message="fresh_candidate_pool_insufficient",
+            )
+            print(
+                "[daily-fresh-candidates] insufficient "
+                f"job_id={job_id} pack={pack_type} item_type={item_type} missing={candidate_plan.get('missing')}"
+            )
+            return {
+                "ok": False,
+                "error": "fresh_candidate_pool_insufficient",
+                "reason": "vocabulary_pool 候選不足，請先匯入 OpenJLPT 或檢查 candidate selection 條件",
+                "job_id": job_id,
+                "stage": "daily_fresh",
+                "pack_type": pack_type,
+                "item_type": item_type,
+                "missing": candidate_plan.get("missing") or [],
+                "retryable": False,
+                "continue_same_step": False,
+                "elapsed_ms": elapsed_ms,
+            }, 200
+        requested_total = len(candidate_plan.get("items") or [])
+        print(
+            f"[daily-fresh-candidates] enrich_plan pack={pack_type} "
+            f"item_type={item_type} candidate_count={requested_total}"
+        )
+        print(f"[gemini-enrich] input_candidates pack={pack_type} count={requested_total}")
+        print(f"[gemini-enrich] mode=fixed_candidates pack={pack_type}")
 
     for attempt_index in range(max_attempts):
         retry = attempt_index > 0
         per_level_exclude_limit = 5 if retry else 10
         call_quota = requested_by_level
-        if retry:
+        if retry and item_type not in {"word", "verb"}:
             call_quota = quota_with_small_overage(step.get("quota_by_level") or requested_by_level, 5 if item_type == "verb" else 8 if item_type == "word" else 5, add_backup=False)
-        requested_total = sum(call_quota.values())
+        if item_type in {"word", "verb"}:
+            call_quota = requested_by_level
+            requested_total = len(candidate_plan.get("items") or [])
+        else:
+            requested_total = sum(call_quota.values())
         exclude_by_level = gemini_daily_exclude_keys_by_level(item_type, levels, recent_keys=recent_keys, max_per_level=per_level_exclude_limit)
-        prompt = build_gemini_daily_fresh_prompt(pack_type, item_type, call_quota, exclude_by_level)
+        prompt = (
+            build_gemini_daily_enrich_prompt(pack_type, item_type, candidate_plan.get("candidates_by_level") or {})
+            if item_type in {"word", "verb"}
+            else build_gemini_daily_fresh_prompt(pack_type, item_type, call_quota, exclude_by_level)
+        )
         print(f"[gemini-cost] daily_fresh_call type={pack_type} requested={requested_total}")
-        print(f"[gemini-cost] exclude_keys_by_level max_per_level={per_level_exclude_limit}")
+        if item_type in {"word", "verb"}:
+            print(f"[gemini-cost] daily_fresh_enrich_candidates type={pack_type} count={requested_total}")
+        else:
+            print(f"[gemini-cost] exclude_keys_by_level max_per_level={per_level_exclude_limit}")
         if retry:
             print("[gemini-cost] timeout_retry reduced=true")
         try:
@@ -8162,6 +8821,13 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 raise ValueError("empty_bank_items")
             allowed_levels = set(levels)
             items = [item for item in items if item.get("jlpt_level") in allowed_levels]
+            if item_type in {"word", "verb"}:
+                items, match_stats = filter_enriched_items_to_candidates(items, item_type, candidate_plan.get("items") or [])
+                print(
+                    f"[daily-fresh-candidates] enrich_validated pack={pack_type} "
+                    f"matched={match_stats.get('matched', 0)} unknown={match_stats.get('unknown', 0)} "
+                    f"mismatch={match_stats.get('mismatch', 0)} invalid_pos={match_stats.get('invalid_pos', 0)}"
+                )
             if not items:
                 print(f"[gemini-bank] daily_fresh normalized pack={pack_type} valid=0 invalid_reason=missing_level")
                 if not best_effort:
@@ -8192,6 +8858,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 daily_batch_id=daily_batch_id,
                 generated_for_date=material_date,
                 generated_source="daily_fresh_jit",
+                retag_existing=False,
             )
             inserted_total += int(result.get("inserted") or 0)
             skipped_total += int(result.get("skipped") or 0)
@@ -8282,6 +8949,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         "last_error": last_error,
         "daily_batch_id": daily_batch_id,
         "generated_for_date": material_date,
+        "candidate_source": "vocabulary_pool" if item_type in {"word", "verb"} else "gemini",
+        "candidate_count": len(candidate_plan.get("items") or []),
+        "candidate_missing": candidate_plan.get("missing") or [],
     }
     cache["daily_fresh"] = pack_cache
     cache = make_json_safe(cache)
