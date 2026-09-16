@@ -5599,6 +5599,37 @@ def build_daily_fresh_candidate_payload(row, item_type, level):
     }
 
 
+def sanitize_vocabulary_pool_candidate_row(row):
+    sanitized = dict(row or {})
+    for field in [
+        "surface",
+        "base_form",
+        "term",
+        "word",
+        "dictionary_form",
+        "reading",
+        "reading_hiragana",
+        "normalized_key",
+        "jlpt_level",
+        "level",
+        "target_level",
+        "part_of_speech",
+        "pos",
+        "category",
+        "source",
+        "source_name",
+        "source_license",
+        "quality",
+        "status",
+        "domain_tags",
+        "payload_json",
+        "last_used_at",
+    ]:
+        if field in sanitized:
+            sanitized[field] = safe_text(sanitized.get(field))
+    return sanitized
+
+
 def daily_fresh_existing_bank_keys(item_type, levels):
     ensure_gemini_item_bank_store()
     levels = [normalize_gemini_bank_level(level, item_type) for level in levels if level]
@@ -5637,6 +5668,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
     ensure_vocabulary_pool_store()
     level = normalize_gemini_bank_level(level, item_type)
     limit = max(1, min(int(limit or 20), 100))
+    print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
     excluded = sorted({normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)})
     active_clause = "COALESCE(is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(is_active, 1) = 1"
     normalized_expr = "COALESCE(NULLIF(vp.normalized_key, ''), NULLIF(vp.base_form, ''), NULLIF(vp.surface, ''))"
@@ -5697,7 +5729,32 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         params.extend(excluded)
     params.append(limit)
     sql = f"""
-        SELECT *
+        SELECT
+            vp.id,
+            vp.surface,
+            vp.base_form,
+            vp.reading_hiragana,
+            vp.meaning_zh,
+            vp.part_of_speech,
+            vp.jlpt_level,
+            vp.verb_group,
+            vp.conjugation_type,
+            vp.quality,
+            vp.normalized_key,
+            vp.category,
+            vp.example_sentence,
+            vp.example_translation_zh,
+            vp.source,
+            vp.source_name,
+            vp.source_license,
+            vp.domain_tags,
+            vp.status,
+            vp.frequency_rank,
+            vp.commonness_score,
+            vp.priority,
+            vp.is_active,
+            vp.used_in_material_count,
+            vp.last_used_at
         FROM vocabulary_pool vp
         WHERE {' AND '.join(where)}
         ORDER BY
@@ -5715,11 +5772,21 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
                     columns = [desc[0] for desc in cur.description]
-                    return [dict(zip(columns, row)) for row in cur.fetchall()]
+                    rows = [sanitize_vocabulary_pool_candidate_row(dict(zip(columns, row))) for row in cur.fetchall()]
+                    print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} fetched={len(rows)}")
+                    print("[vocabulary-pool] safe_text_applied=true")
+                    return rows
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
             conn.row_factory = sqlite3.Row
-            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+            rows = [sanitize_vocabulary_pool_candidate_row(dict(row)) for row in conn.execute(sql, params).fetchall()]
+            print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} fetched={len(rows)}")
+            print("[vocabulary-pool] safe_text_applied=true")
+            return rows
     except Exception as exc:
+        if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
+            print(f"[vocabulary-pool] candidate_fetch_error error_type=utf8_decode_error field=unknown reason={exc}")
+            return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
 
@@ -5741,22 +5808,47 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     selected_by_level = {}
     selected_items = []
     missing = []
+    fetch_errors = []
+    skipped_bad_encoding = 0
     seen = set()
     for level, needed in requested_by_level.items():
         rows = fetch_daily_fresh_candidate_rows(item_type, level, max(needed * 20, 100), excluded_keys | seen)
         candidates = []
         for row in rows:
-            if not is_daily_fresh_quality_pool_row(row, item_type):
+            if isinstance(row, dict) and row.get("__fetch_error"):
+                fetch_errors.append({"level": level, "error": row.get("__fetch_error"), "message": row.get("__error_message", "")})
                 continue
-            key = vocabulary_pool_candidate_key(row)
-            if not key or key in excluded_keys or key in seen:
+            try:
+                if not is_daily_fresh_quality_pool_row(row, item_type):
+                    continue
+                key = vocabulary_pool_candidate_key(row)
+                if not key or key in excluded_keys or key in seen:
+                    continue
+                candidate = build_daily_fresh_candidate_payload(row, item_type, level)
+            except UnicodeDecodeError as exc:
+                skipped_bad_encoding += 1
+                print(
+                    "[vocabulary-pool] skipped_bad_encoding "
+                    f"item_type={item_type} level={level} id={safe_text((row or {}).get('id'))} "
+                    f"key={log_safe_text((row or {}).get('normalized_key'))} reason={exc}"
+                )
                 continue
-            candidate = build_daily_fresh_candidate_payload(row, item_type, level)
+            except Exception as exc:
+                if "codec can't decode" in str(exc):
+                    skipped_bad_encoding += 1
+                    print(
+                        "[vocabulary-pool] skipped_bad_encoding "
+                        f"item_type={item_type} level={level} id={safe_text((row or {}).get('id'))} "
+                        f"key={log_safe_text((row or {}).get('normalized_key'))} reason={exc}"
+                    )
+                    continue
+                raise
             candidates.append(candidate)
             selected_items.append(candidate)
             seen.add(key)
             if len(candidates) >= needed:
                 break
+        print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(candidates)}")
         selected_by_level[level] = candidates
         if len(candidates) < needed:
             missing.append({"level": level, "requested": needed, "available": len(candidates)})
@@ -5767,13 +5859,14 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     ]
     print(f"[fresh-candidate] source=vocabulary_pool pack={pack_type or item_type} selected={len(selected_items)}")
     print(f"[fresh-candidate] levels={level_counts}")
-    print(f"[fresh-candidate] candidates pack={pack_type or item_type} items={json.dumps(selected_surfaces, ensure_ascii=False)}")
+    print(f"[fresh-candidate] candidates pack={pack_type or item_type} items={log_safe_text(json.dumps(selected_surfaces, ensure_ascii=False))}")
+    print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
     if missing:
         print(
             f"[fresh-candidate] insufficient source=vocabulary_pool pack={pack_type or item_type} "
             f"item_type={item_type} missing={missing}"
         )
-    return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing}
+    return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing, "fetch_errors": fetch_errors, "skipped_bad_encoding": skipped_bad_encoding}
 
 
 def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
@@ -8294,8 +8387,21 @@ def gemini_quota_exceeded_payload(job_id="", stage="", item_type="", level="", e
     }
 
 
+def safe_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        try:
+            return bytes(value).decode("utf-8", errors="replace").strip()
+        except Exception:
+            return str(value).strip()
+    return str(value).strip()
+
+
 def simple_text(value):
-    return str(value or "").strip()
+    return safe_text(value)
 
 
 def normalize_gemini_level(value, fallback="N5"):
@@ -8722,6 +8828,27 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "elapsed_ms": elapsed_ms,
             }, 200
         candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+        if candidate_plan.get("fetch_errors"):
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            update_gemini_generation_job(
+                job_id,
+                status="failed",
+                current_stage=f"daily_fresh:{pack_type}",
+                error_message="fresh_candidate_decode_error",
+            )
+            return {
+                "ok": False,
+                "error": "fresh_candidate_decode_error",
+                "reason": "vocabulary_pool candidate contains invalid text encoding",
+                "job_id": job_id,
+                "stage": "daily_fresh",
+                "pack_type": pack_type,
+                "item_type": item_type,
+                "fetch_errors": candidate_plan.get("fetch_errors") or [],
+                "retryable": False,
+                "continue_same_step": False,
+                "elapsed_ms": elapsed_ms,
+            }, 200
         if candidate_plan.get("missing"):
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             update_gemini_generation_job(
@@ -9706,13 +9833,14 @@ def dedupe_vocab_items(items, existing_keys=None):
 def first_text(row, names):
     for name in names:
         value = row.get(name)
-        if value is not None and str(value).strip():
-            return str(value).strip()
+        text = safe_text(value)
+        if text:
+            return text
     return ""
 
 
 def normalize_vocab_key(value):
-    text = unicodedata.normalize("NFKC", str(value or "")).strip()
+    text = unicodedata.normalize("NFKC", safe_text(value)).strip()
     text = re.sub(r"\s+", "", text)
     buzz_base = "\u30d0\u30ba\u308b"
     buzz_variants = (
