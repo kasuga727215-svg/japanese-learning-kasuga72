@@ -5630,6 +5630,23 @@ def sanitize_vocabulary_pool_candidate_row(row):
     return sanitized
 
 
+def log_candidate_fetch_error(item_type, level, field, row_id, value, exc):
+    tb = traceback.extract_tb(exc.__traceback__)
+    line_no = tb[-1].lineno if tb else "unknown"
+    error_type = "utf8_decode_error" if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc) else type(exc).__name__
+    print(
+        "[vocabulary-pool] candidate_fetch_error "
+        f"function=fetch_daily_fresh_candidate_rows item_type={item_type} level={level} "
+        f"row_id={safe_text(row_id) or 'unknown'} field={field or 'unknown'} "
+        f"error_type={error_type} value_repr={repr(value)[:80]} line={line_no} reason={exc}"
+    )
+
+
+def postgres_text_as_bytea(column_name, alias=None):
+    alias = alias or column_name.split(".")[-1]
+    return f"convert_to(COALESCE({column_name}::text, ''), 'UTF8') AS {alias}"
+
+
 def daily_fresh_existing_bank_keys(item_type, levels):
     ensure_gemini_item_bank_store()
     levels = [normalize_gemini_bank_level(level, item_type) for level in levels if level]
@@ -5728,33 +5745,65 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         where.append(f"{normalized_expr} NOT IN ({placeholders})")
         params.extend(excluded)
     params.append(limit)
+    if DATABASE_URL:
+        select_columns = [
+            "vp.id",
+            postgres_text_as_bytea("vp.surface"),
+            postgres_text_as_bytea("vp.base_form"),
+            postgres_text_as_bytea("vp.reading_hiragana"),
+            postgres_text_as_bytea("vp.meaning_zh"),
+            postgres_text_as_bytea("vp.part_of_speech"),
+            postgres_text_as_bytea("vp.jlpt_level"),
+            "vp.verb_group",
+            postgres_text_as_bytea("vp.conjugation_type"),
+            postgres_text_as_bytea("vp.quality"),
+            postgres_text_as_bytea("vp.normalized_key"),
+            postgres_text_as_bytea("vp.category"),
+            postgres_text_as_bytea("vp.example_sentence"),
+            postgres_text_as_bytea("vp.example_translation_zh"),
+            postgres_text_as_bytea("vp.source"),
+            postgres_text_as_bytea("vp.source_name"),
+            postgres_text_as_bytea("vp.source_license"),
+            postgres_text_as_bytea("vp.domain_tags"),
+            postgres_text_as_bytea("vp.status"),
+            "vp.frequency_rank",
+            "vp.commonness_score",
+            "vp.priority",
+            "vp.is_active",
+            "vp.used_in_material_count",
+            postgres_text_as_bytea("vp.last_used_at"),
+        ]
+    else:
+        select_columns = [
+            "vp.id",
+            "vp.surface",
+            "vp.base_form",
+            "vp.reading_hiragana",
+            "vp.meaning_zh",
+            "vp.part_of_speech",
+            "vp.jlpt_level",
+            "vp.verb_group",
+            "vp.conjugation_type",
+            "vp.quality",
+            "vp.normalized_key",
+            "vp.category",
+            "vp.example_sentence",
+            "vp.example_translation_zh",
+            "vp.source",
+            "vp.source_name",
+            "vp.source_license",
+            "vp.domain_tags",
+            "vp.status",
+            "vp.frequency_rank",
+            "vp.commonness_score",
+            "vp.priority",
+            "vp.is_active",
+            "vp.used_in_material_count",
+            "vp.last_used_at",
+        ]
     sql = f"""
         SELECT
-            vp.id,
-            vp.surface,
-            vp.base_form,
-            vp.reading_hiragana,
-            vp.meaning_zh,
-            vp.part_of_speech,
-            vp.jlpt_level,
-            vp.verb_group,
-            vp.conjugation_type,
-            vp.quality,
-            vp.normalized_key,
-            vp.category,
-            vp.example_sentence,
-            vp.example_translation_zh,
-            vp.source,
-            vp.source_name,
-            vp.source_license,
-            vp.domain_tags,
-            vp.status,
-            vp.frequency_rank,
-            vp.commonness_score,
-            vp.priority,
-            vp.is_active,
-            vp.used_in_material_count,
-            vp.last_used_at
+            {', '.join(select_columns)}
         FROM vocabulary_pool vp
         WHERE {' AND '.join(where)}
         ORDER BY
@@ -5772,20 +5821,52 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
                 with conn.cursor() as cur:
                     cur.execute(sql, params)
                     columns = [desc[0] for desc in cur.description]
-                    rows = [sanitize_vocabulary_pool_candidate_row(dict(zip(columns, row))) for row in cur.fetchall()]
+                    rows = []
+                    skipped_bad_encoding = 0
+                    for raw_row in cur.fetchall():
+                        raw_dict = dict(zip(columns, raw_row))
+                        try:
+                            rows.append(sanitize_vocabulary_pool_candidate_row(raw_dict))
+                        except Exception as row_exc:
+                            skipped_bad_encoding += 1
+                            log_candidate_fetch_error(
+                                item_type,
+                                level,
+                                "row_sanitize",
+                                raw_dict.get("id"),
+                                raw_dict,
+                                row_exc,
+                            )
                     print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} fetched={len(rows)}")
+                    print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
                     print("[vocabulary-pool] safe_text_applied=true")
                     return rows
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
             conn.row_factory = sqlite3.Row
-            rows = [sanitize_vocabulary_pool_candidate_row(dict(row)) for row in conn.execute(sql, params).fetchall()]
+            rows = []
+            skipped_bad_encoding = 0
+            for row in conn.execute(sql, params).fetchall():
+                raw_dict = dict(row)
+                try:
+                    rows.append(sanitize_vocabulary_pool_candidate_row(raw_dict))
+                except Exception as row_exc:
+                    skipped_bad_encoding += 1
+                    log_candidate_fetch_error(
+                        item_type,
+                        level,
+                        "row_sanitize",
+                        raw_dict.get("id"),
+                        raw_dict,
+                        row_exc,
+                    )
             print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} fetched={len(rows)}")
+            print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
             print("[vocabulary-pool] safe_text_applied=true")
             return rows
     except Exception as exc:
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
-            print(f"[vocabulary-pool] candidate_fetch_error error_type=utf8_decode_error field=unknown reason={exc}")
+            log_candidate_fetch_error(item_type, level, "fetchall", "unknown", "", exc)
             return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
