@@ -5901,7 +5901,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
             return rows
     except Exception as exc:
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
-            log_candidate_fetch_error(item_type, level, "fetchall", "unknown", "", exc)
+            log_candidate_fetch_error(item_type, level, "id_fetch", "unknown", "", exc)
             return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
