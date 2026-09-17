@@ -5647,6 +5647,15 @@ def postgres_text_as_bytea(column_name, alias=None):
     return f"convert_to(COALESCE({column_name}::text, ''), 'UTF8') AS {alias}"
 
 
+def daily_fresh_row_matches_candidate_fetch(row, item_type, level, excluded_keys):
+    if vocabulary_pool_candidate_level(row, item_type) != level:
+        return False
+    if not is_daily_fresh_quality_pool_row(row, item_type):
+        return False
+    key = vocabulary_pool_candidate_key(row)
+    return bool(key and key not in excluded_keys)
+
+
 def daily_fresh_existing_bank_keys(item_type, levels):
     ensure_gemini_item_bank_store()
     levels = [normalize_gemini_bank_level(level, item_type) for level in levels if level]
@@ -5744,18 +5753,17 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         placeholders = sql_placeholders(len(excluded))
         where.append(f"{normalized_expr} NOT IN ({placeholders})")
         params.extend(excluded)
-    id_limit = max(limit, 300)
-    id_params = [*params, id_limit]
+    id_limit = max(limit * 30, 1500)
+    id_params = [id_limit]
     id_sql = f"""
         SELECT vp.id
         FROM vocabulary_pool vp
-        WHERE {' AND '.join(where)}
+        WHERE {active_clause}
         ORDER BY
             COALESCE(vp.used_in_material_count, 0) ASC,
             {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
             {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
             COALESCE(vp.priority, 1) DESC,
-            {'vp.last_used_at ASC NULLS FIRST' if DATABASE_URL else "COALESCE(vp.last_used_at, '') ASC"},
             RANDOM()
         LIMIT {'%s' if DATABASE_URL else '?'}
     """
@@ -5826,7 +5834,12 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
                                 continue
                             columns = [desc[0] for desc in cur.description]
                             raw_dict = dict(zip(columns, raw_row))
-                            rows.append(sanitize_vocabulary_pool_candidate_row(raw_dict))
+                            candidate_row = sanitize_vocabulary_pool_candidate_row(raw_dict)
+                            if not daily_fresh_row_matches_candidate_fetch(candidate_row, item_type, level, set(excluded)):
+                                continue
+                            rows.append(candidate_row)
+                            if len(rows) >= limit:
+                                break
                         except UnicodeDecodeError as row_exc:
                             skipped_bad_encoding += 1
                             log_candidate_fetch_error(
@@ -5869,7 +5882,12 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
                     if not row:
                         continue
                     raw_dict = dict(row)
-                    rows.append(sanitize_vocabulary_pool_candidate_row(raw_dict))
+                    candidate_row = sanitize_vocabulary_pool_candidate_row(raw_dict)
+                    if not daily_fresh_row_matches_candidate_fetch(candidate_row, item_type, level, set(excluded)):
+                        continue
+                    rows.append(candidate_row)
+                    if len(rows) >= limit:
+                        break
                 except UnicodeDecodeError as row_exc:
                     skipped_bad_encoding += 1
                     log_candidate_fetch_error(
@@ -5935,6 +5953,8 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
                 fetch_errors.append({"level": level, "error": row.get("__fetch_error"), "message": row.get("__error_message", "")})
                 continue
             try:
+                if vocabulary_pool_candidate_level(row, item_type) != level:
+                    continue
                 if not is_daily_fresh_quality_pool_row(row, item_type):
                     continue
                 key = vocabulary_pool_candidate_key(row)
