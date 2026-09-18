@@ -8377,6 +8377,19 @@ def call_gemini(
         generation_config["temperature"] = float(temperature)
     if generation_config:
         request_payload["generationConfig"] = generation_config
+    print(
+        "[gemini-debug] request_config "
+        + json.dumps(
+            {
+                "model": model_name,
+                "temperature": generation_config.get("temperature"),
+                "response_mime_type": generation_config.get("responseMimeType"),
+                "response_schema": bool(generation_config.get("responseSchema")),
+                "max_output_tokens": generation_config.get("maxOutputTokens"),
+            },
+            ensure_ascii=False,
+        )
+    )
     payload = json.dumps(request_payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -8407,15 +8420,26 @@ def call_gemini(
     try:
         candidate = data["candidates"][0]
         finish_reason = candidate.get("finishReason") or candidate.get("finish_reason") or ""
-        text = candidate["content"]["parts"][0]["text"]
+        parts = candidate.get("content", {}).get("parts") or []
+        text_segments = [
+            str(part.get("text") or "")
+            for part in parts
+            if isinstance(part, dict) and part.get("text") is not None
+        ]
+        text = "".join(text_segments)
         if not str(text or "").strip():
             raise RuntimeError("AI 回傳空內容。")
         if max_output_tokens:
             print(f"[gemini-debug] finish_reason={finish_reason or 'unknown'}")
+            print(f"[gemini-debug] response_parts={len(text_segments)}")
             print(f"[gemini-debug] output_text_length={len(str(text or ''))}")
             print(f"[gemini-debug] raw_tail={log_safe_text(str(text or '')[-240:])}")
         if str(finish_reason).upper() == "MAX_TOKENS":
-            raise RuntimeError("gemini_output_token_limit: finish_reason=MAX_TOKENS")
+            raise RuntimeError(
+                "gemini_output_token_limit_config_error: "
+                f"finish_reason=MAX_TOKENS; max_output_tokens={generation_config.get('maxOutputTokens')}; "
+                f"output_text_length={len(str(text or ''))}; response_parts={len(text_segments)}"
+            )
         return text
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError("AI 回傳格式不正確。") from e
@@ -8710,6 +8734,8 @@ def build_gemini_stage_prompt(stage, settings):
 
 def classify_gemini_daily_material_error(error):
     text = str(error or "")
+    if text.startswith("gemini_output_token_limit_config_error"):
+        return "output_token_limit_config_error"
     if text.startswith("gemini_output_token_limit") or "finish_reason=MAX_TOKENS" in text:
         return "output_token_limit"
     if text.startswith("json_truncated"):
@@ -9561,8 +9587,11 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     elapsed_ms=round((time.perf_counter() - started) * 1000),
                 ), 200
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            if reason in {"json_parse_error", "json_truncated", "output_token_limit"}:
-                if reason == "output_token_limit":
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error"}:
+                if reason == "output_token_limit_config_error":
+                    error_code = "gemini_output_token_limit_config_error"
+                    message = "Gemini API 輸出 token 設定異常，已停止本次生成避免重複扣費。請查看 Render Logs 的 request_config。"
+                elif reason == "output_token_limit":
                     error_code = "gemini_output_token_limit"
                     message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
                 else:
@@ -9767,10 +9796,13 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     f"reason={reason} raw_excerpt={raw_excerpt}"
                 )
                 continue
-            if reason in {"json_parse_error", "json_truncated", "output_token_limit"} and not best_effort:
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error"} and not best_effort:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
-                if reason == "output_token_limit":
+                if reason == "output_token_limit_config_error":
+                    error_code = "gemini_output_token_limit_config_error"
+                    message = "Gemini API 輸出 token 設定異常，已停止本次生成避免重複扣費。請查看 Render Logs 的 request_config。"
+                elif reason == "output_token_limit":
                     error_code = "gemini_output_token_limit"
                     message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
                 else:
