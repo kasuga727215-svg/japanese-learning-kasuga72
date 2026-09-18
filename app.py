@@ -5822,12 +5822,16 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         placeholders = sql_placeholders(len(excluded))
         where.append(f"{normalized_expr} NOT IN ({placeholders})")
         params.extend(excluded)
+    # Keep the first pass strictly id-only. Some imported OpenJLPT text rows can
+    # still trigger driver-level UTF-8 decoding before row normalization; all
+    # text filters must run after fetching a single row through safe_text.
     id_limit = min(max(limit * 20, 800), 1000)
-    id_params = [*params, id_limit]
+    id_active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
+    id_params = [id_limit]
     id_sql = f"""
         SELECT vp.id
         FROM vocabulary_pool vp
-        WHERE {' AND '.join(where)}
+        WHERE {id_active_clause}
         ORDER BY
             COALESCE(vp.used_in_material_count, 0) ASC,
             {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
@@ -5890,6 +5894,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
+                    print("[vocabulary-pool] candidate_id_fetch_sql_mode=id_only")
                     cur.execute(id_sql, id_params)
                     candidate_ids = [row[0] for row in cur.fetchall() if row and row[0] is not None]
                     print(f"[vocabulary-pool] candidate_id_fetch_success item_type={item_type} level={level} ids={len(candidate_ids)}")
@@ -5941,6 +5946,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
             conn.row_factory = sqlite3.Row
+            print("[vocabulary-pool] candidate_id_fetch_sql_mode=id_only")
             candidate_ids = [row[0] for row in conn.execute(id_sql, id_params).fetchall() if row and row[0] is not None]
             print(f"[vocabulary-pool] candidate_id_fetch_success item_type={item_type} level={level} ids={len(candidate_ids)}")
             rows = []
@@ -5989,6 +5995,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
     except Exception as exc:
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
             log_candidate_fetch_error(item_type, level, "id_fetch", "unknown", "", exc)
+            print("[vocabulary-pool] regression_error id_fetch_touched_text_field=true")
             return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
