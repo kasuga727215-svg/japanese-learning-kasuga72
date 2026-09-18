@@ -6103,27 +6103,49 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             else:
                 flat_items.append({"level": level, "w": candidate.get("w", "")})
     if item_type == "verb":
-        schema = {"items": [["育てる", "そだてる", "養育", "2", "育てます", "育てて", "育てない", "育てた", "花を育てます。", "我種花。"]]}
-        item_rules = (
-            "你只負責補完指定動詞。不得新增動詞，不得替換動詞，不得改變順序。"
-            "每筆 output 的 d 必須完全等於 input 的 d。"
-            "每筆只回陣列 [d,r,m,g,f_masu,f_te,f_nai,f_ta,ex,ex_zh]。"
-            "若不確定正確變化，請省略該 item，不可換成其他動詞。"
+        input_lines = "\n".join(
+            f"{item.get('level', '')}\t{item.get('d', '')}" for item in flat_items if item.get("d")
         )
-    elif item_type == "grammar":
-        schema = {"items": [["particle:を", "を", "表示動作對象", "名詞 + を + 動詞", "水を飲みます。", "喝水。"]]}
-        item_rules = (
-            "你只負責補完指定文法。不得新增文法，不得替換文法，不得改變順序。"
-            "每筆只回陣列 [k,t,m,c,ex,ex_zh]。"
-            "若不確定，請省略該 item，不可換成其他文法。"
+        return (
+            "你只需要補完指定詞條。\n"
+            "不可新增詞。不可刪除詞。不可改變順序。\n"
+            "每個詞只輸出一行 TSV，欄位用 TAB 分隔。\n"
+            "不要 Markdown。不要 JSON。不要解釋。最後一行輸出 END。\n"
+            "verb 欄位固定 10 欄：d\tr\tm\tg\tf_masu\tf_te\tf_nai\tf_ta\tex\tex_zh。\n"
+            "第一欄 d 必須完全等於 input d。日文例句最多 15 字，中文例句最多 15 字。\n"
+            "不可輸出引號，不可輸出逗號包裝。\n"
+            "Input candidates，格式 level<TAB>d：\n"
+            f"{input_lines}\n"
+            "Output example:\n"
+            "登る\tのぼる\t攀登\t1\t登ります\t登って\t登らない\t登った\t山に登ります。\t爬山。\n"
+            "END"
         )
-    else:
-        schema = {"items": [["財布", "さいふ", "錢包", "名詞", "財布を忘れました。", "我忘了錢包。"]]}
-        item_rules = (
-            "你只負責補完指定單字。不得新增單字，不得替換單字，不得改變順序。"
-            "每筆 output 的 w 必須完全等於 input 的 w。"
-            "每筆只回陣列 [w,r,m,p,ex,ex_zh]。p 不可是動詞。若指定詞是動詞，請省略該 item，不可換成其他詞。"
+    if item_type == "word":
+        input_lines = "\n".join(
+            f"{item.get('level', '')}\t{item.get('w', '')}" for item in flat_items if item.get("w")
         )
+        return (
+            "你只需要補完指定詞條。\n"
+            "不可新增詞。不可刪除詞。不可改變順序。\n"
+            "每個詞只輸出一行 TSV，欄位用 TAB 分隔。\n"
+            "不要 Markdown。不要 JSON。不要解釋。最後一行輸出 END。\n"
+            "word 欄位固定 6 欄：w\tr\tm\tp\tex\tex_zh。\n"
+            "第一欄 w 必須完全等於 input word。p 不可是動詞。\n"
+            "日文例句最多 15 字，中文例句最多 15 字。\n"
+            "不可輸出引號，不可輸出逗號包裝。\n"
+            "Input candidates，格式 level<TAB>w：\n"
+            f"{input_lines}\n"
+            "Output example:\n"
+            "確認\tかくにん\t確認\t名詞\t内容を確認します。\t確認內容。\n"
+            "原因\tげんいん\t原因\t名詞\t原因を調べます。\t調查原因。\n"
+            "END"
+        )
+    schema = {"items": [["particle:を", "を", "表示動作對象", "名詞 + を + 動詞", "水を飲みます。", "喝水。"]]}
+    item_rules = (
+        "你只負責補完指定文法。不得新增文法，不得替換文法，不得改變順序。"
+        "每筆只回陣列 [k,t,m,c,ex,ex_zh]。"
+        "若不確定，請省略該 item，不可換成其他文法。"
+    )
     return (
         "Return JSON only, as an object with an items array. Do not use Markdown or extra text. "
         f"Daily Fresh JIT enrich pack={pack_type}. mode=fixed_candidates. "
@@ -6300,6 +6322,96 @@ def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
         "ex": clipped_compact_text(values[4], 15),
         "ex_zh": clipped_compact_text(values[5], 15),
     }
+
+
+def parse_tsv_enrich_response(text, expected_candidates, item_type):
+    expected = []
+    for candidate in expected_candidates or []:
+        surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
+        surface = simple_text(surface)
+        if not surface:
+            continue
+        expected.append(
+            {
+                "surface": surface,
+                "level": simple_text(candidate.get("level")) or "N5",
+                "normalized_key": normalize_vocab_key(candidate.get("normalized_key") or surface),
+            }
+        )
+    raw_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    rows = []
+    for line in raw_lines:
+        cleaned = line.strip()
+        if not cleaned:
+            continue
+        if cleaned.startswith("```"):
+            continue
+        if cleaned.upper() == "END":
+            break
+        rows.append(cleaned)
+
+    items = []
+    seen = set()
+    stats = {"parsed": len(rows), "valid": 0, "invalid": 0, "duplicate": 0, "missing": 0}
+    expected_index = 0
+    required_columns = 10 if item_type == "verb" else 6
+    for row in rows:
+        fields = [simple_text(value).strip().strip('"').strip("'") for value in row.split("\t")]
+        if len(fields) != required_columns:
+            stats["invalid"] += 1
+            continue
+        matched_index = None
+        for index in range(expected_index, len(expected)):
+            if fields[0] == expected[index]["surface"]:
+                matched_index = index
+                break
+        if matched_index is None:
+            stats["invalid"] += 1
+            continue
+        expected_index = matched_index + 1
+        level = expected[matched_index]["level"]
+        if item_type == "verb":
+            payload = {
+                "type": "verb",
+                "level": level,
+                "d": fields[0],
+                "r": fields[1],
+                "m": fields[2],
+                "g": fields[3],
+                "f_masu": fields[4],
+                "f_te": fields[5],
+                "f_nai": fields[6],
+                "f_ta": fields[7],
+                "ex": clipped_compact_text(fields[8], 15),
+                "ex_zh": clipped_compact_text(fields[9], 15),
+                "normalized_key": expected[matched_index]["normalized_key"],
+            }
+        else:
+            payload = {
+                "type": "word",
+                "level": level,
+                "w": fields[0],
+                "r": fields[1],
+                "m": fields[2],
+                "p": fields[3],
+                "ex": clipped_compact_text(fields[4], 15),
+                "ex_zh": clipped_compact_text(fields[5], 15),
+                "normalized_key": expected[matched_index]["normalized_key"],
+            }
+        try:
+            bank_item = gemini_bank_item_from_payload(item_type, payload, level)
+        except ValueError:
+            stats["invalid"] += 1
+            continue
+        key = bank_item["normalized_key"]
+        if key in seen:
+            stats["duplicate"] += 1
+            continue
+        seen.add(key)
+        items.append(bank_item)
+        stats["valid"] += 1
+    stats["missing"] = max(0, len(expected) - stats["valid"])
+    return items, stats
 
 
 def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
@@ -8354,6 +8466,7 @@ def call_gemini(
     response_schema=None,
     max_output_tokens=None,
     temperature=None,
+    protocol=None,
 ):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
@@ -8377,11 +8490,17 @@ def call_gemini(
         generation_config["temperature"] = float(temperature)
     if generation_config:
         request_payload["generationConfig"] = generation_config
+    if protocol:
+        print(f"[gemini-debug] protocol={protocol}")
+        print(f"[gemini-debug] response_schema={str(bool(response_schema)).lower()}")
+        print(f"[gemini-debug] response_mime_type={response_mime_type or ''}")
+        print(f"[gemini-debug] max_output_tokens={generation_config.get('maxOutputTokens')}")
     print(
         "[gemini-debug] request_config "
         + json.dumps(
             {
                 "model": model_name,
+                "protocol": protocol,
                 "temperature": generation_config.get("temperature"),
                 "response_mime_type": generation_config.get("responseMimeType"),
                 "response_schema": bool(generation_config.get("responseSchema")),
@@ -8437,7 +8556,7 @@ def call_gemini(
         if str(finish_reason).upper() == "MAX_TOKENS":
             raise RuntimeError(
                 "gemini_output_token_limit_config_error: "
-                f"finish_reason=MAX_TOKENS; max_output_tokens={generation_config.get('maxOutputTokens')}; "
+                f"finish_reason=MAX_TOKENS; protocol={protocol or ''}; max_output_tokens={generation_config.get('maxOutputTokens')}; "
                 f"output_text_length={len(str(text or ''))}; response_parts={len(text_segments)}"
             )
         return text
@@ -9362,15 +9481,16 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             raw_chunk_text = call_gemini(
                 prompt,
                 timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
-                response_mime_type="application/json",
-                response_schema=gemini_daily_pack_schema(item_type, requested_count),
-                max_output_tokens=gemini_daily_pack_max_tokens(pack_type, retry=False),
+                response_mime_type="text/plain",
+                response_schema=None,
+                max_output_tokens=512,
                 temperature=0,
+                protocol="tsv",
             )
-            chunk_items, chunk_parse_stats = parse_gemini_bank_items_with_stats(
-                item_type,
-                chunk_candidates[0].get("level") if chunk_candidates else (levels[0] if levels else settings.get("target_level", "N5")),
+            chunk_items, chunk_parse_stats = parse_tsv_enrich_response(
                 raw_chunk_text,
+                chunk_candidates,
+                item_type,
             )
             print(
                 f"[gemini-bank] daily_fresh parsed pack={pack_type} chunk={chunk_label} "
