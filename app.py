@@ -5392,6 +5392,56 @@ DAILY_FRESH_WORD_ALLOWED_POS = {
     "SNS",
 }
 DAILY_FRESH_VERB_ENDINGS = ("う", "く", "ぐ", "す", "つ", "ぬ", "ぶ", "む", "る")
+DAILY_FRESH_NON_VERB_COUNTER_WORDS = {
+    "一つ",
+    "二つ",
+    "三つ",
+    "四つ",
+    "五つ",
+    "六つ",
+    "七つ",
+    "八つ",
+    "九つ",
+    "十",
+    "五",
+    "日",
+    "月",
+    "年",
+    "人",
+    "本",
+    "枚",
+    "円",
+}
+DAILY_FRESH_COUNTER_UNITS = (
+    "つ",
+    "日",
+    "月",
+    "年",
+    "人",
+    "本",
+    "枚",
+    "円",
+    "個",
+    "回",
+    "冊",
+    "台",
+    "匹",
+    "歳",
+    "才",
+    "時",
+    "分",
+    "秒",
+    "週間",
+    "ヶ月",
+    "か月",
+    "杯",
+    "階",
+    "軒",
+    "件",
+    "度",
+    "番",
+)
+DAILY_FRESH_NUMBER_TOKEN_PATTERN = r"[0-9０-９一二三四五六七八九十百千万〇零何幾数]+"
 DAILY_FRESH_DEFAULT_DUPLICATE_BLACKLIST = {
     "見る",
     "食べる",
@@ -5508,9 +5558,25 @@ def has_variant_separator(surface):
     return any(token in str(surface or "") for token in ["/", "／", "|", "｜"])
 
 
+def is_daily_fresh_non_verb_counter_surface(surface):
+    text = simple_text(surface).replace(" ", "").replace("　", "")
+    if not text:
+        return False
+    if text in DAILY_FRESH_NON_VERB_COUNTER_WORDS:
+        return True
+    if re.fullmatch(DAILY_FRESH_NUMBER_TOKEN_PATTERN, text):
+        return True
+    for unit in DAILY_FRESH_COUNTER_UNITS:
+        if re.fullmatch(f"{DAILY_FRESH_NUMBER_TOKEN_PATTERN}{re.escape(unit)}", text):
+            return True
+    return False
+
+
 def looks_like_daily_fresh_verb_surface(surface):
     text = simple_text(surface)
     if not text or has_variant_separator(text):
+        return False
+    if is_daily_fresh_non_verb_counter_surface(text):
         return False
     if len(text) < 2:
         return False
@@ -5535,6 +5601,8 @@ def is_daily_fresh_verb_pool_row(row):
     if not surface:
         return False
     if has_variant_separator(surface):
+        return False
+    if is_daily_fresh_non_verb_counter_surface(surface):
         return False
     pos = first_text(row, ["part_of_speech", "pos"]).strip()
     pos_lower = pos.lower()
