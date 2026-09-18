@@ -6068,6 +6068,48 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
     )
 
 
+def chunked_list(items, chunk_size):
+    chunk_size = max(1, int(chunk_size or 1))
+    return [list(items[index : index + chunk_size]) for index in range(0, len(items or []), chunk_size)]
+
+
+def daily_fresh_enrich_chunk_size(item_type):
+    if item_type == "verb":
+        return 2
+    if item_type == "grammar":
+        return 1
+    return 3
+
+
+def daily_fresh_candidates_by_level(candidates):
+    grouped = {}
+    for candidate in candidates or []:
+        level = simple_text(candidate.get("level"))
+        if not level:
+            continue
+        grouped.setdefault(level, []).append(candidate)
+    return grouped
+
+
+def cached_daily_fresh_candidate_plan(pack_state):
+    if not isinstance(pack_state, dict):
+        return None
+    plan = pack_state.get("candidate_plan")
+    if not isinstance(plan, dict):
+        return None
+    items = plan.get("items")
+    candidates_by_level = plan.get("candidates_by_level")
+    if not isinstance(items, list) or not isinstance(candidates_by_level, dict):
+        return None
+    return {
+        "candidates_by_level": candidates_by_level,
+        "items": items,
+        "missing": plan.get("missing") if isinstance(plan.get("missing"), list) else [],
+        "fetch_errors": plan.get("fetch_errors") if isinstance(plan.get("fetch_errors"), list) else [],
+        "skipped_bad_encoding": int(plan.get("skipped_bad_encoding") or 0),
+    }
+
+
 def filter_enriched_items_to_candidates(items, item_type, candidates):
     candidate_by_key = {}
     for candidate in candidates or []:
@@ -8930,6 +8972,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     requested_total = sum(requested_by_level.values())
     raw_text = ""
     candidate_plan = {"candidates_by_level": {}, "items": [], "missing": []}
+    pack_state = pack_cache.get(pack_type) if isinstance(pack_cache.get(pack_type), dict) else {}
     if item_type in {"word", "verb"}:
         inventory = vocabulary_pool_candidate_inventory()
         inventory_levels = inventory.get("by_level") or {}
@@ -8963,7 +9006,15 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "continue_same_step": False,
                 "elapsed_ms": elapsed_ms,
             }, 200
-        candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+        cached_plan = cached_daily_fresh_candidate_plan(pack_state)
+        if cached_plan:
+            candidate_plan = cached_plan
+            print(
+                f"[daily-fresh-candidates] using_cached_candidates job_id={job_id} "
+                f"pack={pack_type} item_type={item_type} candidate_count={len(candidate_plan.get('items') or [])}"
+            )
+        else:
+            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
         if candidate_plan.get("fetch_errors"):
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             update_gemini_generation_job(
@@ -9011,12 +9062,290 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "elapsed_ms": elapsed_ms,
             }, 200
         requested_total = len(candidate_plan.get("items") or [])
+        if not cached_plan:
+            pack_state = {
+                **pack_state,
+                "item_type": item_type,
+                "requested_by_level": requested_by_level,
+                "requested": requested_total,
+                "candidate_plan": candidate_plan,
+                "candidate_count": requested_total,
+                "candidate_missing": candidate_plan.get("missing") or [],
+                "chunk_size": daily_fresh_enrich_chunk_size(item_type),
+                "completed_chunks": pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [],
+                "daily_batch_id": daily_batch_id,
+                "generated_for_date": material_date,
+                "candidate_source": "vocabulary_pool",
+            }
+            pack_cache[pack_type] = make_json_safe(pack_state)
+            cache["daily_fresh"] = pack_cache
+            update_gemini_generation_job(
+                job_id,
+                current_stage=f"daily_fresh:{pack_type}_candidates_selected",
+                **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+            )
         print(
             f"[daily-fresh-candidates] enrich_plan pack={pack_type} "
             f"item_type={item_type} candidate_count={requested_total}"
         )
         print(f"[gemini-enrich] input_candidates pack={pack_type} count={requested_total}")
         print(f"[gemini-enrich] mode=fixed_candidates pack={pack_type}")
+
+    if item_type in {"word", "verb"}:
+        chunk_size = daily_fresh_enrich_chunk_size(item_type)
+        candidate_items = list(candidate_plan.get("items") or [])
+        chunks = chunked_list(candidate_items, chunk_size)
+        completed_chunks = {
+            int(index)
+            for index in (pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [])
+            if str(index).isdigit()
+        }
+        inserted_total = int(pack_state.get("inserted") or 0)
+        skipped_total = int(pack_state.get("skipped") or 0)
+
+        def persist_daily_fresh_pack_state(current_stage):
+            pack_cache[pack_type] = make_json_safe(pack_state)
+            cache["daily_fresh"] = pack_cache
+            update_gemini_generation_job(
+                job_id,
+                current_stage=current_stage,
+                **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+            )
+
+        def enrich_candidate_chunk(chunk_candidates, chunk_label):
+            chunk_candidates_by_level = daily_fresh_candidates_by_level(chunk_candidates)
+            requested_count = len(chunk_candidates)
+            prompt = build_gemini_daily_enrich_prompt(pack_type, item_type, chunk_candidates_by_level)
+            print(
+                f"[gemini-enrich] chunk_start pack={pack_type} item_type={item_type} "
+                f"chunk={chunk_label} size={requested_count}"
+            )
+            raw_chunk_text = call_gemini(
+                prompt,
+                timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
+                response_mime_type="application/json",
+                response_schema=gemini_daily_pack_schema(item_type, requested_count),
+                max_output_tokens=gemini_daily_pack_max_tokens(pack_type, retry=False),
+                temperature=0,
+            )
+            chunk_items, chunk_parse_stats = parse_gemini_bank_items_with_stats(
+                item_type,
+                chunk_candidates[0].get("level") if chunk_candidates else (levels[0] if levels else settings.get("target_level", "N5")),
+                raw_chunk_text,
+            )
+            print(
+                f"[gemini-bank] daily_fresh parsed pack={pack_type} chunk={chunk_label} "
+                f"parsed={chunk_parse_stats.get('parsed', 0)}"
+            )
+            print(
+                f"[gemini-bank] daily_fresh normalized pack={pack_type} chunk={chunk_label} "
+                f"valid={chunk_parse_stats.get('valid', 0)} invalid={chunk_parse_stats.get('invalid', 0)} "
+                f"duplicate={chunk_parse_stats.get('duplicate', 0)}"
+            )
+            allowed_levels = set(levels)
+            chunk_items = [item for item in chunk_items if item.get("jlpt_level") in allowed_levels]
+            chunk_items, match_stats = filter_enriched_items_to_candidates(chunk_items, item_type, chunk_candidates)
+            print(
+                f"[daily-fresh-candidates] enrich_validated pack={pack_type} chunk={chunk_label} "
+                f"matched={match_stats.get('matched', 0)} unknown={match_stats.get('unknown', 0)} "
+                f"mismatch={match_stats.get('mismatch', 0)} invalid_pos={match_stats.get('invalid_pos', 0)}"
+            )
+            if not chunk_items:
+                raise ValueError("daily_fresh_items_invalid:empty_chunk")
+            result = upsert_gemini_bank_items(
+                chunk_items,
+                daily_batch_id=daily_batch_id,
+                generated_for_date=material_date,
+                generated_source="daily_fresh_jit",
+                retag_existing=False,
+            )
+            if int(result.get("duplicate") or 0) > 0:
+                print(
+                    "[gemini-bank] candidate_selection_duplicate_leak "
+                    f"pack={pack_type} chunk={chunk_label} duplicate={result.get('duplicate', 0)} "
+                    f"skipped={result.get('skipped', 0)}"
+                )
+            print(
+                f"[gemini-bank] daily_fresh upserted pack={pack_type} chunk={chunk_label} "
+                f"inserted={result.get('inserted', 0)} skipped={result.get('skipped', 0)} "
+                f"duplicate={result.get('duplicate', 0)}"
+            )
+            print(
+                f"[gemini-bank] daily_fresh tagged batch_id={daily_batch_id} "
+                f"generated_for_date={material_date}"
+            )
+            return result
+
+        for chunk_index, chunk_candidates in enumerate(chunks):
+            if chunk_index in completed_chunks:
+                print(f"[gemini-enrich] chunk_skip_completed pack={pack_type} chunk={chunk_index}")
+                continue
+            try:
+                result = enrich_candidate_chunk(chunk_candidates, str(chunk_index))
+                inserted_total += int(result.get("inserted") or 0)
+                skipped_total += int(result.get("skipped") or 0)
+                completed_chunks.add(chunk_index)
+                pack_state.update(
+                    {
+                        "inserted": inserted_total,
+                        "skipped": skipped_total,
+                        "completed_chunks": sorted(completed_chunks),
+                        "chunk_count": len(chunks),
+                        "warning": warning,
+                        "last_error": last_error,
+                    }
+                )
+                persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_chunk_{chunk_index}_done")
+            except Exception as exc:
+                reason = classify_gemini_daily_material_error(exc)
+                last_error = f"{reason}:{str(exc)[:240]}"
+                if reason in {"quota_exceeded", "prepayment_depleted"}:
+                    update_gemini_generation_job(
+                        job_id,
+                        status="failed",
+                        current_stage=f"daily_fresh:{pack_type}:chunk_{chunk_index}",
+                        error_message="gemini_quota_exceeded",
+                    )
+                    return gemini_quota_exceeded_payload(
+                        job_id=job_id,
+                        stage=f"daily_fresh:{pack_type}",
+                        item_type=item_type,
+                        level=",".join(levels),
+                        elapsed_ms=round((time.perf_counter() - started) * 1000),
+                    ), 200
+                if reason == "json_truncated" and len(chunk_candidates) > 1:
+                    print(
+                        f"[gemini-bank] daily_fresh chunk_json_truncated pack={pack_type} "
+                        f"chunk={chunk_index} action=split_single"
+                    )
+                    try:
+                        for single_index, single_candidate in enumerate(chunk_candidates):
+                            result = enrich_candidate_chunk([single_candidate], f"{chunk_index}.{single_index}")
+                            inserted_total += int(result.get("inserted") or 0)
+                            skipped_total += int(result.get("skipped") or 0)
+                        completed_chunks.add(chunk_index)
+                        pack_state.update(
+                            {
+                                "inserted": inserted_total,
+                                "skipped": skipped_total,
+                                "completed_chunks": sorted(completed_chunks),
+                                "chunk_count": len(chunks),
+                                "warning": warning,
+                                "last_error": last_error,
+                            }
+                        )
+                        persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_chunk_{chunk_index}_split_done")
+                        continue
+                    except Exception as single_exc:
+                        reason = classify_gemini_daily_material_error(single_exc)
+                        last_error = f"{reason}:{str(single_exc)[:240]}"
+                if reason in {"json_parse_error", "json_truncated"}:
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    error_code = "gemini_json_truncated" if reason == "json_truncated" else "gemini_json_parse_error"
+                    message = "Gemini 回傳 JSON 被截斷，已停止本次生成，請稍後重試。" if reason == "json_truncated" else "Gemini 未回傳合法 JSON，請稍後重試。"
+                    update_gemini_generation_job(
+                        job_id,
+                        status="failed",
+                        current_stage=f"daily_fresh:{pack_type}:chunk_{chunk_index}",
+                        error_message=error_code,
+                    )
+                    pack_state.update(
+                        {
+                            "inserted": inserted_total,
+                            "skipped": skipped_total,
+                            "completed_chunks": sorted(completed_chunks),
+                            "chunk_count": len(chunks),
+                            "warning": error_code,
+                            "last_error": last_error,
+                        }
+                    )
+                    pack_cache[pack_type] = make_json_safe(pack_state)
+                    cache["daily_fresh"] = pack_cache
+                    update_gemini_generation_job(
+                        job_id,
+                        **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+                    )
+                    return {
+                        "ok": False,
+                        "error": error_code,
+                        "reason": reason,
+                        "job_id": job_id,
+                        "stage": "daily_fresh",
+                        "pack_type": pack_type,
+                        "item_type": item_type,
+                        "chunk_index": chunk_index,
+                        "retryable": True,
+                        "auto_retry": False,
+                        "continue_same_step": False,
+                        "message": message,
+                        "elapsed_ms": elapsed_ms,
+                    }, 200
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                update_gemini_generation_job(
+                    job_id,
+                    status="failed",
+                    current_stage=f"daily_fresh:{pack_type}:chunk_{chunk_index}",
+                    error_message="daily_fresh_items_invalid",
+                )
+                return {
+                    "ok": False,
+                    "error": "daily_fresh_items_invalid",
+                    "reason": last_error,
+                    "job_id": job_id,
+                    "stage": "daily_fresh",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "chunk_index": chunk_index,
+                    "retryable": True,
+                    "auto_retry": False,
+                    "continue_same_step": False,
+                    "elapsed_ms": elapsed_ms,
+                }, 200
+
+        pack_state.update(
+            {
+                "item_type": item_type,
+                "requested_by_level": requested_by_level,
+                "requested": requested_total,
+                "inserted": inserted_total,
+                "skipped": skipped_total,
+                "warning": warning,
+                "last_error": last_error,
+                "daily_batch_id": daily_batch_id,
+                "generated_for_date": material_date,
+                "candidate_source": "vocabulary_pool",
+                "candidate_count": len(candidate_plan.get("items") or []),
+                "candidate_missing": candidate_plan.get("missing") or [],
+                "chunk_size": chunk_size,
+                "chunk_count": len(chunks),
+                "completed_chunks": sorted(completed_chunks),
+            }
+        )
+        pack_cache[pack_type] = make_json_safe(pack_state)
+        cache["daily_fresh"] = pack_cache
+        update_gemini_generation_job(
+            job_id,
+            current_stage=f"daily_fresh:{pack_type}_done",
+            **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+        )
+        completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "daily_batch_id": daily_batch_id,
+            "stage": "daily_fresh",
+            "pack_type": pack_type,
+            "item_type": item_type,
+            "requested": requested_total,
+            "inserted": inserted_total,
+            "skipped": skipped_total,
+            "warning": warning,
+            "continued": False,
+            "continue_same_step": False,
+            "completed_steps": completed_steps,
+            "elapsed_ms": elapsed_ms,
+        }, 200
 
     for attempt_index in range(max_attempts):
         retry = attempt_index > 0
