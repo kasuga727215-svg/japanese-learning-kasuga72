@@ -142,6 +142,7 @@ GEMINI_MODEL_CANDIDATES = os.environ.get(
     "GEMINI_MODEL_CANDIDATES",
     "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
 ).strip()
+GEMINI_DAILY_ENRICH_MODEL = os.environ.get("GEMINI_DAILY_ENRICH_MODEL", "").strip()
 GEMINI_BILLING_BLOCK_SECONDS = read_int_env("GEMINI_BILLING_BLOCK_SECONDS", 600, 60, 86400)
 TG_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_TOKEN", "")).strip()
 TG_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID", "")).strip()
@@ -6103,42 +6104,28 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             else:
                 flat_items.append({"level": level, "w": candidate.get("w", "")})
     if item_type == "verb":
-        input_lines = "\n".join(
-            f"{item.get('level', '')}\t{item.get('d', '')}" for item in flat_items if item.get("d")
-        )
+        schema = {"items": [["登る", "のぼる", "攀登", 1, "登ります", "登って", "登らない", "登った", "山に登ります。", "爬山。"]]}
         return (
-            "你只需要補完指定詞條。\n"
-            "不可新增詞。不可刪除詞。不可改變順序。\n"
-            "每個詞只輸出一行 TSV，欄位用 TAB 分隔。\n"
-            "不要 Markdown。不要 JSON。不要解釋。最後一行輸出 END。\n"
-            "verb 欄位固定 10 欄：d\tr\tm\tg\tf_masu\tf_te\tf_nai\tf_ta\tex\tex_zh。\n"
-            "第一欄 d 必須完全等於 input d。日文例句最多 15 字，中文例句最多 15 字。\n"
-            "不可輸出引號，不可輸出逗號包裝。\n"
-            "Input candidates，格式 level<TAB>d：\n"
-            f"{input_lines}\n"
-            "Output example:\n"
-            "登る\tのぼる\t攀登\t1\t登ります\t登って\t登らない\t登った\t山に登ります。\t爬山。\n"
-            "END"
+            "Return compact JSON only. Do not use Markdown or extra text. "
+            "You only enrich the fixed input verb candidates. Do not add, delete, reorder, or replace candidates. "
+            "Each output item must be an array [d,r,m,g,f_masu,f_te,f_nai,f_ta,ex,ex_zh]. "
+            "The first field d must exactly equal the input d. "
+            "Japanese example max 15 chars; Chinese example max 15 chars. "
+            "If an item is unfamiliar, omit it instead of replacing it. "
+            f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
+            f"Output schema example: {json.dumps(schema, ensure_ascii=False)}"
         )
     if item_type == "word":
-        input_lines = "\n".join(
-            f"{item.get('level', '')}\t{item.get('w', '')}" for item in flat_items if item.get("w")
-        )
+        schema = {"items": [["交番", "こうばん", "派出所", "名詞", "交番で聞きます。", "在派出所詢問。"]]}
         return (
-            "你只需要補完指定詞條。\n"
-            "不可新增詞。不可刪除詞。不可改變順序。\n"
-            "每個詞只輸出一行 TSV，欄位用 TAB 分隔。\n"
-            "不要 Markdown。不要 JSON。不要解釋。最後一行輸出 END。\n"
-            "word 欄位固定 6 欄：w\tr\tm\tp\tex\tex_zh。\n"
-            "第一欄 w 必須完全等於 input word。p 不可是動詞。\n"
-            "日文例句最多 15 字，中文例句最多 15 字。\n"
-            "不可輸出引號，不可輸出逗號包裝。\n"
-            "Input candidates，格式 level<TAB>w：\n"
-            f"{input_lines}\n"
-            "Output example:\n"
-            "確認\tかくにん\t確認\t名詞\t内容を確認します。\t確認內容。\n"
-            "原因\tげんいん\t原因\t名詞\t原因を調べます。\t調查原因。\n"
-            "END"
+            "Return compact JSON only. Do not use Markdown or extra text. "
+            "You only enrich the fixed input word candidates. Do not add, delete, reorder, or replace candidates. "
+            "Each output item must be an array [w,r,m,p,ex,ex_zh]. "
+            "The first field w must exactly equal the input w. p must not be a verb. "
+            "Japanese example max 15 chars; Chinese example max 15 chars. "
+            "If an item is unfamiliar, omit it instead of replacing it. "
+            f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
+            f"Output schema example: {json.dumps(schema, ensure_ascii=False)}"
         )
     schema = {"items": [["particle:を", "を", "表示動作對象", "名詞 + を + 動詞", "水を飲みます。", "喝水。"]]}
     item_rules = (
@@ -6322,97 +6309,6 @@ def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
         "ex": clipped_compact_text(values[4], 15),
         "ex_zh": clipped_compact_text(values[5], 15),
     }
-
-
-def parse_tsv_enrich_response(text, expected_candidates, item_type):
-    expected = []
-    for candidate in expected_candidates or []:
-        surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
-        surface = simple_text(surface)
-        if not surface:
-            continue
-        expected.append(
-            {
-                "surface": surface,
-                "level": simple_text(candidate.get("level")) or "N5",
-                "normalized_key": normalize_vocab_key(candidate.get("normalized_key") or surface),
-            }
-        )
-    raw_lines = str(text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    rows = []
-    for line in raw_lines:
-        cleaned = line.strip()
-        if not cleaned:
-            continue
-        if cleaned.startswith("```"):
-            continue
-        if cleaned.upper() == "END":
-            break
-        rows.append(cleaned)
-
-    items = []
-    seen = set()
-    stats = {"parsed": len(rows), "valid": 0, "invalid": 0, "duplicate": 0, "missing": 0}
-    expected_index = 0
-    required_columns = 10 if item_type == "verb" else 6
-    for row in rows:
-        fields = [simple_text(value).strip().strip('"').strip("'") for value in row.split("\t")]
-        if len(fields) != required_columns:
-            stats["invalid"] += 1
-            continue
-        matched_index = None
-        for index in range(expected_index, len(expected)):
-            if fields[0] == expected[index]["surface"]:
-                matched_index = index
-                break
-        if matched_index is None:
-            stats["invalid"] += 1
-            continue
-        expected_index = matched_index + 1
-        level = expected[matched_index]["level"]
-        if item_type == "verb":
-            payload = {
-                "type": "verb",
-                "level": level,
-                "d": fields[0],
-                "r": fields[1],
-                "m": fields[2],
-                "g": fields[3],
-                "f_masu": fields[4],
-                "f_te": fields[5],
-                "f_nai": fields[6],
-                "f_ta": fields[7],
-                "ex": clipped_compact_text(fields[8], 15),
-                "ex_zh": clipped_compact_text(fields[9], 15),
-                "normalized_key": expected[matched_index]["normalized_key"],
-            }
-        else:
-            payload = {
-                "type": "word",
-                "level": level,
-                "w": fields[0],
-                "r": fields[1],
-                "m": fields[2],
-                "p": fields[3],
-                "ex": clipped_compact_text(fields[4], 15),
-                "ex_zh": clipped_compact_text(fields[5], 15),
-                "normalized_key": expected[matched_index]["normalized_key"],
-            }
-        try:
-            bank_item = gemini_bank_item_from_payload(item_type, payload, level)
-        except ValueError:
-            stats["invalid"] += 1
-            continue
-        key = bank_item["normalized_key"]
-        if key in seen:
-            stats["duplicate"] += 1
-            continue
-        seen.add(key)
-        items.append(bank_item)
-        stats["valid"] += 1
-    stats["missing"] = max(0, len(expected) - stats["valid"])
-    return items, stats
-
 
 def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
     try:
@@ -8316,6 +8212,23 @@ def choose_gemini_model():
     return gemini_model_candidates()[0]
 
 
+def gemini_model_supports_thinking_config(model_name):
+    model = str(model_name or "").lower()
+    return "gemini-2.5" in model or "gemini-3" in model
+
+
+def choose_gemini_daily_enrich_model():
+    if GEMINI_DAILY_ENRICH_MODEL:
+        return GEMINI_DAILY_ENRICH_MODEL
+    primary = choose_gemini_model()
+    if "gemini-3" in primary.lower() and "preview" in primary.lower():
+        for model in gemini_model_candidates()[1:]:
+            lower = model.lower()
+            if "gemini-3" not in lower or "preview" not in lower:
+                return model
+    return primary
+
+
 def gemini_smoke_test_enabled():
     return os.environ.get("GEMINI_ENABLE_MODEL_SMOKE_TEST", "false").strip().lower() == "true"
 
@@ -8467,6 +8380,7 @@ def call_gemini(
     max_output_tokens=None,
     temperature=None,
     protocol=None,
+    thinking_budget=None,
 ):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
@@ -8488,6 +8402,10 @@ def call_gemini(
         print(f"[gemini-debug] max_output_tokens_applied={int(max_output_tokens)}")
     if temperature is not None:
         generation_config["temperature"] = float(temperature)
+    thinking_config_applied = False
+    if thinking_budget is not None and gemini_model_supports_thinking_config(model_name):
+        generation_config["thinkingConfig"] = {"thinkingBudget": int(thinking_budget)}
+        thinking_config_applied = True
     if generation_config:
         request_payload["generationConfig"] = generation_config
     if protocol:
@@ -8495,6 +8413,8 @@ def call_gemini(
         print(f"[gemini-debug] response_schema={str(bool(response_schema)).lower()}")
         print(f"[gemini-debug] response_mime_type={response_mime_type or ''}")
         print(f"[gemini-debug] max_output_tokens={generation_config.get('maxOutputTokens')}")
+        print(f"[gemini-debug] thinking_budget={thinking_budget if thinking_budget is not None else ''}")
+        print(f"[gemini-debug] thinking_config_applied={str(thinking_config_applied).lower()}")
     print(
         "[gemini-debug] request_config "
         + json.dumps(
@@ -8505,6 +8425,8 @@ def call_gemini(
                 "response_mime_type": generation_config.get("responseMimeType"),
                 "response_schema": bool(generation_config.get("responseSchema")),
                 "max_output_tokens": generation_config.get("maxOutputTokens"),
+                "thinking_budget": thinking_budget,
+                "thinking_config_applied": thinking_config_applied,
             },
             ensure_ascii=False,
         )
@@ -8541,6 +8463,21 @@ def call_gemini(
         finish_reason = candidate.get("finishReason") or candidate.get("finish_reason") or ""
         usage_metadata = data.get("usageMetadata") or data.get("usage_metadata") or {}
         model_version = data.get("modelVersion") or data.get("model_version") or ""
+        def usage_int(*keys):
+            for key in keys:
+                if key in usage_metadata and usage_metadata.get(key) is not None:
+                    try:
+                        return int(usage_metadata.get(key))
+                    except (TypeError, ValueError):
+                        return None
+            return None
+        prompt_token_count = usage_int("promptTokenCount", "prompt_token_count")
+        candidates_token_count = usage_int("candidatesTokenCount", "candidates_token_count")
+        total_token_count = usage_int("totalTokenCount", "total_token_count")
+        thoughts_token_count = usage_int("thoughtsTokenCount", "thoughts_token_count")
+        estimated_thoughts_tokens = None
+        if total_token_count is not None and prompt_token_count is not None and candidates_token_count is not None:
+            estimated_thoughts_tokens = max(0, total_token_count - prompt_token_count - candidates_token_count)
         parts = candidate.get("content", {}).get("parts") or []
         text_segments = [
             str(part.get("text") or "")
@@ -8554,12 +8491,11 @@ def call_gemini(
             "[gemini-debug] usage_metadata "
             + json.dumps(
                 {
-                    "prompt_token_count": usage_metadata.get("promptTokenCount")
-                    or usage_metadata.get("prompt_token_count"),
-                    "candidates_token_count": usage_metadata.get("candidatesTokenCount")
-                    or usage_metadata.get("candidates_token_count"),
-                    "total_token_count": usage_metadata.get("totalTokenCount")
-                    or usage_metadata.get("total_token_count"),
+                    "prompt_token_count": prompt_token_count,
+                    "candidates_token_count": candidates_token_count,
+                    "thoughts_token_count": thoughts_token_count,
+                    "estimated_thoughts_tokens": estimated_thoughts_tokens,
+                    "total_token_count": total_token_count,
                     "finish_reason": finish_reason or "",
                     "model_version": model_version,
                 },
@@ -8572,6 +8508,15 @@ def call_gemini(
             print(f"[gemini-debug] output_text_length={len(str(text or ''))}")
             print(f"[gemini-debug] raw_tail={log_safe_text(str(text or '')[-240:])}")
         if str(finish_reason).upper() == "MAX_TOKENS":
+            hidden_thinking_tokens = thoughts_token_count if thoughts_token_count is not None else estimated_thoughts_tokens
+            if hidden_thinking_tokens is not None and hidden_thinking_tokens > max(64, (candidates_token_count or 0) * 2):
+                raise RuntimeError(
+                    "gemini_thinking_token_limit: "
+                    f"finish_reason=MAX_TOKENS; protocol={protocol or ''}; max_output_tokens={generation_config.get('maxOutputTokens')}; "
+                    f"prompt_token_count={prompt_token_count}; candidates_token_count={candidates_token_count}; "
+                    f"thoughts_token_count={thoughts_token_count}; estimated_thoughts_tokens={estimated_thoughts_tokens}; "
+                    f"total_token_count={total_token_count}; model={model_name}; model_version={model_version}"
+                )
             raise RuntimeError(
                 "gemini_output_token_limit_config_error: "
                 f"finish_reason=MAX_TOKENS; protocol={protocol or ''}; max_output_tokens={generation_config.get('maxOutputTokens')}; "
@@ -8616,33 +8561,36 @@ def smoke_test_gemini_model(model_name):
         }
 
 
-def smoke_test_gemini_tsv_config(model_name=None):
-    prompt = "請只輸出：\nA\tB\tC\nD\tE\tF\nEND"
+def smoke_test_gemini_compact_json_config(model_name=None):
+    prompt = '請只回傳 compact JSON，不要 Markdown：{"items":[["A","B","C"],["D","E","F"]]}'
     started = time.perf_counter()
+    model_name = model_name or choose_gemini_daily_enrich_model()
     try:
         raw_text = call_gemini(
             prompt,
             model_name=model_name,
             timeout_seconds=GEMINI_TIMEOUT_SECONDS,
-            response_mime_type="text/plain",
+            response_mime_type="application/json",
             response_schema=None,
-            max_output_tokens=512,
+            max_output_tokens=2048,
             temperature=0,
-            protocol="tsv_smoke",
+            protocol="compact_json_smoke",
+            thinking_budget=0,
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         return {
             "ok": True,
             "status": "ok",
-            "model": model_name or choose_gemini_model(),
+            "model": model_name,
             "elapsed_ms": elapsed_ms,
             "raw_text": raw_text,
             "output_text_length": len(str(raw_text or "")),
             "expected_config": {
-                "response_mime_type": "text/plain",
+                "response_mime_type": "application/json",
                 "response_schema": False,
-                "max_output_tokens": 512,
+                "max_output_tokens": 2048,
                 "temperature": 0,
+                "thinking_budget": 0,
             },
         }
     except Exception as e:
@@ -8650,15 +8598,16 @@ def smoke_test_gemini_tsv_config(model_name=None):
         return {
             "ok": False,
             "status": "error",
-            "model": model_name or choose_gemini_model(),
+            "model": model_name,
             "elapsed_ms": elapsed_ms,
             "error_type": classify_gemini_daily_material_error(e),
             "error_message": str(e)[:500],
             "expected_config": {
-                "response_mime_type": "text/plain",
+                "response_mime_type": "application/json",
                 "response_schema": False,
-                "max_output_tokens": 512,
+                "max_output_tokens": 2048,
                 "temperature": 0,
+                "thinking_budget": 0,
             },
         }
 
@@ -8918,6 +8867,8 @@ def build_gemini_stage_prompt(stage, settings):
 
 def classify_gemini_daily_material_error(error):
     text = str(error or "")
+    if text.startswith("gemini_thinking_token_limit"):
+        return "thinking_token_limit"
     if text.startswith("gemini_output_token_limit_config_error"):
         return "output_token_limit_config_error"
     if text.startswith("gemini_output_token_limit") or "finish_reason=MAX_TOKENS" in text:
@@ -9545,17 +9496,19 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             )
             raw_chunk_text = call_gemini(
                 prompt,
+                model_name=choose_gemini_daily_enrich_model(),
                 timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
-                response_mime_type="text/plain",
+                response_mime_type="application/json",
                 response_schema=None,
-                max_output_tokens=512,
+                max_output_tokens=2048,
                 temperature=0,
-                protocol="tsv",
+                protocol="compact_json",
+                thinking_budget=0,
             )
-            chunk_items, chunk_parse_stats = parse_tsv_enrich_response(
-                raw_chunk_text,
-                chunk_candidates,
+            chunk_items, chunk_parse_stats = parse_gemini_bank_items_with_stats(
                 item_type,
+                levels[0] if levels else settings.get("target_level", "N5"),
+                raw_chunk_text,
             )
             print(
                 f"[gemini-bank] daily_fresh parsed pack={pack_type} chunk={chunk_label} "
@@ -9772,10 +9725,13 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     elapsed_ms=round((time.perf_counter() - started) * 1000),
                 ), 200
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error"}:
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error", "thinking_token_limit"}:
                 if reason == "output_token_limit_config_error":
                     error_code = "gemini_output_token_limit_config_error"
                     message = "Gemini API 輸出 token 設定異常，已停止本次生成避免重複扣費。請查看 Render Logs 的 request_config。"
+                elif reason == "thinking_token_limit":
+                    error_code = "gemini_thinking_token_limit"
+                    message = "Gemini 模型的 hidden thinking tokens 佔用過多輸出額度，已停止本次生成避免重複扣費。請查看 Render Logs 的 usage_metadata。"
                 elif reason == "output_token_limit":
                     error_code = "gemini_output_token_limit"
                     message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
@@ -9981,12 +9937,15 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     f"reason={reason} raw_excerpt={raw_excerpt}"
                 )
                 continue
-            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error"} and not best_effort:
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error", "thinking_token_limit"} and not best_effort:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
                 if reason == "output_token_limit_config_error":
                     error_code = "gemini_output_token_limit_config_error"
                     message = "Gemini API 輸出 token 設定異常，已停止本次生成避免重複扣費。請查看 Render Logs 的 request_config。"
+                elif reason == "thinking_token_limit":
+                    error_code = "gemini_thinking_token_limit"
+                    message = "Gemini 模型的 hidden thinking tokens 佔用過多輸出額度，已停止本次生成避免重複扣費。請查看 Render Logs 的 usage_metadata。"
                 elif reason == "output_token_limit":
                     error_code = "gemini_output_token_limit"
                     message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
@@ -20008,13 +19967,13 @@ def api_gemini_debug_model_check():
     )
 
 
-@app.get("/api/gemini/debug/tsv-smoke")
-def api_gemini_debug_tsv_smoke():
+@app.get("/api/gemini/debug/compact-json-smoke")
+def api_gemini_debug_compact_json_smoke():
     if not grammar_debug_enabled():
-        return jsonify({"error": "Gemini TSV 測試端點未啟用。"}), 404
-    result = smoke_test_gemini_tsv_config()
+        return jsonify({"error": "Gemini compact JSON 測試端點未啟用。"}), 404
+    result = smoke_test_gemini_compact_json_config()
     print(
-        "[gemini-debug] tsv smoke test；"
+        "[gemini-debug] compact json smoke test；"
         f"status={result.get('status')}；"
         f"elapsed_ms={result.get('elapsed_ms')}；"
         f"error_type={result.get('error_type', '')}"
