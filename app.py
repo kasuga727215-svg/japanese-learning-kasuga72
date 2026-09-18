@@ -5228,47 +5228,31 @@ def gemini_daily_pack_steps(settings):
 
 def gemini_daily_pack_max_tokens(pack_type, retry=False):
     if pack_type == "grammar":
-        return 1536
-    return 2048
+        return 1200
+    return 1024
 
 
 def gemini_daily_pack_schema(item_type, max_items):
     if item_type == "word":
-        properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
-            "w": {"type": "STRING"},
-            "r": {"type": "STRING"},
-            "m": {"type": "STRING"},
-            "p": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
+        item_schema = {
+            "type": "ARRAY",
+            "minItems": 6,
+            "maxItems": 6,
+            "items": {"type": "STRING"},
         }
     elif item_type == "verb":
-        properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
-            "d": {"type": "STRING"},
-            "r": {"type": "STRING"},
-            "m": {"type": "STRING"},
-            "g": {"type": "INTEGER"},
-            "f_masu": {"type": "STRING"},
-            "f_te": {"type": "STRING"},
-            "f_nai": {"type": "STRING"},
-            "f_ta": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
+        item_schema = {
+            "type": "ARRAY",
+            "minItems": 10,
+            "maxItems": 10,
+            "items": {"type": "STRING"},
         }
     else:
-        properties = {
-            "type": {"type": "STRING"},
-            "level": {"type": "STRING"},
-            "k": {"type": "STRING"},
-            "t": {"type": "STRING"},
-            "m": {"type": "STRING"},
-            "c": {"type": "STRING"},
-            "ex": {"type": "STRING"},
-            "ex_zh": {"type": "STRING"},
+        item_schema = {
+            "type": "ARRAY",
+            "minItems": 6,
+            "maxItems": 6,
+            "items": {"type": "STRING"},
         }
     return {
         "type": "OBJECT",
@@ -5277,11 +5261,7 @@ def gemini_daily_pack_schema(item_type, max_items):
                 "type": "ARRAY",
                 "minItems": 1,
                 "maxItems": max(1, int(max_items or 1)),
-                "items": {
-                    "type": "OBJECT",
-                    "properties": properties,
-                    "required": list(properties.keys()),
-                },
+                "items": item_schema,
             }
         },
         "required": ["items"],
@@ -6123,54 +6103,33 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             else:
                 flat_items.append({"level": level, "w": candidate.get("w", "")})
     if item_type == "verb":
-        schema = {
-            "items": [
-                {
-                    "type": "verb",
-                    "level": "N4",
-                    "d": "育てる",
-                    "r": "そだてる",
-                    "m": "養育、培養",
-                    "g": 2,
-                    "f_masu": "育てます",
-                    "f_te": "育てて",
-                    "f_nai": "育てない",
-                    "f_ta": "育てた",
-                    "ex": "花を育てます。",
-                    "ex_zh": "我種花。",
-                }
-            ]
-        }
+        schema = {"items": [["育てる", "そだてる", "養育", "2", "育てます", "育てて", "育てない", "育てた", "花を育てます。", "我種花。"]]}
         item_rules = (
             "你只負責補完指定動詞。不得新增動詞，不得替換動詞，不得改變順序。"
             "每筆 output 的 d 必須完全等於 input 的 d。"
-            "請補 r/m/g/f_masu/f_te/f_nai/f_ta/ex/ex_zh。"
+            "每筆只回陣列 [d,r,m,g,f_masu,f_te,f_nai,f_ta,ex,ex_zh]。"
             "若不確定正確變化，請省略該 item，不可換成其他動詞。"
         )
+    elif item_type == "grammar":
+        schema = {"items": [["particle:を", "を", "表示動作對象", "名詞 + を + 動詞", "水を飲みます。", "喝水。"]]}
+        item_rules = (
+            "你只負責補完指定文法。不得新增文法，不得替換文法，不得改變順序。"
+            "每筆只回陣列 [k,t,m,c,ex,ex_zh]。"
+            "若不確定，請省略該 item，不可換成其他文法。"
+        )
     else:
-        schema = {
-            "items": [
-                {
-                    "type": "word",
-                    "level": "N5",
-                    "w": "財布",
-                    "r": "さいふ",
-                    "m": "錢包",
-                    "p": "名詞",
-                    "ex": "財布を忘れました。",
-                    "ex_zh": "我忘了錢包。",
-                }
-            ]
-        }
+        schema = {"items": [["財布", "さいふ", "錢包", "名詞", "財布を忘れました。", "我忘了錢包。"]]}
         item_rules = (
             "你只負責補完指定單字。不得新增單字，不得替換單字，不得改變順序。"
             "每筆 output 的 w 必須完全等於 input 的 w。"
-            "請補 r/m/p/ex/ex_zh。p 不可是動詞。若指定詞是動詞，請省略該 item，不可換成其他詞。"
+            "每筆只回陣列 [w,r,m,p,ex,ex_zh]。p 不可是動詞。若指定詞是動詞，請省略該 item，不可換成其他詞。"
         )
     return (
         "Return JSON only, as an object with an items array. Do not use Markdown or extra text. "
         f"Daily Fresh JIT enrich pack={pack_type}. mode=fixed_candidates. "
         f"{item_rules} Readings must be hiragana. Meanings and translations must be Traditional Chinese. "
+        "Examples must be short: ex Japanese max 15 chars, ex_zh Chinese max 15 chars. "
+        "Do not explain grammar, do not add notes, do not add object keys inside item arrays. "
         "If an item is unfamiliar, omit it instead of replacing it. Output may be fewer than input, but may not include unknown items. "
         f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
         f"Output compact schema: {json.dumps(schema, ensure_ascii=False)}"
@@ -6183,11 +6142,9 @@ def chunked_list(items, chunk_size):
 
 
 def daily_fresh_enrich_chunk_size(item_type):
-    if item_type == "verb":
-        return 2
-    if item_type == "grammar":
+    if item_type in {"verb", "grammar"}:
         return 1
-    return 3
+    return 2
 
 
 def daily_fresh_candidates_by_level(candidates):
@@ -6293,6 +6250,58 @@ def parse_gemini_bank_json_safely(raw_text):
     raise ValueError("Gemini did not return JSON for bank items.")
 
 
+def clipped_compact_text(value, max_chars=15):
+    return simple_text(value)[:max(0, int(max_chars or 0))]
+
+
+def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
+    if not isinstance(raw, list):
+        return raw
+    values = [simple_text(value) for value in raw]
+    if item_type == "verb":
+        if len(values) < 10:
+            return {}
+        return {
+            "type": "verb",
+            "level": fallback_level,
+            "d": values[0],
+            "r": values[1],
+            "m": values[2],
+            "g": values[3],
+            "f_masu": values[4],
+            "f_te": values[5],
+            "f_nai": values[6],
+            "f_ta": values[7],
+            "ex": clipped_compact_text(values[8], 15),
+            "ex_zh": clipped_compact_text(values[9], 15),
+        }
+    if item_type == "grammar":
+        if len(values) < 6:
+            return {}
+        return {
+            "type": "grammar",
+            "level": fallback_level,
+            "k": values[0],
+            "t": values[1],
+            "m": values[2],
+            "c": values[3],
+            "ex": clipped_compact_text(values[4], 15),
+            "ex_zh": clipped_compact_text(values[5], 15),
+        }
+    if len(values) < 6:
+        return {}
+    return {
+        "type": "word",
+        "level": fallback_level,
+        "w": values[0],
+        "r": values[1],
+        "m": values[2],
+        "p": values[3],
+        "ex": clipped_compact_text(values[4], 15),
+        "ex_zh": clipped_compact_text(values[5], 15),
+    }
+
+
 def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
     try:
         parsed = parse_gemini_bank_json_safely(raw_text)
@@ -6310,6 +6319,7 @@ def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
     seen = set()
     stats = {"parsed": len(raw_items), "valid": 0, "invalid": 0, "duplicate": 0}
     for raw in raw_items:
+        raw = compact_gemini_bank_item_from_array(item_type, raw, level)
         if not isinstance(raw, dict):
             stats["invalid"] += 1
             continue
@@ -8362,6 +8372,7 @@ def call_gemini(
         generation_config["responseSchema"] = response_schema
     if max_output_tokens:
         generation_config["maxOutputTokens"] = int(max_output_tokens)
+        print(f"[gemini-debug] max_output_tokens_applied={int(max_output_tokens)}")
     if temperature is not None:
         generation_config["temperature"] = float(temperature)
     if generation_config:
@@ -8394,9 +8405,17 @@ def call_gemini(
         raise RuntimeError(f"AI 服務回傳錯誤；model={model_name}；detail={compact_detail}")
 
     try:
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        candidate = data["candidates"][0]
+        finish_reason = candidate.get("finishReason") or candidate.get("finish_reason") or ""
+        text = candidate["content"]["parts"][0]["text"]
         if not str(text or "").strip():
             raise RuntimeError("AI 回傳空內容。")
+        if max_output_tokens:
+            print(f"[gemini-debug] finish_reason={finish_reason or 'unknown'}")
+            print(f"[gemini-debug] output_text_length={len(str(text or ''))}")
+            print(f"[gemini-debug] raw_tail={log_safe_text(str(text or '')[-240:])}")
+        if str(finish_reason).upper() == "MAX_TOKENS":
+            raise RuntimeError("gemini_output_token_limit: finish_reason=MAX_TOKENS")
         return text
     except (KeyError, IndexError, TypeError) as e:
         raise RuntimeError("AI 回傳格式不正確。") from e
@@ -8691,6 +8710,8 @@ def build_gemini_stage_prompt(stage, settings):
 
 def classify_gemini_daily_material_error(error):
     text = str(error or "")
+    if text.startswith("gemini_output_token_limit") or "finish_reason=MAX_TOKENS" in text:
+        return "output_token_limit"
     if text.startswith("json_truncated"):
         return "json_truncated"
     if text.startswith("json_parse_error"):
@@ -9540,9 +9561,13 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     elapsed_ms=round((time.perf_counter() - started) * 1000),
                 ), 200
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            if reason in {"json_parse_error", "json_truncated"}:
-                error_code = "gemini_json_truncated" if reason == "json_truncated" else "gemini_json_parse_error"
-                message = "Gemini 回傳 JSON 被截斷，已停止本次生成，請稍後重試。" if reason == "json_truncated" else "Gemini 未回傳合法 JSON，請稍後重試。"
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit"}:
+                if reason == "output_token_limit":
+                    error_code = "gemini_output_token_limit"
+                    message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
+                else:
+                    error_code = "gemini_json_truncated" if reason == "json_truncated" else "gemini_json_parse_error"
+                    message = "Gemini 補全資料時回傳不完整。已保留成功片段，系統將改用更小批次續跑。" if reason == "json_truncated" else "Gemini 未回傳合法 JSON，請稍後重試。"
                 update_gemini_generation_job(
                     job_id,
                     status="failed",
@@ -9734,7 +9759,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 ), 200
             if reason == "timeout" and not retry and not best_effort:
                 continue
-            if reason in {"json_parse_error", "json_truncated"} and not retry and not best_effort:
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit"} and not retry and not best_effort:
                 raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
                 print(
                     "[gemini-bank] daily_fresh retry_after_json_error "
@@ -9742,11 +9767,15 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     f"reason={reason} raw_excerpt={raw_excerpt}"
                 )
                 continue
-            if reason in {"json_parse_error", "json_truncated"} and not best_effort:
+            if reason in {"json_parse_error", "json_truncated", "output_token_limit"} and not best_effort:
                 elapsed_ms = round((time.perf_counter() - started) * 1000)
                 raw_excerpt = re.sub(r"\s+", " ", str(raw_text or "")).strip()[:1000]
-                error_code = "gemini_json_truncated" if reason == "json_truncated" else "gemini_json_parse_error"
-                message = "Gemini 回傳 JSON 被截斷，已停止本次生成，請稍後重試。" if reason == "json_truncated" else "Gemini 未回傳合法 JSON，請稍後重試。"
+                if reason == "output_token_limit":
+                    error_code = "gemini_output_token_limit"
+                    message = "Gemini 補全資料時達到輸出上限。已保留成功片段，請再次執行以續跑較小批次。"
+                else:
+                    error_code = "gemini_json_truncated" if reason == "json_truncated" else "gemini_json_parse_error"
+                    message = "Gemini 補全資料時回傳不完整。已保留成功片段，系統將改用更小批次續跑。" if reason == "json_truncated" else "Gemini 未回傳合法 JSON，請稍後重試。"
                 update_gemini_generation_job(
                     job_id,
                     status="failed",
