@@ -8539,6 +8539,8 @@ def call_gemini(
     try:
         candidate = data["candidates"][0]
         finish_reason = candidate.get("finishReason") or candidate.get("finish_reason") or ""
+        usage_metadata = data.get("usageMetadata") or data.get("usage_metadata") or {}
+        model_version = data.get("modelVersion") or data.get("model_version") or ""
         parts = candidate.get("content", {}).get("parts") or []
         text_segments = [
             str(part.get("text") or "")
@@ -8548,6 +8550,22 @@ def call_gemini(
         text = "".join(text_segments)
         if not str(text or "").strip():
             raise RuntimeError("AI 回傳空內容。")
+        print(
+            "[gemini-debug] usage_metadata "
+            + json.dumps(
+                {
+                    "prompt_token_count": usage_metadata.get("promptTokenCount")
+                    or usage_metadata.get("prompt_token_count"),
+                    "candidates_token_count": usage_metadata.get("candidatesTokenCount")
+                    or usage_metadata.get("candidates_token_count"),
+                    "total_token_count": usage_metadata.get("totalTokenCount")
+                    or usage_metadata.get("total_token_count"),
+                    "finish_reason": finish_reason or "",
+                    "model_version": model_version,
+                },
+                ensure_ascii=False,
+            )
+        )
         if max_output_tokens:
             print(f"[gemini-debug] finish_reason={finish_reason or 'unknown'}")
             print(f"[gemini-debug] response_parts={len(text_segments)}")
@@ -8595,6 +8613,53 @@ def smoke_test_gemini_model(model_name):
             "elapsed_ms": elapsed_ms,
             "error_type": error_type,
             "error_message": str(e)[:500],
+        }
+
+
+def smoke_test_gemini_tsv_config(model_name=None):
+    prompt = "請只輸出：\nA\tB\tC\nD\tE\tF\nEND"
+    started = time.perf_counter()
+    try:
+        raw_text = call_gemini(
+            prompt,
+            model_name=model_name,
+            timeout_seconds=GEMINI_TIMEOUT_SECONDS,
+            response_mime_type="text/plain",
+            response_schema=None,
+            max_output_tokens=512,
+            temperature=0,
+            protocol="tsv_smoke",
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        return {
+            "ok": True,
+            "status": "ok",
+            "model": model_name or choose_gemini_model(),
+            "elapsed_ms": elapsed_ms,
+            "raw_text": raw_text,
+            "output_text_length": len(str(raw_text or "")),
+            "expected_config": {
+                "response_mime_type": "text/plain",
+                "response_schema": False,
+                "max_output_tokens": 512,
+                "temperature": 0,
+            },
+        }
+    except Exception as e:
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        return {
+            "ok": False,
+            "status": "error",
+            "model": model_name or choose_gemini_model(),
+            "elapsed_ms": elapsed_ms,
+            "error_type": classify_gemini_daily_material_error(e),
+            "error_message": str(e)[:500],
+            "expected_config": {
+                "response_mime_type": "text/plain",
+                "response_schema": False,
+                "max_output_tokens": 512,
+                "temperature": 0,
+            },
         }
 
 
@@ -19941,6 +20006,20 @@ def api_gemini_debug_model_check():
             "candidate_count": len(models),
         }
     )
+
+
+@app.get("/api/gemini/debug/tsv-smoke")
+def api_gemini_debug_tsv_smoke():
+    if not grammar_debug_enabled():
+        return jsonify({"error": "Gemini TSV 測試端點未啟用。"}), 404
+    result = smoke_test_gemini_tsv_config()
+    print(
+        "[gemini-debug] tsv smoke test；"
+        f"status={result.get('status')}；"
+        f"elapsed_ms={result.get('elapsed_ms')}；"
+        f"error_type={result.get('error_type', '')}"
+    )
+    return jsonify(result), 200
 
 
 @app.get("/api/grammar/debug/analyze-smoke")
