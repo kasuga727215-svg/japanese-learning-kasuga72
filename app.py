@@ -5442,6 +5442,7 @@ DAILY_FRESH_COUNTER_UNITS = (
     "番",
 )
 DAILY_FRESH_NUMBER_TOKEN_PATTERN = r"[0-9０-９一二三四五六七八九十百千万〇零何幾数]+"
+DAILY_FRESH_SNS_REDISTRIBUTE_LEVELS = ("N3", "N2", "N1", "N4", "N5")
 DAILY_FRESH_DEFAULT_DUPLICATE_BLACKLIST = {
     "見る",
     "食べる",
@@ -6013,7 +6014,9 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     fetch_errors = []
     skipped_bad_encoding = 0
     seen = set()
-    for level, needed in requested_by_level.items():
+
+    def collect_candidates_for_level(level, needed):
+        nonlocal skipped_bad_encoding
         rows = fetch_daily_fresh_candidate_rows(item_type, level, max(needed * 20, 100), excluded_keys | seen)
         candidates = []
         for row in rows:
@@ -6053,8 +6056,39 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
             if len(candidates) >= needed:
                 break
         print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(candidates)}")
+        return candidates
+
+    for level, needed in requested_by_level.items():
+        candidates = collect_candidates_for_level(level, needed)
         selected_by_level[level] = candidates
         if len(candidates) < needed:
+            shortage = needed - len(candidates)
+            if item_type == "word" and level == "SNS":
+                print(
+                    "[fresh-candidate] optional_level_missing "
+                    f"level=SNS requested={needed} available={len(candidates)} action=redistribute"
+                )
+                remaining = shortage
+                for fallback_level in DAILY_FRESH_SNS_REDISTRIBUTE_LEVELS:
+                    if remaining <= 0:
+                        break
+                    if fallback_level not in requested_by_level:
+                        continue
+                    fallback_candidates = collect_candidates_for_level(fallback_level, remaining)
+                    if not fallback_candidates:
+                        continue
+                    selected_by_level.setdefault(fallback_level, []).extend(fallback_candidates)
+                    remaining -= len(fallback_candidates)
+                    print(
+                        "[fresh-candidate] redistributed_from=SNS "
+                        f"to={fallback_level} count={len(fallback_candidates)}"
+                    )
+                if remaining > 0:
+                    print(
+                        "[fresh-candidate] optional_level_missing_unfilled "
+                        f"level=SNS requested={needed} redistributed={shortage - remaining} remaining={remaining}"
+                    )
+                continue
             missing.append({"level": level, "requested": needed, "available": len(candidates)})
     level_counts = {level: len(items) for level, items in selected_by_level.items()}
     selected_surfaces = [
