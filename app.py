@@ -143,6 +143,7 @@ GEMINI_MODEL_CANDIDATES = os.environ.get(
     "gemini-2.5-flash-lite,gemini-2.5-flash,gemini-2.0-flash-lite,gemini-2.0-flash",
 ).strip()
 GEMINI_DAILY_ENRICH_MODEL = os.environ.get("GEMINI_DAILY_ENRICH_MODEL", "").strip()
+GEMINI_ENABLE_MODEL_FALLBACK = os.environ.get("GEMINI_ENABLE_MODEL_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_BILLING_BLOCK_SECONDS = read_int_env("GEMINI_BILLING_BLOCK_SECONDS", 600, 60, 86400)
 TG_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("TG_TOKEN", "")).strip()
 TG_CHAT_ID = (os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("TG_CHAT_ID", "")).strip()
@@ -4798,14 +4799,19 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
             forms["nai_form"] = simple_text(payload.get("f_nai"))
         if simple_text(payload.get("f_ta")):
             forms["ta_form"] = simple_text(payload.get("f_ta"))
+        verb_group = payload.get("g") or payload.get("verb_group")
+        verb_type = simple_text(payload.get("t") or payload.get("verb_type"))
+        if surface.endswith("する"):
+            verb_group = 3
+            verb_type = "サ変動詞"
         expanded = {
             **payload,
             "surface": surface,
             "dictionary_form": surface,
             "reading_hiragana": simple_text(payload.get("r") or payload.get("reading_hiragana") or payload.get("reading")),
             "meaning_zh": simple_text(payload.get("m") or payload.get("meaning_zh") or payload.get("meaning")),
-            "verb_group": payload.get("g") or payload.get("verb_group"),
-            "verb_type": simple_text(payload.get("t") or payload.get("verb_type")),
+            "verb_group": verb_group,
+            "verb_type": verb_type,
             "jlpt_level": normalize_gemini_bank_level(payload.get("l") or payload.get("jlpt_level") or payload.get("level") or fallback_level, "verb"),
             "normalized_key": normalize_vocab_key(payload.get("normalized_key") or surface),
             "example_sentence": simple_text(payload.get("ex") or payload.get("example_sentence") or payload.get("example_japanese")),
@@ -6110,7 +6116,9 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             "You only enrich the fixed input verb candidates. Do not add, delete, reorder, or replace candidates. "
             "Each output item must be an array [d,r,m,g,f_masu,f_te,f_nai,f_ta,ex,ex_zh]. "
             "The first field d must exactly equal the input d. "
+            "If d ends with する, g must be 3 because it is a サ変動詞. "
             "Japanese example max 15 chars; Chinese example max 15 chars. "
+            "All Chinese fields must use Traditional Chinese, never Simplified Chinese. "
             "If an item is unfamiliar, omit it instead of replacing it. "
             f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
             f"Output schema example: {json.dumps(schema, ensure_ascii=False)}"
@@ -6123,6 +6131,7 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             "Each output item must be an array [w,r,m,p,ex,ex_zh]. "
             "The first field w must exactly equal the input w. p must not be a verb. "
             "Japanese example max 15 chars; Chinese example max 15 chars. "
+            "All Chinese fields must use Traditional Chinese, never Simplified Chinese. "
             "If an item is unfamiliar, omit it instead of replacing it. "
             f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
             f"Output schema example: {json.dumps(schema, ensure_ascii=False)}"
@@ -6185,6 +6194,14 @@ def cached_daily_fresh_candidate_plan(pack_state):
     }
 
 
+SIMPLIFIED_ZH_WARNING_CHARS = set("发表会议会说过这为与国门问题实学体广区医药后时个")
+
+
+def has_simplified_zh_warning(value):
+    text = simple_text(value)
+    return any(ch in text for ch in SIMPLIFIED_ZH_WARNING_CHARS)
+
+
 def filter_enriched_items_to_candidates(items, item_type, candidates):
     candidate_by_key = {}
     for candidate in candidates or []:
@@ -6212,9 +6229,10 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 stats["invalid_pos"] += 1
                 continue
         if item_type == "verb":
-            if surface.endswith("する") and surface != "する":
-                stats["invalid_pos"] += 1
-                continue
+            if surface.endswith("する"):
+                payload["verb_group"] = 3
+                payload["verb_type"] = "サ変動詞"
+                item["payload_json"] = json.dumps(payload, ensure_ascii=False)
             required_forms = [
                 payload.get("f_masu"),
                 payload.get("f_te"),
@@ -6224,6 +6242,13 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
             if any(not simple_text(value) or simple_text(value) == NO_VERB_FORM for value in required_forms):
                 stats["invalid_pos"] += 1
                 continue
+        if has_simplified_zh_warning(payload.get("meaning_zh") or payload.get("m")) or has_simplified_zh_warning(
+            payload.get("example_translation_zh") or payload.get("ex_zh")
+        ):
+            print(
+                "[gemini-bank] zh_traditional_warning "
+                f"item_type={item_type} surface={log_safe_text(surface)}"
+            )
         item["jlpt_level"] = normalize_gemini_bank_level(candidate.get("level") or item.get("jlpt_level"), item_type)
         filtered.append(item)
         stats["matched"] += 1
@@ -8218,15 +8243,23 @@ def gemini_model_supports_thinking_config(model_name):
 
 
 def choose_gemini_daily_enrich_model():
-    if GEMINI_DAILY_ENRICH_MODEL:
-        return GEMINI_DAILY_ENRICH_MODEL
     primary = choose_gemini_model()
-    if "gemini-3" in primary.lower() and "preview" in primary.lower():
-        for model in gemini_model_candidates()[1:]:
-            lower = model.lower()
-            if "gemini-3" not in lower or "preview" not in lower:
-                return model
+    if GEMINI_ENABLE_MODEL_FALLBACK and GEMINI_DAILY_ENRICH_MODEL:
+        return GEMINI_DAILY_ENRICH_MODEL
     return primary
+
+
+def gemini_daily_enrich_model_selection():
+    env_model = choose_gemini_model()
+    selected_model = choose_gemini_daily_enrich_model()
+    fallback_used = selected_model != env_model
+    fallback_reason = "explicit_daily_enrich_model" if fallback_used else "none"
+    return {
+        "env_model": env_model,
+        "selected_model": selected_model,
+        "fallback_used": fallback_used,
+        "fallback_reason": fallback_reason,
+    }
 
 
 def gemini_smoke_test_enabled():
@@ -8381,11 +8414,16 @@ def call_gemini(
     temperature=None,
     protocol=None,
     thinking_budget=None,
+    env_model=None,
+    fallback_used=False,
+    fallback_reason="none",
 ):
     if not GEMINI_API_KEY:
         raise RuntimeError("尚未設定 Gemini API Key。")
 
     model_name = model_name or choose_gemini_model()
+    env_model = env_model or choose_gemini_model()
+    fallback_reason = fallback_reason or "none"
     timeout_seconds = timeout_seconds or GEMINI_TIMEOUT_SECONDS
     url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
@@ -8409,6 +8447,10 @@ def call_gemini(
     if generation_config:
         request_payload["generationConfig"] = generation_config
     if protocol:
+        print(f"[gemini-debug] env_model={env_model}")
+        print(f"[gemini-debug] selected_model={model_name}")
+        print(f"[gemini-debug] fallback_used={str(bool(fallback_used)).lower()}")
+        print(f"[gemini-debug] fallback_reason={fallback_reason}")
         print(f"[gemini-debug] protocol={protocol}")
         print(f"[gemini-debug] response_schema={str(bool(response_schema)).lower()}")
         print(f"[gemini-debug] response_mime_type={response_mime_type or ''}")
@@ -8420,6 +8462,10 @@ def call_gemini(
         + json.dumps(
             {
                 "model": model_name,
+                "env_model": env_model,
+                "selected_model": model_name,
+                "fallback_used": bool(fallback_used),
+                "fallback_reason": fallback_reason,
                 "protocol": protocol,
                 "temperature": generation_config.get("temperature"),
                 "response_mime_type": generation_config.get("responseMimeType"),
@@ -9494,9 +9540,10 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 f"[gemini-enrich] chunk_start pack={pack_type} item_type={item_type} "
                 f"chunk={chunk_label} size={requested_count}"
             )
+            model_selection = gemini_daily_enrich_model_selection()
             raw_chunk_text = call_gemini(
                 prompt,
-                model_name=choose_gemini_daily_enrich_model(),
+                model_name=model_selection["selected_model"],
                 timeout_seconds=GEMINI_BANK_STAGE_TIMEOUT_SECONDS,
                 response_mime_type="application/json",
                 response_schema=None,
@@ -9504,6 +9551,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 temperature=0,
                 protocol="compact_json",
                 thinking_budget=0,
+                env_model=model_selection["env_model"],
+                fallback_used=model_selection["fallback_used"],
+                fallback_reason=model_selection["fallback_reason"],
             )
             chunk_items, chunk_parse_stats = parse_gemini_bank_items_with_stats(
                 item_type,
