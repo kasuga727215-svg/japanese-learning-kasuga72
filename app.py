@@ -1229,6 +1229,7 @@ def _ensure_settings_store_uncached():
         migrate_vocabulary_pool_sqlite(conn)
         migrate_vocab_rules_sqlite(conn)
         migrate_grammar_points_sqlite(conn)
+        migrate_grammar_pool_sqlite(conn)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_quiz_records_created_at ON quiz_records(created_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_last_reviewed_at ON mistake_logs(last_reviewed_at)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mistake_logs_next_review_date ON mistake_logs(next_review_date)")
@@ -2748,6 +2749,51 @@ def migrate_grammar_points_sqlite(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_logs_selected_date_key ON grammar_selection_logs(selected_for, material_date, grammar_key)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_logs_level_key_date ON grammar_selection_logs(jlpt_level, grammar_key, material_date)")
     seed_grammar_points_sqlite(conn)
+
+
+def migrate_grammar_pool_sqlite(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS grammar_pool (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            grammar_key TEXT UNIQUE NOT NULL,
+            pattern TEXT DEFAULT '',
+            display_name TEXT DEFAULT '',
+            jlpt_level TEXT DEFAULT '',
+            meaning_seed TEXT DEFAULT '',
+            connection_seed TEXT DEFAULT '',
+            category TEXT DEFAULT 'basic',
+            source TEXT DEFAULT 'manual_seed',
+            status TEXT DEFAULT 'active',
+            used_count INTEGER DEFAULT 0,
+            last_used_at TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """
+    )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(grammar_pool)").fetchall()}
+    migrations = {
+        "grammar_key": "ALTER TABLE grammar_pool ADD COLUMN grammar_key TEXT",
+        "pattern": "ALTER TABLE grammar_pool ADD COLUMN pattern TEXT DEFAULT ''",
+        "display_name": "ALTER TABLE grammar_pool ADD COLUMN display_name TEXT DEFAULT ''",
+        "jlpt_level": "ALTER TABLE grammar_pool ADD COLUMN jlpt_level TEXT DEFAULT ''",
+        "meaning_seed": "ALTER TABLE grammar_pool ADD COLUMN meaning_seed TEXT DEFAULT ''",
+        "connection_seed": "ALTER TABLE grammar_pool ADD COLUMN connection_seed TEXT DEFAULT ''",
+        "category": "ALTER TABLE grammar_pool ADD COLUMN category TEXT DEFAULT 'basic'",
+        "source": "ALTER TABLE grammar_pool ADD COLUMN source TEXT DEFAULT 'manual_seed'",
+        "status": "ALTER TABLE grammar_pool ADD COLUMN status TEXT DEFAULT 'active'",
+        "used_count": "ALTER TABLE grammar_pool ADD COLUMN used_count INTEGER DEFAULT 0",
+        "last_used_at": "ALTER TABLE grammar_pool ADD COLUMN last_used_at TEXT",
+        "created_at": "ALTER TABLE grammar_pool ADD COLUMN created_at TEXT",
+        "updated_at": "ALTER TABLE grammar_pool ADD COLUMN updated_at TEXT",
+    }
+    for column, statement in migrations.items():
+        if column not in columns:
+            conn.execute(statement)
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_pool_key ON grammar_pool(grammar_key)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_pool_level_status ON grammar_pool(jlpt_level, status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_grammar_pool_last_used_at ON grammar_pool(last_used_at)")
 
 
 def migrate_mistake_logs(conn):
@@ -4825,6 +4871,8 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
         grammar_key = simple_text(payload.get("k") or payload.get("grammar_key")) or normalize_vocab_key(title)
         meaning = simple_text(payload.get("m") or payload.get("meaning_zh") or payload.get("meaning"))
         connection = simple_text(payload.get("c") or payload.get("connection") or payload.get("structure_formula") or payload.get("structure"))
+        structure_formula = simple_text(payload.get("structure_formula")) or connection
+        usage_summary = simple_text(payload.get("usage_summary_zh")) or meaning
         return {
             **payload,
             "grammar_key": grammar_key,
@@ -4834,10 +4882,12 @@ def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
             "grammar_type": simple_text(payload.get("grammar_type") or "grammar"),
             "meaning_zh": meaning,
             "connection": connection,
-            "structure_formula": connection,
-            "usage_summary_zh": simple_text(payload.get("usage_summary_zh")) or meaning,
+            "structure_formula": structure_formula,
+            "usage_summary_zh": usage_summary,
             "example_japanese": simple_text(payload.get("ex") or payload.get("example_japanese")),
+            "example_hiragana": simple_text(payload.get("example_hiragana") or payload.get("example_reading")),
             "example_zh": simple_text(payload.get("ex_zh") or payload.get("example_zh") or payload.get("example_translation_zh")),
+            "common_mistake_zh": simple_text(payload.get("common_mistake_zh")),
         }
     return dict(payload)
 
@@ -6101,12 +6151,229 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing, "fetch_errors": fetch_errors, "skipped_bad_encoding": skipped_bad_encoding}
 
 
+def grammar_pool_candidate_inventory():
+    ensure_grammar_pool_store()
+    by_level = {level: 0 for level in LEVELS}
+    status_clause = "LOWER(COALESCE(NULLIF(status, ''), 'active')) IN ('active', 'approved', 'enabled', 'unused')"
+    try:
+        sql_total = f"SELECT COUNT(*) FROM grammar_pool WHERE {status_clause}"
+        sql_level = f"""
+            SELECT COALESCE(NULLIF(jlpt_level, ''), '__empty__') AS level, COUNT(*)
+            FROM grammar_pool
+            WHERE {status_clause}
+            GROUP BY COALESCE(NULLIF(jlpt_level, ''), '__empty__')
+        """
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql_total)
+                    total = int(cur.fetchone()[0] or 0)
+                    cur.execute(sql_level)
+                    rows = cur.fetchall()
+        else:
+            with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+                total = int(conn.execute(sql_total).fetchone()[0] or 0)
+                rows = conn.execute(sql_level).fetchall()
+        for level, count in rows:
+            normalized = normalize_gemini_bank_level(level, "grammar")
+            if normalized in by_level:
+                by_level[normalized] = int(count or 0)
+        return {"total": total, "by_level": by_level}
+    except Exception as exc:
+        print(f"[grammar-pool] candidate_inventory failed reason={exc}")
+        return {"total": 0, "by_level": by_level, "warning": str(exc)}
+
+
+def sanitize_grammar_pool_candidate_row(row):
+    sanitized = dict(row or {})
+    for field in [
+        "grammar_key",
+        "pattern",
+        "display_name",
+        "jlpt_level",
+        "meaning_seed",
+        "connection_seed",
+        "category",
+        "source",
+        "status",
+        "last_used_at",
+    ]:
+        if field in sanitized:
+            sanitized[field] = safe_text(sanitized.get(field))
+    return sanitized
+
+
+def grammar_pool_candidate_key(row):
+    return normalize_vocab_key(first_text(row, ["grammar_key", "pattern", "display_name"]))
+
+
+def build_daily_fresh_grammar_candidate_payload(row, level):
+    key = first_text(row, ["grammar_key", "pattern", "display_name"])
+    pattern = first_text(row, ["pattern", "display_name", "grammar_key"])
+    return {
+        "level": level,
+        "grammar_key": key,
+        "k": key,
+        "pattern": pattern,
+        "display_name": first_text(row, ["display_name", "pattern", "grammar_key"]),
+        "meaning_seed": first_text(row, ["meaning_seed"]),
+        "connection_seed": first_text(row, ["connection_seed"]),
+        "category": first_text(row, ["category"]) or "basic",
+        "normalized_key": normalize_vocab_key(key),
+        "pool_id": row.get("id"),
+    }
+
+
+def fetch_daily_fresh_grammar_candidate_rows(level, limit, excluded_keys):
+    ensure_grammar_pool_store()
+    level = normalize_gemini_bank_level(level, "grammar")
+    limit = max(1, min(int(limit or 10), 30))
+    excluded = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
+    print(f"[grammar-pool] candidate_fetch_start level={level} requested={limit}")
+    if DATABASE_URL:
+        row_columns = [
+            "gp.id",
+            postgres_text_as_bytea("gp.grammar_key"),
+            postgres_text_as_bytea("gp.pattern"),
+            postgres_text_as_bytea("gp.display_name"),
+            postgres_text_as_bytea("gp.jlpt_level"),
+            postgres_text_as_bytea("gp.meaning_seed"),
+            postgres_text_as_bytea("gp.connection_seed"),
+            postgres_text_as_bytea("gp.category"),
+            postgres_text_as_bytea("gp.source"),
+            postgres_text_as_bytea("gp.status"),
+            "gp.used_count",
+            postgres_text_as_bytea("gp.last_used_at"),
+        ]
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT {', '.join(row_columns)}
+                    FROM grammar_pool gp
+                    WHERE COALESCE(NULLIF(gp.jlpt_level, ''), '') = %s
+                      AND LOWER(COALESCE(NULLIF(gp.status, ''), 'active')) IN ('active', 'approved', 'enabled', 'unused')
+                      AND COALESCE(NULLIF(gp.grammar_key, ''), '') <> ''
+                    ORDER BY
+                      COALESCE(gp.used_count, 0) ASC,
+                      gp.last_used_at ASC NULLS FIRST,
+                      gp.id ASC
+                    LIMIT %s
+                    """,
+                    (level, max(limit * 10, 30)),
+                )
+                raw_rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description]
+        rows = [sanitize_grammar_pool_candidate_row(dict(zip(columns, row))) for row in raw_rows]
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            raw_rows = conn.execute(
+                """
+                SELECT id, grammar_key, pattern, display_name, jlpt_level, meaning_seed, connection_seed,
+                       category, source, status, used_count, last_used_at
+                FROM grammar_pool
+                WHERE COALESCE(NULLIF(jlpt_level, ''), '') = ?
+                  AND LOWER(COALESCE(NULLIF(status, ''), 'active')) IN ('active', 'approved', 'enabled', 'unused')
+                  AND COALESCE(NULLIF(grammar_key, ''), '') <> ''
+                ORDER BY COALESCE(used_count, 0) ASC, last_used_at ASC, id ASC
+                LIMIT ?
+                """,
+                (level, max(limit * 10, 30)),
+            ).fetchall()
+        rows = [sanitize_grammar_pool_candidate_row(dict(row)) for row in raw_rows]
+    selected = []
+    for row in rows:
+        key = grammar_pool_candidate_key(row)
+        if not key or key in excluded:
+            continue
+        selected.append(row)
+        excluded.add(key)
+        if len(selected) >= limit:
+            break
+    print(f"[grammar-pool] candidate_fetch_success level={level} selected={len(selected)}")
+    return selected
+
+
+def select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type="grammar"):
+    requested_by_level = {
+        normalize_gemini_bank_level(level, "grammar"): int(count or 0)
+        for level, count in (requested_by_level or {}).items()
+        if int(count or 0) > 0
+    }
+    existing_bank_keys = daily_fresh_existing_bank_keys("grammar", requested_by_level.keys())
+    excluded_keys = (
+        set(existing_bank_keys)
+        | {normalize_vocab_key(key) for key in (recent_keys or set()) if normalize_vocab_key(key)}
+        | gemini_daily_duplicate_blacklist_keys()
+    )
+    selected_by_level = {}
+    selected_items = []
+    missing = []
+    seen = set()
+
+    def collect_candidates_for_level(level, needed):
+        rows = fetch_daily_fresh_grammar_candidate_rows(level, max(needed * 4, 4), excluded_keys | seen)
+        candidates = []
+        for row in rows:
+            key = grammar_pool_candidate_key(row)
+            if not key or key in excluded_keys or key in seen:
+                continue
+            candidate = build_daily_fresh_grammar_candidate_payload(row, level)
+            candidates.append(candidate)
+            selected_items.append(candidate)
+            seen.add(key)
+            if len(candidates) >= needed:
+                break
+        return candidates
+
+    for level, needed in requested_by_level.items():
+        candidates = collect_candidates_for_level(level, min(1, needed))
+        selected_by_level[level] = candidates
+        if len(candidates) < min(1, needed):
+            missing.append({"level": level, "requested": min(1, needed), "available": len(candidates)})
+
+    remaining = max(0, sum(requested_by_level.values()) - len(selected_items))
+    if remaining > 0:
+        for fallback_level in [level for level in ("N3", "N2", "N1", "N4", "N5") if level in requested_by_level]:
+            if remaining <= 0:
+                break
+            candidates = collect_candidates_for_level(fallback_level, remaining)
+            if not candidates:
+                continue
+            selected_by_level.setdefault(fallback_level, []).extend(candidates)
+            remaining -= len(candidates)
+            print(f"[fresh-candidate] grammar_redistributed to={fallback_level} count={len(candidates)}")
+    if remaining <= 0:
+        missing = []
+
+    level_counts = {level: len(items) for level, items in selected_by_level.items()}
+    selected_keys = [candidate.get("grammar_key") for candidate in selected_items]
+    print(f"[fresh-candidate] source=grammar_pool pack={pack_type} selected={len(selected_items)}")
+    print(f"[fresh-candidate] levels={level_counts}")
+    print(f"[fresh-candidate] candidates pack={pack_type} items={log_safe_text(json.dumps(selected_keys, ensure_ascii=False))}")
+    if missing:
+        print(f"[fresh-candidate] insufficient source=grammar_pool pack={pack_type} item_type=grammar missing={missing}")
+    return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing, "fetch_errors": [], "skipped_bad_encoding": 0}
+
+
 def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
     flat_items = []
     for level, candidates in (candidates_by_level or {}).items():
         for candidate in candidates or []:
             if item_type == "verb":
                 flat_items.append({"level": level, "d": candidate.get("d", "")})
+            elif item_type == "grammar":
+                flat_items.append(
+                    {
+                        "level": level,
+                        "grammar_key": candidate.get("grammar_key", ""),
+                        "pattern": candidate.get("pattern", ""),
+                        "display_name": candidate.get("display_name", ""),
+                        "meaning_seed": candidate.get("meaning_seed", ""),
+                        "connection_seed": candidate.get("connection_seed", ""),
+                    }
+                )
             else:
                 flat_items.append({"level": level, "w": candidate.get("w", "")})
     if item_type == "verb":
@@ -6131,6 +6398,34 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             "Each output item must be an array [w,r,m,p,ex,ex_zh]. "
             "The first field w must exactly equal the input w. p must not be a verb. "
             "Japanese example max 15 chars; Chinese example max 15 chars. "
+            "All Chinese fields must use Traditional Chinese, never Simplified Chinese. "
+            "If an item is unfamiliar, omit it instead of replacing it. "
+            f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
+            f"Output schema example: {json.dumps(schema, ensure_ascii=False)}"
+        )
+    if item_type == "grammar":
+        schema = {
+            "items": [
+                [
+                    "n5:つもり",
+                    "つもり",
+                    "打算、計畫",
+                    "動詞辞書形＋つもり",
+                    "Vる＋つもり",
+                    "表示說話者已決定做某事。",
+                    "明日行くつもりです。",
+                    "あしたいくつもりです。",
+                    "我打算明天去。",
+                    "不要和單純未來式混用。",
+                ]
+            ]
+        }
+        return (
+            "Return compact JSON only. Do not use Markdown or extra text. "
+            "You only enrich the fixed input grammar candidates. Do not add, delete, reorder, or replace candidates. "
+            "The first field grammar_key must exactly equal the input grammar_key. "
+            "Each output item must be an array "
+            "[grammar_key,title,meaning_zh,connection,structure_formula,usage_summary_zh,example_japanese,example_hiragana,example_zh,common_mistake_zh]. "
             "All Chinese fields must use Traditional Chinese, never Simplified Chinese. "
             "If an item is unfamiliar, omit it instead of replacing it. "
             f"Input candidates: {json.dumps({'items': flat_items}, ensure_ascii=False)}. "
@@ -6205,7 +6500,12 @@ def has_simplified_zh_warning(value):
 def filter_enriched_items_to_candidates(items, item_type, candidates):
     candidate_by_key = {}
     for candidate in candidates or []:
-        surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
+        if item_type == "verb":
+            surface = candidate.get("d")
+        elif item_type == "grammar":
+            surface = candidate.get("grammar_key") or candidate.get("k") or candidate.get("pattern")
+        else:
+            surface = candidate.get("w")
         key = normalize_vocab_key(candidate.get("normalized_key") or surface)
         if key:
             candidate_by_key[key] = candidate
@@ -6218,11 +6518,22 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
         if not candidate:
             stats["unknown"] += 1
             continue
-        expected_surface = candidate.get("d") if item_type == "verb" else candidate.get("w")
-        if surface != expected_surface:
+        if item_type == "verb":
+            expected_surface = candidate.get("d")
+        elif item_type == "grammar":
+            expected_surface = item.get("normalized_key") or surface
+        else:
+            expected_surface = candidate.get("w")
+        if item_type != "grammar" and surface != expected_surface:
             stats["mismatch"] += 1
             continue
         payload = json.loads(item.get("payload_json") or "{}")
+        if item_type == "grammar":
+            expected_key = candidate.get("grammar_key") or candidate.get("k") or candidate.get("pattern")
+            actual_key = payload.get("grammar_key") or payload.get("k") or item.get("normalized_key")
+            if normalize_vocab_key(actual_key) != normalize_vocab_key(expected_key):
+                stats["mismatch"] += 1
+                continue
         if item_type == "word":
             pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
             if "動詞" in pos or pos.lower() in {"verb", "verb_godan", "verb_ichidan"}:
@@ -6310,7 +6621,7 @@ def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
             "ex_zh": clipped_compact_text(values[9], 15),
         }
     if item_type == "grammar":
-        if len(values) < 6:
+        if len(values) < 10:
             return {}
         return {
             "type": "grammar",
@@ -6319,8 +6630,12 @@ def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
             "t": values[1],
             "m": values[2],
             "c": values[3],
-            "ex": clipped_compact_text(values[4], 15),
-            "ex_zh": clipped_compact_text(values[5], 15),
+            "structure_formula": values[4],
+            "usage_summary_zh": values[5],
+            "ex": clipped_compact_text(values[6], 30),
+            "example_hiragana": clipped_compact_text(values[7], 50),
+            "ex_zh": clipped_compact_text(values[8], 30),
+            "common_mistake_zh": clipped_compact_text(values[9], 60),
         }
     if len(values) < 6:
         return {}
@@ -7079,7 +7394,14 @@ def gemini_daily_fresh_chunk_already_persisted(item_type, daily_batch_id, chunk_
     ensure_gemini_item_bank_store()
     daily_batch_id = simple_text(daily_batch_id)
     keys = [
-        normalize_vocab_key(candidate.get("normalized_key") or candidate.get("d") or candidate.get("w"))
+        normalize_vocab_key(
+            candidate.get("normalized_key")
+            or candidate.get("grammar_key")
+            or candidate.get("k")
+            or candidate.get("pattern")
+            or candidate.get("d")
+            or candidate.get("w")
+        )
         for candidate in (chunk_candidates or [])
     ]
     keys = [key for key in keys if key]
@@ -7711,6 +8033,69 @@ def migrate_vocabulary_pool_postgres():
         conn.commit()
 
 
+def migrate_grammar_pool_postgres():
+    if not DATABASE_URL:
+        return
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS grammar_pool (
+                    id BIGSERIAL PRIMARY KEY,
+                    grammar_key TEXT UNIQUE NOT NULL,
+                    pattern TEXT DEFAULT '',
+                    display_name TEXT DEFAULT '',
+                    jlpt_level TEXT DEFAULT '',
+                    meaning_seed TEXT DEFAULT '',
+                    connection_seed TEXT DEFAULT '',
+                    category TEXT DEFAULT 'basic',
+                    source TEXT DEFAULT 'manual_seed',
+                    status TEXT DEFAULT 'active',
+                    used_count INTEGER DEFAULT 0,
+                    last_used_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ,
+                    updated_at TIMESTAMPTZ
+                )
+                """
+            )
+            columns = {
+                "grammar_key": "TEXT",
+                "pattern": "TEXT DEFAULT ''",
+                "display_name": "TEXT DEFAULT ''",
+                "jlpt_level": "TEXT DEFAULT ''",
+                "meaning_seed": "TEXT DEFAULT ''",
+                "connection_seed": "TEXT DEFAULT ''",
+                "category": "TEXT DEFAULT 'basic'",
+                "source": "TEXT DEFAULT 'manual_seed'",
+                "status": "TEXT DEFAULT 'active'",
+                "used_count": "INTEGER DEFAULT 0",
+                "last_used_at": "TIMESTAMPTZ",
+                "created_at": "TIMESTAMPTZ",
+                "updated_at": "TIMESTAMPTZ",
+            }
+            for column, col_type in columns.items():
+                cur.execute(f"ALTER TABLE grammar_pool ADD COLUMN IF NOT EXISTS {column} {col_type}")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_grammar_pool_key ON grammar_pool(grammar_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_pool_level_status ON grammar_pool(jlpt_level, status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_grammar_pool_last_used_at ON grammar_pool(last_used_at)")
+            now = utc_now_iso()
+            cur.execute(
+                """
+                UPDATE grammar_pool
+                SET pattern = COALESCE(NULLIF(pattern, ''), grammar_key),
+                    display_name = COALESCE(NULLIF(display_name, ''), NULLIF(pattern, ''), grammar_key),
+                    category = COALESCE(NULLIF(category, ''), 'basic'),
+                    source = COALESCE(NULLIF(source, ''), 'manual_seed'),
+                    status = COALESCE(NULLIF(status, ''), 'active'),
+                    used_count = COALESCE(used_count, 0),
+                    created_at = COALESCE(created_at, %s),
+                    updated_at = COALESCE(updated_at, %s)
+                """,
+                (now, now),
+            )
+        conn.commit()
+
+
 def migrate_vocab_rules_postgres():
     if not DATABASE_URL:
         return
@@ -7917,6 +8302,15 @@ def ensure_grammar_points_store():
         ensure_settings_store()
 
 
+def ensure_grammar_pool_store():
+    if not migrations_allowed_now():
+        return
+    if DATABASE_URL:
+        migrate_grammar_pool_postgres()
+    else:
+        ensure_settings_store()
+
+
 def material_version_columns():
     return {
         "material_key": "TEXT DEFAULT ''",
@@ -8099,6 +8493,7 @@ def _ensure_database_uncached():
         migrate_vocabulary_pool_postgres()
         migrate_vocab_rules_postgres()
         migrate_grammar_points_postgres()
+        migrate_grammar_pool_postgres()
         return
 
     if not os.path.exists(DATABASE_FILE):
@@ -9355,7 +9750,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     candidate_plan = {"candidates_by_level": {}, "items": [], "missing": []}
     pack_state = pack_cache.get(pack_type) if isinstance(pack_cache.get(pack_type), dict) else {}
     recent_keys = set()
-    if item_type not in {"word", "verb"}:
+    if item_type == "grammar":
+        recent_keys = get_recent_used_grammar_keys(material_date, days=GEMINI_BANK_RECENT_EXCLUSION_DAYS)
+    elif item_type not in {"word", "verb"}:
         recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_BANK_RECENT_EXCLUSION_DAYS, material_date=material_date)
         recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
     if item_type in {"word", "verb"}:
@@ -9478,7 +9875,70 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         print(f"[gemini-enrich] input_candidates pack={pack_type} count={requested_total}")
         print(f"[gemini-enrich] mode=fixed_candidates pack={pack_type}")
 
-    if item_type in {"word", "verb"}:
+    if item_type == "grammar":
+        cached_plan = cached_daily_fresh_candidate_plan(pack_state)
+        if cached_plan:
+            candidate_plan = cached_plan
+            print(
+                f"[daily-fresh-candidates] using_cached_candidates job_id={job_id} "
+                f"pack={pack_type} item_type={item_type} candidate_count={len(candidate_plan.get('items') or [])}"
+            )
+        else:
+            inventory = grammar_pool_candidate_inventory()
+            inventory_levels = inventory.get("by_level") or {}
+            print(f"[grammar-pool] candidate_inventory total={inventory.get('total', 0)}")
+            print(
+                "[grammar-pool] by_level "
+                f"N5={inventory_levels.get('N5', 0)} "
+                f"N4={inventory_levels.get('N4', 0)} "
+                f"N3={inventory_levels.get('N3', 0)} "
+                f"N2={inventory_levels.get('N2', 0)} "
+                f"N1={inventory_levels.get('N1', 0)}"
+            )
+            try:
+                candidate_plan = select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type=pack_type)
+            except Exception as exc:
+                warning = "grammar_pool_unavailable"
+                candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
+                print(f"[grammar-pool] candidate_fetch_failed pack={pack_type} reason={exc}")
+        if candidate_plan.get("missing"):
+            warning = "grammar_pool_candidate_shortage"
+            print(
+                "[daily-fresh-candidates] grammar best_effort "
+                f"job_id={job_id} pack={pack_type} missing={candidate_plan.get('missing')}"
+            )
+        requested_total = len(candidate_plan.get("items") or [])
+        if not cached_plan:
+            pack_state = {
+                **pack_state,
+                "item_type": item_type,
+                "requested_by_level": requested_by_level,
+                "requested": requested_total,
+                "candidate_plan": candidate_plan,
+                "candidate_count": requested_total,
+                "candidate_missing": candidate_plan.get("missing") or [],
+                "chunk_size": daily_fresh_enrich_chunk_size(item_type),
+                "completed_chunks": pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [],
+                "daily_batch_id": daily_batch_id,
+                "generated_for_date": material_date,
+                "candidate_source": "grammar_pool",
+                "warning": warning,
+            }
+            pack_cache[pack_type] = make_json_safe(pack_state)
+            cache["daily_fresh"] = pack_cache
+            update_gemini_generation_job(
+                job_id,
+                current_stage=f"daily_fresh:{pack_type}_candidates_selected",
+                **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+            )
+        print(
+            f"[daily-fresh-candidates] enrich_plan pack={pack_type} "
+            f"item_type={item_type} candidate_count={requested_total}"
+        )
+        print(f"[gemini-enrich] input_candidates pack={pack_type} count={requested_total}")
+        print(f"[gemini-enrich] mode=fixed_candidates pack={pack_type}")
+
+    if item_type in {"word", "verb", "grammar"}:
         chunk_size = daily_fresh_enrich_chunk_size(item_type)
         candidate_items = list(candidate_plan.get("items") or [])
         chunks = chunked_list(candidate_items, chunk_size)
@@ -9514,6 +9974,28 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "[gemini-step] micro_step_done "
                 f"job_id={job_id} step=prepare_candidates pack={pack_type} elapsed_ms={elapsed_ms}"
             )
+            if item_type == "grammar" and not chunks:
+                completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
+                persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_done")
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "daily_batch_id": daily_batch_id,
+                    "stage": "daily_fresh",
+                    "micro_step": "prepare_candidates",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "candidate_count": requested_total,
+                    "chunk_size": chunk_size,
+                    "chunk_count": 0,
+                    "completed_chunks": [],
+                    "done": True,
+                    "continued": False,
+                    "continue_same_step": False,
+                    "completed_steps": completed_steps,
+                    "warning": warning or "grammar_pool_candidate_shortage",
+                    "elapsed_ms": elapsed_ms,
+                }, 200
             return {
                 "ok": True,
                 "job_id": job_id,
@@ -9616,7 +10098,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "last_error": last_error,
                     "daily_batch_id": daily_batch_id,
                     "generated_for_date": material_date,
-                    "candidate_source": "vocabulary_pool",
+                    "candidate_source": "grammar_pool" if item_type == "grammar" else "vocabulary_pool",
                     "candidate_count": len(candidate_plan.get("items") or []),
                     "candidate_missing": candidate_plan.get("missing") or [],
                     "chunk_size": chunk_size,
@@ -9717,7 +10199,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "last_error": last_error,
                     "daily_batch_id": daily_batch_id,
                     "generated_for_date": material_date,
-                    "candidate_source": "vocabulary_pool",
+                    "candidate_source": "grammar_pool" if item_type == "grammar" else "vocabulary_pool",
                     "candidate_count": len(candidate_plan.get("items") or []),
                     "candidate_missing": candidate_plan.get("missing") or [],
                 }
