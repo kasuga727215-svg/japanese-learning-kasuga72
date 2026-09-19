@@ -6576,22 +6576,73 @@ def looks_like_truncated_json(raw_text):
         json.loads(cleaned)
         return False
     except json.JSONDecodeError as exc:
+        json_text, _trailing, _start_offset = extract_first_json_value_text(cleaned)
+        if json_text:
+            try:
+                json.loads(json_text)
+                return False
+            except json.JSONDecodeError:
+                pass
         tail = cleaned.rstrip()[-1:]
         return tail not in {"}", "]"} or exc.pos >= max(0, len(cleaned) - 8)
+
+
+def extract_first_json_value_text(cleaned):
+    text = str(cleaned or "")
+    starts = [(pos, char) for char in ("{", "[") if (pos := text.find(char)) != -1]
+    if not starts:
+        return "", "", 0
+    start, _start_char = min(starts, key=lambda item: item[0])
+    expected = []
+    in_string = False
+    escaped = False
+    pairs = {"{": "}", "[": "]"}
+    closing = set(pairs.values())
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in pairs:
+            expected.append(pairs[char])
+        elif char in closing:
+            if not expected or char != expected[-1]:
+                return "", "", start
+            expected.pop()
+            if not expected:
+                return text[start : index + 1], text[index + 1 :], start
+    return "", "", start
 
 
 def parse_gemini_bank_json_safely(raw_text):
     cleaned = str(raw_text or "").strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r"\s*```\s*$", "", cleaned).strip()
-    array_start = cleaned.find("[")
-    array_end = cleaned.rfind("]")
-    object_start = cleaned.find("{")
-    object_end = cleaned.rfind("}")
-    if array_start != -1 and array_end > array_start and (object_start == -1 or array_start < object_start):
-        return json.loads(cleaned[array_start : array_end + 1])
-    if object_start != -1 and object_end > object_start:
-        return json.loads(cleaned[object_start : object_end + 1])
+    try:
+        parsed = json.loads(cleaned)
+        print("[gemini-json] parse_success=true")
+        return parsed
+    except json.JSONDecodeError as full_exc:
+        json_text, trailing, start_offset = extract_first_json_value_text(cleaned)
+        if json_text:
+            try:
+                parsed = json.loads(json_text)
+                trailing_length = len(trailing.strip())
+                if start_offset or trailing_length:
+                    print("[gemini-json] extracted_first_json_object=true")
+                    print(f"[gemini-json] ignored_trailing_text_length={trailing_length}")
+                print("[gemini-json] parse_success=true")
+                return parsed
+            except json.JSONDecodeError:
+                pass
+        raise full_exc
     raise ValueError("Gemini did not return JSON for bank items.")
 
 
@@ -6621,7 +6672,9 @@ def compact_gemini_bank_item_from_array(item_type, raw, fallback_level):
             "ex_zh": clipped_compact_text(values[9], 15),
         }
     if item_type == "grammar":
-        if len(values) < 10:
+        if len(values) != 10:
+            return {}
+        if not values[0] or not values[1] or not values[2] or not values[6]:
             return {}
         return {
             "type": "grammar",
@@ -10256,6 +10309,48 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     level=",".join(levels),
                     elapsed_ms=round((time.perf_counter() - started) * 1000),
                 ), 200
+            if item_type == "grammar":
+                warning = f"grammar_chunk_skipped:{reason}"
+                completed_chunks.add(chunk_index)
+                has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+                pack_state.update(
+                    {
+                        "inserted": inserted_total,
+                        "skipped": skipped_total,
+                        "completed_chunks": sorted(completed_chunks),
+                        "chunk_size": chunk_size,
+                        "chunk_count": len(chunks),
+                        "warning": warning,
+                        "last_error": last_error,
+                    }
+                )
+                persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}:chunk_{chunk_index}_skipped")
+                completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
+                if not has_more_chunks:
+                    completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
+                    persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_done")
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                print(
+                    "[gemini-bank] grammar best_effort skip "
+                    f"pack={pack_type} chunk={chunk_index} reason={reason}"
+                )
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "daily_batch_id": daily_batch_id,
+                    "stage": "daily_fresh",
+                    "micro_step": "enrich_chunk",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "chunk_index": chunk_index,
+                    "warning": warning,
+                    "done": not has_more_chunks,
+                    "continued": has_more_chunks,
+                    "continue_same_step": has_more_chunks,
+                    "next_step": {"stage": "daily_fresh", "pack_type": pack_type} if has_more_chunks else None,
+                    "completed_steps": completed_steps,
+                    "elapsed_ms": elapsed_ms,
+                }, 200
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             if reason in {"json_parse_error", "json_truncated", "output_token_limit", "output_token_limit_config_error", "thinking_token_limit"}:
                 if reason == "output_token_limit_config_error":
