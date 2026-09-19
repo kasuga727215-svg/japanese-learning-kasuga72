@@ -5450,6 +5450,7 @@ DAILY_FRESH_NON_VERB_COUNTER_WORDS = {
     "円",
 }
 DAILY_FRESH_NON_VERB_SURFACES = {
+    "近く",
     "ほんとう",
     "本当",
     "まっすぐ",
@@ -5457,6 +5458,7 @@ DAILY_FRESH_NON_VERB_SURFACES = {
     "たぶん",
     "多分",
     "すぐ",
+    "すぐに",
     "とても",
     "きれい",
     "綺麗",
@@ -5701,6 +5703,72 @@ def is_probable_japanese_verb_surface(surface):
     return text_has_cjk_kanji(text)
 
 
+def audit_verb_candidate(candidate, row=None, log=False):
+    source = candidate if isinstance(candidate, dict) else {"surface": candidate}
+    row = row if isinstance(row, dict) else {}
+    surface = (
+        first_text(source, ["d", "dictionary_form", "surface", "base_form", "term", "word"])
+        or vocabulary_pool_candidate_surface(row)
+    )
+    text = simple_text(surface)
+
+    def audit_result(accepted, reason="", suggested_type=""):
+        result = {
+            "accepted": bool(accepted),
+            "reason": reason,
+            "suggested_type": suggested_type,
+            "candidate": text,
+        }
+        if log and not accepted and reason == "known_non_verb":
+            print(
+                "[vocabulary-pool] verb_candidate_rejected "
+                f"candidate={log_safe_text(text)} reason={reason}"
+            )
+        return result
+
+    if not text:
+        return audit_result(False, "empty_candidate")
+    if has_variant_separator(text):
+        return audit_result(False, "variant_separator")
+    if is_daily_fresh_non_verb_counter_surface(text):
+        return audit_result(False, "counter_or_number", "word")
+    if text in DAILY_FRESH_NON_VERB_SURFACES:
+        return audit_result(False, "known_non_verb", "word")
+
+    pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
+    pos_allowed = verb_pos_allows_candidate(pos)
+    if pos_allowed is False:
+        return audit_result(False, "blocked_pos", "word")
+    try:
+        group = int(source.get("verb_group") or row.get("verb_group") or 0)
+    except (TypeError, ValueError):
+        group = 0
+
+    if text.endswith("する") and text != "する":
+        category = (first_text(source, ["category"]) or first_text(row, ["category"])).lower()
+        source_name = (first_text(source, ["source"]) or first_text(row, ["source"])).lower()
+        if (category or source_name) and (
+            category not in {"manual_core", "jlpt_core", "general", "daily", "common"}
+            or source_name in DAILY_FRESH_BLOCKED_SOURCES
+        ):
+            return audit_result(False, "unsafe_suru_candidate", "word")
+
+    if pos_allowed is True:
+        if looks_like_daily_fresh_verb_surface(text) or group in {1, 2, 3}:
+            return audit_result(True)
+        return audit_result(False, "not_verb_shape", "word")
+
+    if group in {1, 2, 3}:
+        return audit_result(True)
+    if not looks_like_daily_fresh_verb_surface(text):
+        return audit_result(False, "not_verb_shape", "word")
+    if text.endswith("く") and not text_has_cjk_kanji(text):
+        return audit_result(False, "weak_ku_suffix", "word")
+    if is_probable_japanese_verb_surface(text):
+        return audit_result(True)
+    return audit_result(False, "uncertain_verb", "word")
+
+
 def is_daily_fresh_word_pool_row(row):
     surface = vocabulary_pool_candidate_surface(row)
     if has_variant_separator(surface):
@@ -5715,31 +5783,7 @@ def is_daily_fresh_word_pool_row(row):
 
 
 def is_daily_fresh_verb_pool_row(row):
-    surface = vocabulary_pool_candidate_surface(row)
-    if not surface:
-        return False
-    if has_variant_separator(surface):
-        return False
-    if is_daily_fresh_non_verb_counter_surface(surface):
-        return False
-    if simple_text(surface) in DAILY_FRESH_NON_VERB_SURFACES:
-        return False
-    pos = first_text(row, ["part_of_speech", "pos"]).strip()
-    pos_allowed = verb_pos_allows_candidate(pos)
-    if pos_allowed is False:
-        return False
-    try:
-        group = int(row.get("verb_group") or 0)
-    except (TypeError, ValueError):
-        group = 0
-    if surface.endswith("する") and surface != "する":
-        category = first_text(row, ["category"]).lower()
-        source = first_text(row, ["source"]).lower()
-        if category not in {"manual_core", "jlpt_core", "general", "daily", "common"} or source in DAILY_FRESH_BLOCKED_SOURCES:
-            return False
-    if pos_allowed is True:
-        return looks_like_daily_fresh_verb_surface(surface) or group in {1, 2, 3}
-    return group in {1, 2, 3} or is_probable_japanese_verb_surface(surface)
+    return audit_verb_candidate(row, row=row, log=True).get("accepted", False)
 
 
 def is_daily_fresh_quality_pool_row(row, item_type):
@@ -6143,10 +6187,11 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     missing = []
     fetch_errors = []
     skipped_bad_encoding = 0
+    verb_audit_rejected = 0
     seen = set()
 
     def collect_candidates_for_level(level, needed):
-        nonlocal skipped_bad_encoding
+        nonlocal skipped_bad_encoding, verb_audit_rejected
         rows = fetch_daily_fresh_candidate_rows(item_type, level, max(needed * 10, 30), excluded_keys | seen)
         candidates = []
         for row in rows:
@@ -6162,6 +6207,11 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
                 if not key or key in excluded_keys or key in seen:
                     continue
                 candidate = build_daily_fresh_candidate_payload(row, item_type, level)
+                if item_type == "verb":
+                    audit = audit_verb_candidate(candidate, row=row, log=True)
+                    if not audit.get("accepted"):
+                        verb_audit_rejected += 1
+                        continue
             except UnicodeDecodeError as exc:
                 skipped_bad_encoding += 1
                 print(
@@ -6228,6 +6278,8 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     print(f"[fresh-candidate] source=vocabulary_pool pack={pack_type or item_type} selected={len(selected_items)}")
     print(f"[fresh-candidate] levels={level_counts}")
     print(f"[fresh-candidate] candidates pack={pack_type or item_type} items={log_safe_text(json.dumps(selected_surfaces, ensure_ascii=False))}")
+    if item_type == "verb":
+        print(f"[vocabulary-pool] verb_candidate_audit selected={len(selected_items)} rejected={verb_audit_rejected}")
     print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
     if missing:
         print(
@@ -6470,6 +6522,8 @@ def build_gemini_daily_enrich_prompt(pack_type, item_type, candidates_by_level):
             "Each output item must be an array [d,r,m,g,f_masu,f_te,f_nai,f_ta,ex,ex_zh]. "
             "The first field d must exactly equal the input d. "
             "If d ends with する, g must be 3 because it is a サ変動詞. "
+            "If a candidate is not actually a verb, do not invent verb forms; put it into rejected as "
+            "[candidate,reason,suggested_type,meaning_zh], using suggested_type=word when appropriate. "
             "Japanese example max 15 chars; Chinese example max 15 chars. "
             "All Chinese fields must use Traditional Chinese, never Simplified Chinese. "
             "If an item is unfamiliar, omit it instead of replacing it. "
@@ -6626,6 +6680,31 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 stats["invalid_pos"] += 1
                 continue
         if item_type == "verb":
+            audit = audit_verb_candidate(
+                {
+                    "d": surface,
+                    "part_of_speech": payload.get("part_of_speech"),
+                    "pos": payload.get("pos"),
+                    "verb_group": payload.get("verb_group"),
+                    "category": payload.get("category"),
+                    "source": payload.get("source"),
+                },
+                row=candidate,
+                log=True,
+            )
+            if not audit.get("accepted"):
+                stats["invalid_pos"] += 1
+                print(
+                    "[gemini-bank] candidate_rejected "
+                    f"item_type=verb candidate={log_safe_text(surface)} "
+                    f"reason={audit.get('reason')} suggested_type={audit.get('suggested_type') or 'word'}"
+                )
+                if (audit.get("suggested_type") or "") == "word":
+                    print(
+                        "[gemini-bank] candidate_reclassify_pending "
+                        f"candidate={log_safe_text(surface)} from=verb to=word"
+                    )
+                continue
             if surface.endswith("する"):
                 payload["verb_group"] = 3
                 payload["verb_type"] = "サ変動詞"
@@ -6797,14 +6876,29 @@ def parse_gemini_bank_items_with_stats(item_type, level, raw_text):
         raise ValueError(f"{error_code}:{exc}") from exc
     if isinstance(parsed, list):
         raw_items = parsed
+        raw_rejected = []
     else:
         source = source_from_gemini_payload(parsed)
         raw_items = source.get("items") or source.get("vocab") or source.get("vocabulary") or source.get("verbs") or source.get("grammar_points") or []
+        raw_rejected = source.get("rejected") if isinstance(source.get("rejected"), list) else []
     if not isinstance(raw_items, list):
         raise ValueError("invalid_bank_items")
+    rejected_items = []
+    for raw in raw_rejected:
+        values = [simple_text(value) for value in raw] if isinstance(raw, list) else []
+        if not values:
+            continue
+        rejected_items.append(
+            {
+                "candidate": values[0],
+                "reason": values[1] if len(values) > 1 and values[1] else "rejected_by_gemini",
+                "suggested_type": values[2] if len(values) > 2 else "",
+                "meaning_zh": values[3] if len(values) > 3 else "",
+            }
+        )
     items = []
     seen = set()
-    stats = {"parsed": len(raw_items), "valid": 0, "invalid": 0, "duplicate": 0}
+    stats = {"parsed": len(raw_items), "valid": 0, "invalid": 0, "duplicate": 0, "rejected": len(rejected_items), "rejected_items": rejected_items}
     for raw in raw_items:
         raw = compact_gemini_bank_item_from_array(item_type, raw, level)
         if not isinstance(raw, dict):
@@ -10154,6 +10248,36 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             }, 200
 
         def enrich_candidate_chunk(chunk_candidates, chunk_label):
+            if item_type == "verb":
+                audited_candidates = []
+                rejected_before_gemini = 0
+                for candidate in chunk_candidates:
+                    audit = audit_verb_candidate(candidate, log=True)
+                    if audit.get("accepted"):
+                        audited_candidates.append(candidate)
+                        continue
+                    rejected_before_gemini += 1
+                    candidate_text = candidate.get("d") or candidate.get("normalized_key") or audit.get("candidate")
+                    reason = audit.get("reason") or "not_verb"
+                    suggested_type = audit.get("suggested_type") or "word"
+                    print(
+                        "[gemini-bank] candidate_rejected "
+                        f"item_type=verb candidate={log_safe_text(candidate_text)} "
+                        f"reason={reason} suggested_type={suggested_type}"
+                    )
+                    if suggested_type == "word":
+                        print(
+                            "[gemini-bank] candidate_reclassify_pending "
+                            f"candidate={log_safe_text(candidate_text)} from=verb to=word"
+                        )
+                if not audited_candidates:
+                    return {
+                        "inserted": 0,
+                        "skipped": len(chunk_candidates),
+                        "duplicate": 0,
+                        "candidate_rejected": rejected_before_gemini,
+                    }
+                chunk_candidates = audited_candidates
             chunk_candidates_by_level = daily_fresh_candidates_by_level(chunk_candidates)
             requested_count = len(chunk_candidates)
             prompt = build_gemini_daily_enrich_prompt(pack_type, item_type, chunk_candidates_by_level)
@@ -10190,6 +10314,22 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 f"valid={chunk_parse_stats.get('valid', 0)} invalid={chunk_parse_stats.get('invalid', 0)} "
                 f"duplicate={chunk_parse_stats.get('duplicate', 0)}"
             )
+            rejected_items = chunk_parse_stats.get("rejected_items") if isinstance(chunk_parse_stats.get("rejected_items"), list) else []
+            if item_type == "verb" and rejected_items:
+                for rejected in rejected_items:
+                    candidate_text = rejected.get("candidate") or ""
+                    reason = rejected.get("reason") or "not_verb"
+                    suggested_type = rejected.get("suggested_type") or "word"
+                    print(
+                        "[gemini-bank] candidate_rejected "
+                        f"item_type=verb candidate={log_safe_text(candidate_text)} "
+                        f"reason={reason} suggested_type={suggested_type}"
+                    )
+                    if suggested_type == "word":
+                        print(
+                            "[gemini-bank] candidate_reclassify_pending "
+                            f"candidate={log_safe_text(candidate_text)} from=verb to=word"
+                        )
             allowed_levels = set(levels)
             chunk_items = [item for item in chunk_items if item.get("jlpt_level") in allowed_levels]
             chunk_items, match_stats = filter_enriched_items_to_candidates(chunk_items, item_type, chunk_candidates)
@@ -10210,6 +10350,14 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         f"item_type=verb candidate={log_safe_text(rejected_candidate)}"
                     )
                 return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": len(chunk_candidates)}
+            if not chunk_items and item_type == "verb":
+                rejected_count = len(rejected_items) or int(match_stats.get("invalid_pos") or 0) or len(chunk_candidates)
+                print(
+                    "[gemini-bank] verb_chunk_skipped "
+                    f"pack={pack_type} chunk={chunk_label} reason=candidate_rejected_or_invalid "
+                    f"rejected={rejected_count}"
+                )
+                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": rejected_count}
             if not chunk_items:
                 raise ValueError("daily_fresh_items_invalid:empty_chunk")
             result = upsert_gemini_bank_items(
