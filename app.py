@@ -5449,6 +5449,55 @@ DAILY_FRESH_NON_VERB_COUNTER_WORDS = {
     "枚",
     "円",
 }
+DAILY_FRESH_NON_VERB_SURFACES = {
+    "ほんとう",
+    "本当",
+    "まっすぐ",
+    "真っ直ぐ",
+    "たぶん",
+    "多分",
+    "すぐ",
+    "とても",
+    "きれい",
+    "綺麗",
+    "便利",
+    "安心",
+    "必要",
+    "大切",
+    "安全",
+    "普通",
+    "同じ",
+}
+DAILY_FRESH_VERB_ALLOWED_POS_TOKENS = {
+    "verb",
+    "v",
+    "godan",
+    "ichidan",
+    "suru_verb",
+    "kuru_verb",
+    "irregular verb",
+    "動詞",
+    "五段",
+    "一段",
+    "サ変",
+    "する動詞",
+}
+DAILY_FRESH_VERB_BLOCKED_POS_TOKENS = {
+    "noun",
+    "名詞",
+    "adjective",
+    "形容詞",
+    "形容動詞",
+    "副詞",
+    "adverb",
+    "接続詞",
+    "conjunction",
+    "助詞",
+    "particle",
+    "代名詞",
+    "連体詞",
+    "接尾辞",
+}
 DAILY_FRESH_COUNTER_UNITS = (
     "つ",
     "日",
@@ -5616,9 +5665,40 @@ def looks_like_daily_fresh_verb_surface(surface):
         return False
     if is_daily_fresh_non_verb_counter_surface(text):
         return False
+    if text in DAILY_FRESH_NON_VERB_SURFACES:
+        return False
     if len(text) < 2:
         return False
     return text.endswith(DAILY_FRESH_VERB_ENDINGS)
+
+
+def text_has_cjk_kanji(value):
+    return any("\u4e00" <= char <= "\u9fff" for char in simple_text(value))
+
+
+def verb_pos_allows_candidate(pos):
+    text = simple_text(pos)
+    if not text:
+        return None
+    lowered = text.lower()
+    if any(token.lower() in lowered for token in DAILY_FRESH_VERB_ALLOWED_POS_TOKENS):
+        return True
+    if any(token.lower() in lowered for token in DAILY_FRESH_VERB_BLOCKED_POS_TOKENS):
+        return False
+    return False
+
+
+def is_probable_japanese_verb_surface(surface):
+    text = simple_text(surface)
+    if not looks_like_daily_fresh_verb_surface(text):
+        return False
+    if text.endswith(("する", "ずる")):
+        return True
+    if text in {"する", "来る", "くる"}:
+        return True
+    # OpenJLPT sometimes lacks POS. Be conservative: pure kana words such as
+    # ほんとう / まっすぐ frequently look verb-like by final kana only.
+    return text_has_cjk_kanji(text)
 
 
 def is_daily_fresh_word_pool_row(row):
@@ -5642,8 +5722,12 @@ def is_daily_fresh_verb_pool_row(row):
         return False
     if is_daily_fresh_non_verb_counter_surface(surface):
         return False
+    if simple_text(surface) in DAILY_FRESH_NON_VERB_SURFACES:
+        return False
     pos = first_text(row, ["part_of_speech", "pos"]).strip()
-    pos_lower = pos.lower()
+    pos_allowed = verb_pos_allows_candidate(pos)
+    if pos_allowed is False:
+        return False
     try:
         group = int(row.get("verb_group") or 0)
     except (TypeError, ValueError):
@@ -5653,7 +5737,9 @@ def is_daily_fresh_verb_pool_row(row):
         source = first_text(row, ["source"]).lower()
         if category not in {"manual_core", "jlpt_core", "general", "daily", "common"} or source in DAILY_FRESH_BLOCKED_SOURCES:
             return False
-    return group in {1, 2, 3} or pos_lower in {"verb", "動詞"} or "動詞" in pos or (not pos and looks_like_daily_fresh_verb_surface(surface))
+    if pos_allowed is True:
+        return looks_like_daily_fresh_verb_surface(surface) or group in {1, 2, 3}
+    return group in {1, 2, 3} or is_probable_japanese_verb_surface(surface)
 
 
 def is_daily_fresh_quality_pool_row(row, item_type):
@@ -10112,6 +10198,18 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 f"matched={match_stats.get('matched', 0)} unknown={match_stats.get('unknown', 0)} "
                 f"mismatch={match_stats.get('mismatch', 0)} invalid_pos={match_stats.get('invalid_pos', 0)}"
             )
+            if not chunk_items and item_type == "verb" and int(chunk_parse_stats.get("parsed") or 0) == 0:
+                rejected_candidates = [candidate.get("d") or candidate.get("normalized_key") for candidate in chunk_candidates]
+                print(
+                    f"[gemini-bank] empty_items pack={pack_type} chunk={chunk_label} "
+                    f"candidate={log_safe_text(json.dumps(rejected_candidates, ensure_ascii=False))}"
+                )
+                for rejected_candidate in rejected_candidates:
+                    print(
+                        "[gemini-bank] candidate_rejected_by_gemini "
+                        f"item_type=verb candidate={log_safe_text(rejected_candidate)}"
+                    )
+                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": len(chunk_candidates)}
             if not chunk_items:
                 raise ValueError("daily_fresh_items_invalid:empty_chunk")
             result = upsert_gemini_bank_items(
