@@ -6025,11 +6025,39 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
     generated_keys = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
     current_batch_keys = {normalize_vocab_key(key) for key in (current_batch_keys or set()) if normalize_vocab_key(key)}
     excluded = generated_keys | current_batch_keys
-    batch_size = min(max(limit * 200, 500), 3000)
-    max_batches = 3
+    id_batch_size = min(max(limit * 200, 500), 1000)
+    hydrate_batch_size = 50
+    max_id_batches = 4
     selector_deadline = time.perf_counter() + 5.0
     active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
     normalized_expr = "COALESCE(NULLIF(vp.normalized_key, ''), NULLIF(vp.base_form, ''), NULLIF(vp.surface, ''))"
+    id_where = [
+        active_clause,
+        "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
+        "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
+        "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
+        "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = %s AND gib.normalized_key = " + normalized_expr + ")" if DATABASE_URL else "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = ? AND gib.normalized_key = " + normalized_expr + ")",
+    ]
+    id_params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE, item_type]
+    if excluded:
+        placeholders = sql_placeholders(len(excluded))
+        id_where.append(f"{normalized_expr} NOT IN ({placeholders})")
+        id_params_base.extend(sorted(excluded))
+    id_order_by = f"""
+        ORDER BY
+            COALESCE(vp.used_in_material_count, 0) ASC,
+            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
+            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
+            COALESCE(vp.priority, 1) DESC,
+            vp.id ASC
+    """
+    id_sql = f"""
+        SELECT vp.id
+        FROM vocabulary_pool vp
+        WHERE {' AND '.join(id_where)}
+        {id_order_by}
+        LIMIT {'%s' if DATABASE_URL else '?'} OFFSET {'%s' if DATABASE_URL else '?'}
+    """
     if DATABASE_URL:
         row_columns = [
             "vp.id",
@@ -6070,105 +6098,127 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
             "vp.used_in_material_count",
             "vp.last_used_at",
         ]
-    where = [
-        active_clause,
-        "COALESCE(NULLIF(vp.surface, ''), NULLIF(vp.base_form, '')) IS NOT NULL",
-        "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
-        "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
-        "LOWER(COALESCE(vp.quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
-        "LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) NOT IN ('business', 'advanced', 'generated_compound', 'unknown', 'named_entity', 'proper_noun', 'person_name', 'place_name', 'company', 'brand', 'legal', 'medical', 'finance', 'financial', 'archaic', 'classical', 'specialized', 'technical', 'sensitive', 'typo_or_noise')",
-        "LOWER(COALESCE(NULLIF(vp.source, ''), 'manual')) NOT IN ('synthetic', 'auto_generated', 'generated', 'seed_advanced_synthetic')",
-        "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
-        "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = %s AND gib.normalized_key = " + normalized_expr + ")" if DATABASE_URL else "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = ? AND gib.normalized_key = " + normalized_expr + ")",
-    ]
-    params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE, item_type]
-    if item_type == "word":
-        where.append(
-            "("
-            "COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' "
-            "OR LOWER(COALESCE(vp.part_of_speech, '')) IN ('noun', 'adjective', 'i-adjective', 'na-adjective', 'adverb', 'conjunction', 'sns') "
-            "OR COALESCE(vp.part_of_speech, '') IN ('名詞', 'い形容詞', 'イ形容詞', 'な形容詞', 'ナ形容詞', '形容詞', '副詞', '接續詞', '接続詞', 'SNS')"
-            ")"
-        )
-        where.append("COALESCE(vp.part_of_speech, '') NOT LIKE '%動詞%'")
-    elif item_type == "verb":
-        where.append(
-            "("
-            "LOWER(COALESCE(vp.part_of_speech, '')) IN ('verb', '動詞') "
-            "OR COALESCE(vp.part_of_speech, '') LIKE '%動詞%' "
-            "OR vp.verb_group IN (1, 2, 3) "
-            "OR (COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' AND ("
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%う' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%く' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぐ' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%す' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%つ' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぬ' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぶ' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%む' OR "
-            "COALESCE(vp.surface, vp.base_form, '') LIKE '%る'"
-            "))"
-            ")"
-        )
-        where.append(
-            "("
-            "COALESCE(vp.surface, vp.base_form, '') = 'する' "
-            "OR COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%する' "
-            "OR LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) IN ('manual_core', 'jlpt_core', 'general', 'daily', 'common')"
-            ")"
-        )
-    where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%/%'")
-    where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%／%'")
-    if excluded:
-        placeholders = sql_placeholders(len(excluded))
-        where.append(f"{normalized_expr} NOT IN ({placeholders})")
-        params_base.extend(sorted(excluded))
-    order_by = f"""
-        ORDER BY
-            COALESCE(vp.used_in_material_count, 0) ASC,
-            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
-            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
-            COALESCE(vp.priority, 1) DESC,
-            vp.id ASC
-    """
-    sql = f"""
+    row_sql_template = f"""
         SELECT {', '.join(row_columns)}
         FROM vocabulary_pool vp
-        WHERE {' AND '.join(where)}
-        {order_by}
-        LIMIT {'%s' if DATABASE_URL else '?'} OFFSET {'%s' if DATABASE_URL else '?'}
+        WHERE vp.id IN ({{placeholders}})
+        ORDER BY vp.id ASC
     """
 
-    def scan_candidate_rows(fetch_batch):
+    def scan_candidate_rows(fetch_id_batch, hydrate_ids):
         rows = []
         skipped_bad_encoding = 0
+        bad_rows = []
         rejected_by_reason = Counter()
         scanned_total = 0
-        query_ms_total = 0.0
+        id_query_ms_total = 0.0
+        hydration_ms_total = 0.0
+        id_scan_exhausted = False
+        selector_timed_out = False
         bank_count = daily_fresh_bank_key_count(item_type, level)
-        print("[vocabulary-pool] selector_sql_mode=batch_rows")
+        print("[vocabulary-pool] selector_sql_mode=id_batch_safe_hydration")
         print(f"[vocabulary-pool] candidate_scan_start item_type={item_type} level={level} requested={limit}")
-        for batch_index in range(1, max_batches + 1):
+        for batch_index in range(1, max_id_batches + 1):
             if time.perf_counter() > selector_deadline:
-                print(f"[vocabulary-pool] selector_timeout item_type={item_type} level={level} selected={len(rows)}")
+                selector_timed_out = True
+                print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} selected={len(rows)}")
                 break
-            offset = (batch_index - 1) * batch_size
-            query_started = time.perf_counter()
-            raw_rows = fetch_batch(batch_size, offset)
-            query_ms = round((time.perf_counter() - query_started) * 1000, 2)
-            query_ms_total += query_ms
+            offset = (batch_index - 1) * id_batch_size
+            id_query_started = time.perf_counter()
+            candidate_ids = fetch_id_batch(id_batch_size, offset)
+            id_query_ms = round((time.perf_counter() - id_query_started) * 1000, 2)
+            id_query_ms_total += id_query_ms
             print(
-                f"[vocabulary-pool] selector_query_ms={query_ms} item_type={item_type} "
-                f"level={level} batch={batch_index} rows={len(raw_rows)}"
+                f"[vocabulary-pool] selector_id_query_ms={id_query_ms} item_type={item_type} "
+                f"level={level} batch={batch_index} ids={len(candidate_ids)}"
             )
-            if not raw_rows:
+            if not candidate_ids:
+                id_scan_exhausted = True
                 break
-            scanned_total += len(raw_rows)
+            scanned_total += len(candidate_ids)
             batch_rejected = Counter()
-            for raw_row in raw_rows:
+            for id_chunk in chunked_list(candidate_ids, hydrate_batch_size):
+                if time.perf_counter() > selector_deadline:
+                    selector_timed_out = True
+                    print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} selected={len(rows)}")
+                    break
+                hydration_started = time.perf_counter()
                 try:
-                    candidate_row = sanitize_vocabulary_pool_candidate_row(raw_row)
-                    reason = daily_fresh_candidate_rejection_reason(candidate_row, item_type, level, excluded)
+                    raw_rows = hydrate_ids(id_chunk)
+                except Exception as chunk_exc:
+                    if isinstance(chunk_exc, UnicodeDecodeError) or "codec can't decode" in str(chunk_exc):
+                        hydration_ms_total += round((time.perf_counter() - hydration_started) * 1000, 2)
+                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
+                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                        raw_rows = []
+                        for candidate_id in id_chunk:
+                            row_started = time.perf_counter()
+                            try:
+                                raw_rows.extend(hydrate_ids([candidate_id]))
+                                hydration_ms_total += round((time.perf_counter() - row_started) * 1000, 2)
+                            except Exception as row_exc:
+                                if isinstance(row_exc, UnicodeDecodeError) or "codec can't decode" in str(row_exc):
+                                    skipped_bad_encoding += 1
+                                    bad_rows.append(candidate_id)
+                                    rejected_by_reason["bad_encoding"] += 1
+                                    batch_rejected["bad_encoding"] += 1
+                                    print(f"[vocabulary-pool] bad_candidate_row id={candidate_id} reason=utf8_decode_error")
+                                    print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                                    continue
+                                raise
+                    else:
+                        raise
+                else:
+                    hydration_ms_total += round((time.perf_counter() - hydration_started) * 1000, 2)
+                for raw_row in raw_rows:
+                    try:
+                        candidate_row = sanitize_vocabulary_pool_candidate_row(raw_row)
+                    except UnicodeDecodeError as row_exc:
+                        candidate_id = safe_text((raw_row or {}).get("id"))
+                        skipped_bad_encoding += 1
+                        bad_rows.append(candidate_id)
+                        rejected_by_reason["bad_encoding"] += 1
+                        batch_rejected["bad_encoding"] += 1
+                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
+                        print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
+                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                        continue
+                    except Exception as row_exc:
+                        if "codec can't decode" in str(row_exc):
+                            candidate_id = safe_text((raw_row or {}).get("id"))
+                            skipped_bad_encoding += 1
+                            bad_rows.append(candidate_id)
+                            rejected_by_reason["bad_encoding"] += 1
+                            batch_rejected["bad_encoding"] += 1
+                            print("[vocabulary-pool] candidate_decode_error_recoverable=true")
+                            print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
+                            print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                            continue
+                        raise
+                    try:
+                        reason = daily_fresh_candidate_rejection_reason(candidate_row, item_type, level, excluded)
+                    except UnicodeDecodeError as row_exc:
+                        candidate_id = safe_text(candidate_row.get("id"))
+                        skipped_bad_encoding += 1
+                        bad_rows.append(candidate_id)
+                        rejected_by_reason["bad_encoding"] += 1
+                        batch_rejected["bad_encoding"] += 1
+                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
+                        print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
+                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                        continue
+                    except Exception as row_exc:
+                        if "codec can't decode" in str(row_exc):
+                            candidate_id = safe_text(candidate_row.get("id"))
+                            skipped_bad_encoding += 1
+                            bad_rows.append(candidate_id)
+                            rejected_by_reason["bad_encoding"] += 1
+                            batch_rejected["bad_encoding"] += 1
+                            print("[vocabulary-pool] candidate_decode_error_recoverable=true")
+                            print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
+                            print("[vocabulary-pool] continue_scan_after_decode_error=true")
+                            continue
+                        raise
                     if reason:
                         rejected_by_reason[reason] += 1
                         batch_rejected[reason] += 1
@@ -6177,35 +6227,31 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                     excluded.add(vocabulary_pool_candidate_key(candidate_row))
                     if len(rows) >= limit:
                         break
-                except UnicodeDecodeError as row_exc:
-                    skipped_bad_encoding += 1
-                    rejected_by_reason["bad_encoding"] += 1
-                    batch_rejected["bad_encoding"] += 1
-                    log_candidate_fetch_error(item_type, level, "batch_row", "unknown", "", row_exc)
-                    continue
-                except Exception as row_exc:
-                    if "codec can't decode" in str(row_exc):
-                        skipped_bad_encoding += 1
-                        rejected_by_reason["bad_encoding"] += 1
-                        batch_rejected["bad_encoding"] += 1
-                        log_candidate_fetch_error(item_type, level, "batch_row", "unknown", "", row_exc)
-                        continue
-                    raise
+                if len(rows) >= limit:
+                    break
+            if selector_timed_out:
+                break
             print(
                 f"[vocabulary-pool] candidate_scan_batch item_type={item_type} level={level} "
-                f"batch={batch_index} rows={len(raw_rows)} selected_so_far={len(rows)} "
+                f"batch={batch_index} ids={len(candidate_ids)} selected_so_far={len(rows)} "
                 f"rejected={dict(batch_rejected)}"
             )
             if len(rows) >= limit:
                 break
-            if len(raw_rows) < batch_size:
+            if len(candidate_ids) < id_batch_size:
+                id_scan_exhausted = True
                 break
-        print(f"[vocabulary-pool] selector_query_ms={round(query_ms_total, 2)} item_type={item_type} level={level} total=true")
+        if not id_scan_exhausted and not selector_timed_out and len(rows) < limit:
+            print(f"[vocabulary-pool] selector_scan_incomplete item_type={item_type} level={level} selected={len(rows)}")
+        print(f"[vocabulary-pool] selector_id_query_ms={round(id_query_ms_total, 2)} item_type={item_type} level={level} total=true")
+        print(f"[vocabulary-pool] selector_hydration_ms={round(hydration_ms_total, 2)} item_type={item_type} level={level} total=true")
         print(f"[vocabulary-pool] selector_selected={len(rows)} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_scanned_ids={scanned_total} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_bad_rows={len(bad_rows)} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_excluded_generated={len(generated_keys)} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_excluded_bank={bank_count} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_excluded_current_batch={len(current_batch_keys)} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_rejected_by_filter={dict(rejected_by_reason)} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_excluded_current_batch={len(current_batch_keys)} item_type={item_type} level={level}")
         print(
             f"[vocabulary-pool] candidate_row_fetch_success item_type={item_type} level={level} "
             f"selected={len(rows)} skipped_bad_encoding={skipped_bad_encoding}"
@@ -6214,7 +6260,8 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
             f"[vocabulary-pool] candidate_scan_done item_type={item_type} level={level} "
             f"selected={len(rows)} scanned_ids={scanned_total}"
         )
-        if len(rows) < limit:
+        exhausted = id_scan_exhausted and not selector_timed_out and len(rows) < limit
+        if exhausted:
             print(
                 f"[vocabulary-pool] candidate_exhausted=true item_type={item_type} level={level} "
                 f"selected={len(rows)} requested={limit} scanned_total={scanned_total} "
@@ -6223,33 +6270,64 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(rows)}")
         print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
         print("[vocabulary-pool] safe_text_applied=true")
+        rows.append(
+            {
+                "__selector_meta": True,
+                "candidate_exhausted": exhausted,
+                "selector_timeout_warning": selector_timed_out,
+                "selector_scan_incomplete": not exhausted and len(rows) < limit,
+                "bad_rows": bad_rows,
+                "skipped_bad_encoding": skipped_bad_encoding,
+            }
+        )
         return rows
 
     try:
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
-                    def fetch_batch(batch_size_value, offset_value):
-                        cur.execute(sql, (*params_base, batch_size_value, offset_value))
+                    def fetch_id_batch(batch_size_value, offset_value):
+                        cur.execute(id_sql, (*id_params_base, batch_size_value, offset_value))
+                        return [row[0] for row in cur.fetchall() if row and row[0] is not None]
+
+                    def hydrate_ids(candidate_ids):
+                        if not candidate_ids:
+                            return []
+                        placeholders = sql_placeholders(len(candidate_ids))
+                        row_sql = row_sql_template.format(placeholders=placeholders)
+                        cur.execute(row_sql, tuple(candidate_ids))
                         raw_rows = cur.fetchall()
                         columns = [desc[0] for desc in cur.description]
                         return [dict(zip(columns, row)) for row in raw_rows]
 
-                    return scan_candidate_rows(fetch_batch)
+                    return scan_candidate_rows(fetch_id_batch, hydrate_ids)
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
             conn.row_factory = sqlite3.Row
-            def fetch_batch(batch_size_value, offset_value):
+
+            def fetch_id_batch(batch_size_value, offset_value):
                 return [
-                    dict(row)
-                    for row in conn.execute(sql, (*params_base, batch_size_value, offset_value)).fetchall()
+                    row[0]
+                    for row in conn.execute(id_sql, (*id_params_base, batch_size_value, offset_value)).fetchall()
+                    if row and row[0] is not None
                 ]
 
-            return scan_candidate_rows(fetch_batch)
+            def hydrate_ids(candidate_ids):
+                if not candidate_ids:
+                    return []
+                placeholders = sql_placeholders(len(candidate_ids))
+                row_sql = row_sql_template.format(placeholders=placeholders)
+                return [
+                    dict(row)
+                    for row in conn.execute(row_sql, tuple(candidate_ids)).fetchall()
+                ]
+
+            return scan_candidate_rows(fetch_id_batch, hydrate_ids)
     except Exception as exc:
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
-            log_candidate_fetch_error(item_type, level, "batch_rows", "unknown", "", exc)
-            return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
+            log_candidate_fetch_error(item_type, level, "selector", "unknown", "", exc)
+            print("[vocabulary-pool] candidate_decode_error_recoverable=false")
+            return [{"__selector_meta": True, "candidate_exhausted": False, "selector_failed": True, "bad_rows": [], "skipped_bad_encoding": 0}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
 
@@ -6273,6 +6351,7 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
     missing = []
     shortages = []
     fetch_errors = []
+    selector_meta_by_level = {}
     skipped_bad_encoding = 0
     verb_audit_rejected = 0
     seen = set()
@@ -6282,6 +6361,10 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
         rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys, current_batch_keys=seen)
         candidates = []
         for row in rows:
+            if isinstance(row, dict) and row.get("__selector_meta"):
+                selector_meta_by_level[level] = row
+                skipped_bad_encoding += int(row.get("skipped_bad_encoding") or 0)
+                continue
             if isinstance(row, dict) and row.get("__fetch_error"):
                 fetch_errors.append({"level": level, "error": row.get("__fetch_error"), "message": row.get("__error_message", "")})
                 continue
@@ -6351,13 +6434,32 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
                         f"to={fallback_level} count={len(fallback_candidates)}"
                     )
                 if remaining > 0:
+                    attempted_levels = [
+                        fallback_level
+                        for fallback_level in DAILY_FRESH_SNS_REDISTRIBUTE_LEVELS
+                        if fallback_level in requested_by_level
+                    ]
+                    exhausted = bool(selector_meta_by_level.get(level, {}).get("candidate_exhausted"))
+                    if attempted_levels:
+                        exhausted = exhausted and all(
+                            bool(selector_meta_by_level.get(fallback_level, {}).get("candidate_exhausted"))
+                            for fallback_level in attempted_levels
+                        )
                     print(
                         "[fresh-candidate] optional_level_missing_unfilled "
                         f"level=SNS requested={needed} redistributed={shortage - remaining} remaining={remaining}"
                     )
-                    shortages.append({"level": level, "requested": needed, "available": len(candidates), "remaining": remaining})
+                    shortages.append({"level": level, "requested": needed, "available": len(candidates), "remaining": remaining, "candidate_exhausted": exhausted})
                 continue
-            shortages.append({"level": level, "requested": needed, "available": len(candidates), "remaining": shortage})
+            shortages.append(
+                {
+                    "level": level,
+                    "requested": needed,
+                    "available": len(candidates),
+                    "remaining": shortage,
+                    "candidate_exhausted": bool(selector_meta_by_level.get(level, {}).get("candidate_exhausted")),
+                }
+            )
 
     for shortage in shortages:
         source_level = shortage["level"]
@@ -6381,15 +6483,32 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
                 f"count={len(fallback_candidates)} remaining={remaining}"
             )
         if remaining > 0:
-            missing.append(
-                {
-                    "level": source_level,
-                    "requested": shortage.get("requested"),
-                    "available": int(shortage.get("requested") or 0) - remaining,
-                    "remaining": remaining,
-                    "candidate_exhausted": True,
-                }
-            )
+            attempted_levels = [
+                level
+                for level in requested_by_level
+                if level != source_level and level != "SNS"
+            ]
+            exhausted = bool(shortage.get("candidate_exhausted"))
+            if attempted_levels:
+                exhausted = exhausted and all(
+                    bool(selector_meta_by_level.get(fallback_level, {}).get("candidate_exhausted"))
+                    for fallback_level in attempted_levels
+                )
+            if exhausted:
+                missing.append(
+                    {
+                        "level": source_level,
+                        "requested": shortage.get("requested"),
+                        "available": int(shortage.get("requested") or 0) - remaining,
+                        "remaining": remaining,
+                        "candidate_exhausted": True,
+                    }
+                )
+            else:
+                print(
+                    "[fresh-candidate] shortage_not_exhausted "
+                    f"item_type={item_type} level={source_level} remaining={remaining}"
+                )
     level_counts = {level: len(items) for level, items in selected_by_level.items()}
     selected_surfaces = [
         candidate.get("d") if item_type == "verb" else candidate.get("w")
