@@ -5980,29 +5980,56 @@ def daily_fresh_existing_bank_keys(item_type, levels):
     return {normalize_vocab_key(row[0]) for row in rows if row and row[0]}
 
 
-def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
+def daily_fresh_bank_key_count(item_type, level):
+    ensure_gemini_item_bank_store()
+    level = normalize_gemini_bank_level(level, item_type)
+    try:
+        if DATABASE_URL:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COUNT(*)
+                        FROM gemini_item_bank
+                        WHERE item_type = %s
+                          AND jlpt_level = %s
+                          AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                        """,
+                        (item_type, level),
+                    )
+                    return int(cur.fetchone()[0] or 0)
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            return int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM gemini_item_bank
+                    WHERE item_type = ?
+                      AND jlpt_level = ?
+                      AND COALESCE(NULLIF(normalized_key, ''), '') <> ''
+                    """,
+                    (item_type, level),
+                ).fetchone()[0]
+                or 0
+            )
+    except Exception as exc:
+        print(f"[vocabulary-pool] selector_bank_count_failed item_type={item_type} level={level} reason={exc}")
+        return 0
+
+
+def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None):
     ensure_vocabulary_pool_store()
     level = normalize_gemini_bank_level(level, item_type)
     limit = max(1, min(int(limit or 20), 100))
     print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
-    excluded = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
-    # Keep the first pass strictly id-only. Some imported OpenJLPT text rows can
-    # still trigger driver-level UTF-8 decoding before row normalization; all
-    # text filters must run after fetching a single row through safe_text.
-    id_batch_size = 1000
-    id_active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
-    id_sql = f"""
-        SELECT vp.id
-        FROM vocabulary_pool vp
-        WHERE {id_active_clause}
-        ORDER BY
-            COALESCE(vp.used_in_material_count, 0) ASC,
-            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
-            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
-            COALESCE(vp.priority, 1) DESC,
-            vp.id ASC
-        LIMIT {'%s' if DATABASE_URL else '?'} OFFSET {'%s' if DATABASE_URL else '?'}
-    """
+    generated_keys = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
+    current_batch_keys = {normalize_vocab_key(key) for key in (current_batch_keys or set()) if normalize_vocab_key(key)}
+    excluded = generated_keys | current_batch_keys
+    batch_size = min(max(limit * 200, 500), 3000)
+    max_batches = 3
+    selector_deadline = time.perf_counter() + 5.0
+    active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
+    normalized_expr = "COALESCE(NULLIF(vp.normalized_key, ''), NULLIF(vp.base_form, ''), NULLIF(vp.surface, ''))"
     if DATABASE_URL:
         row_columns = [
             "vp.id",
@@ -6023,11 +6050,6 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
             "vp.used_in_material_count",
             postgres_text_as_bytea("vp.last_used_at"),
         ]
-        row_sql = f"""
-            SELECT {', '.join(row_columns)}
-            FROM vocabulary_pool vp
-            WHERE vp.id = %s
-        """
     else:
         row_columns = [
             "vp.id",
@@ -6048,36 +6070,104 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
             "vp.used_in_material_count",
             "vp.last_used_at",
         ]
-        row_sql = f"""
-            SELECT {', '.join(row_columns)}
-            FROM vocabulary_pool vp
-            WHERE vp.id = ?
-        """
+    where = [
+        active_clause,
+        "COALESCE(NULLIF(vp.surface, ''), NULLIF(vp.base_form, '')) IS NOT NULL",
+        "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
+        "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
+        "LOWER(COALESCE(vp.quality, 'normal')) NOT IN ('rejected', 'experimental', 'low_quality')",
+        "LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) NOT IN ('business', 'advanced', 'generated_compound', 'unknown', 'named_entity', 'proper_noun', 'person_name', 'place_name', 'company', 'brand', 'legal', 'medical', 'finance', 'financial', 'archaic', 'classical', 'specialized', 'technical', 'sensitive', 'typo_or_noise')",
+        "LOWER(COALESCE(NULLIF(vp.source, ''), 'manual')) NOT IN ('synthetic', 'auto_generated', 'generated', 'seed_advanced_synthetic')",
+        "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
+        "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = %s AND gib.normalized_key = " + normalized_expr + ")" if DATABASE_URL else "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = ? AND gib.normalized_key = " + normalized_expr + ")",
+    ]
+    params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE, item_type]
+    if item_type == "word":
+        where.append(
+            "("
+            "COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' "
+            "OR LOWER(COALESCE(vp.part_of_speech, '')) IN ('noun', 'adjective', 'i-adjective', 'na-adjective', 'adverb', 'conjunction', 'sns') "
+            "OR COALESCE(vp.part_of_speech, '') IN ('名詞', 'い形容詞', 'イ形容詞', 'な形容詞', 'ナ形容詞', '形容詞', '副詞', '接續詞', '接続詞', 'SNS')"
+            ")"
+        )
+        where.append("COALESCE(vp.part_of_speech, '') NOT LIKE '%動詞%'")
+    elif item_type == "verb":
+        where.append(
+            "("
+            "LOWER(COALESCE(vp.part_of_speech, '')) IN ('verb', '動詞') "
+            "OR COALESCE(vp.part_of_speech, '') LIKE '%動詞%' "
+            "OR vp.verb_group IN (1, 2, 3) "
+            "OR (COALESCE(NULLIF(vp.part_of_speech, ''), '') = '' AND ("
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%う' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%く' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぐ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%す' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%つ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぬ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%ぶ' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%む' OR "
+            "COALESCE(vp.surface, vp.base_form, '') LIKE '%る'"
+            "))"
+            ")"
+        )
+        where.append(
+            "("
+            "COALESCE(vp.surface, vp.base_form, '') = 'する' "
+            "OR COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%する' "
+            "OR LOWER(COALESCE(NULLIF(vp.category, ''), 'general')) IN ('manual_core', 'jlpt_core', 'general', 'daily', 'common')"
+            ")"
+        )
+    where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%/%'")
+    where.append("COALESCE(vp.surface, vp.base_form, '') NOT LIKE '%／%'")
+    if excluded:
+        placeholders = sql_placeholders(len(excluded))
+        where.append(f"{normalized_expr} NOT IN ({placeholders})")
+        params_base.extend(sorted(excluded))
+    order_by = f"""
+        ORDER BY
+            COALESCE(vp.used_in_material_count, 0) ASC,
+            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
+            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
+            COALESCE(vp.priority, 1) DESC,
+            vp.id ASC
+    """
+    sql = f"""
+        SELECT {', '.join(row_columns)}
+        FROM vocabulary_pool vp
+        WHERE {' AND '.join(where)}
+        {order_by}
+        LIMIT {'%s' if DATABASE_URL else '?'} OFFSET {'%s' if DATABASE_URL else '?'}
+    """
 
-    def scan_candidate_rows(fetch_id_batch, fetch_row):
+    def scan_candidate_rows(fetch_batch):
         rows = []
         skipped_bad_encoding = 0
         rejected_by_reason = Counter()
         scanned_total = 0
-        batch_index = 0
-        offset = 0
+        query_ms_total = 0.0
+        bank_count = daily_fresh_bank_key_count(item_type, level)
+        print("[vocabulary-pool] selector_sql_mode=batch_rows")
         print(f"[vocabulary-pool] candidate_scan_start item_type={item_type} level={level} requested={limit}")
-        while len(rows) < limit:
-            batch_index += 1
-            candidate_ids = fetch_id_batch(id_batch_size, offset)
-            print(
-                f"[vocabulary-pool] candidate_id_fetch_success item_type={item_type} "
-                f"level={level} batch={batch_index} ids={len(candidate_ids)}"
-            )
-            if not candidate_ids:
+        for batch_index in range(1, max_batches + 1):
+            if time.perf_counter() > selector_deadline:
+                print(f"[vocabulary-pool] selector_timeout item_type={item_type} level={level} selected={len(rows)}")
                 break
-            scanned_total += len(candidate_ids)
+            offset = (batch_index - 1) * batch_size
+            query_started = time.perf_counter()
+            raw_rows = fetch_batch(batch_size, offset)
+            query_ms = round((time.perf_counter() - query_started) * 1000, 2)
+            query_ms_total += query_ms
+            print(
+                f"[vocabulary-pool] selector_query_ms={query_ms} item_type={item_type} "
+                f"level={level} batch={batch_index} rows={len(raw_rows)}"
+            )
+            if not raw_rows:
+                break
+            scanned_total += len(raw_rows)
             batch_rejected = Counter()
-            for candidate_id in candidate_ids:
+            for raw_row in raw_rows:
                 try:
-                    candidate_row = fetch_row(candidate_id)
-                    if not candidate_row:
-                        continue
+                    candidate_row = sanitize_vocabulary_pool_candidate_row(raw_row)
                     reason = daily_fresh_candidate_rejection_reason(candidate_row, item_type, level, excluded)
                     if reason:
                         rejected_by_reason[reason] += 1
@@ -6091,26 +6181,31 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
                     skipped_bad_encoding += 1
                     rejected_by_reason["bad_encoding"] += 1
                     batch_rejected["bad_encoding"] += 1
-                    log_candidate_fetch_error(item_type, level, "row_fetch", candidate_id, "", row_exc)
+                    log_candidate_fetch_error(item_type, level, "batch_row", "unknown", "", row_exc)
                     continue
                 except Exception as row_exc:
                     if "codec can't decode" in str(row_exc):
                         skipped_bad_encoding += 1
                         rejected_by_reason["bad_encoding"] += 1
                         batch_rejected["bad_encoding"] += 1
-                        log_candidate_fetch_error(item_type, level, "row_fetch", candidate_id, "", row_exc)
+                        log_candidate_fetch_error(item_type, level, "batch_row", "unknown", "", row_exc)
                         continue
                     raise
             print(
                 f"[vocabulary-pool] candidate_scan_batch item_type={item_type} level={level} "
-                f"batch={batch_index} ids={len(candidate_ids)} selected_so_far={len(rows)} "
+                f"batch={batch_index} rows={len(raw_rows)} selected_so_far={len(rows)} "
                 f"rejected={dict(batch_rejected)}"
             )
             if len(rows) >= limit:
                 break
-            if len(candidate_ids) < id_batch_size:
+            if len(raw_rows) < batch_size:
                 break
-            offset += id_batch_size
+        print(f"[vocabulary-pool] selector_query_ms={round(query_ms_total, 2)} item_type={item_type} level={level} total=true")
+        print(f"[vocabulary-pool] selector_selected={len(rows)} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_excluded_generated={len(generated_keys)} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_excluded_bank={bank_count} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_excluded_current_batch={len(current_batch_keys)} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_rejected_by_filter={dict(rejected_by_reason)} item_type={item_type} level={level}")
         print(
             f"[vocabulary-pool] candidate_row_fetch_success item_type={item_type} level={level} "
             f"selected={len(rows)} skipped_bad_encoding={skipped_bad_encoding}"
@@ -6134,41 +6229,26 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys):
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
-                    print("[vocabulary-pool] candidate_id_fetch_sql_mode=id_only")
-                    def fetch_id_batch(batch_size, offset):
-                        cur.execute(id_sql, (batch_size, offset))
-                        return [row[0] for row in cur.fetchall() if row and row[0] is not None]
-
-                    def fetch_row(candidate_id):
-                        cur.execute(row_sql, (candidate_id,))
-                        raw_row = cur.fetchone()
-                        if not raw_row:
-                            return None
+                    def fetch_batch(batch_size_value, offset_value):
+                        cur.execute(sql, (*params_base, batch_size_value, offset_value))
+                        raw_rows = cur.fetchall()
                         columns = [desc[0] for desc in cur.description]
-                        return sanitize_vocabulary_pool_candidate_row(dict(zip(columns, raw_row)))
+                        return [dict(zip(columns, row)) for row in raw_rows]
 
-                    return scan_candidate_rows(fetch_id_batch, fetch_row)
+                    return scan_candidate_rows(fetch_batch)
         with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
             conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
             conn.row_factory = sqlite3.Row
-            print("[vocabulary-pool] candidate_id_fetch_sql_mode=id_only")
-
-            def fetch_id_batch(batch_size, offset):
+            def fetch_batch(batch_size_value, offset_value):
                 return [
-                    row[0]
-                    for row in conn.execute(id_sql, (batch_size, offset)).fetchall()
-                    if row and row[0] is not None
+                    dict(row)
+                    for row in conn.execute(sql, (*params_base, batch_size_value, offset_value)).fetchall()
                 ]
 
-            def fetch_row(candidate_id):
-                row = conn.execute(row_sql, (candidate_id,)).fetchone()
-                return sanitize_vocabulary_pool_candidate_row(dict(row)) if row else None
-
-            return scan_candidate_rows(fetch_id_batch, fetch_row)
+            return scan_candidate_rows(fetch_batch)
     except Exception as exc:
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
-            log_candidate_fetch_error(item_type, level, "id_fetch", "unknown", "", exc)
-            print("[vocabulary-pool] regression_error id_fetch_touched_text_field=true")
+            log_candidate_fetch_error(item_type, level, "batch_rows", "unknown", "", exc)
             return [{"__fetch_error": "fresh_candidate_decode_error", "__error_message": str(exc)}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
         return []
@@ -6199,7 +6279,7 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
 
     def collect_candidates_for_level(level, needed):
         nonlocal skipped_bad_encoding, verb_audit_rejected
-        rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys | seen)
+        rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys, current_batch_keys=seen)
         candidates = []
         for row in rows:
             if isinstance(row, dict) and row.get("__fetch_error"):
