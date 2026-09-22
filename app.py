@@ -5417,6 +5417,7 @@ DAILY_FRESH_WORD_ALLOWED_POS = {
     "な形容詞",
     "ナ形容詞",
     "形容詞",
+    "形容動詞",
     "adjective",
     "i-adjective",
     "na-adjective",
@@ -5425,6 +5426,13 @@ DAILY_FRESH_WORD_ALLOWED_POS = {
     "接續詞",
     "接続詞",
     "conjunction",
+    "連体詞",
+    "感動詞",
+    "代名詞",
+    "助詞",
+    "助数詞",
+    "接頭辞",
+    "接尾辞",
     "sns",
     "SNS",
 }
@@ -5780,6 +5788,18 @@ def is_daily_fresh_word_pool_row(row):
     if not pos and looks_like_daily_fresh_verb_surface(surface):
         return False
     return pos in DAILY_FRESH_WORD_ALLOWED_POS or pos_lower in DAILY_FRESH_WORD_ALLOWED_POS
+
+
+def word_pos_allows_enriched_item(pos):
+    text = simple_text(pos)
+    if not text:
+        return True
+    lowered = text.lower()
+    if text in DAILY_FRESH_WORD_ALLOWED_POS or lowered in DAILY_FRESH_WORD_ALLOWED_POS:
+        return True
+    if "動詞" in text or lowered in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
+        return False
+    return True
 
 
 def is_daily_fresh_verb_pool_row(row):
@@ -6915,7 +6935,7 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 continue
         if item_type == "word":
             pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
-            if "動詞" in pos or pos.lower() in {"verb", "verb_godan", "verb_ichidan"}:
+            if not word_pos_allows_enriched_item(pos):
                 stats["invalid_pos"] += 1
                 continue
         if item_type == "verb":
