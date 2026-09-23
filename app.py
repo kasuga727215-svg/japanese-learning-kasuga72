@@ -112,6 +112,10 @@ GEMINI_BANK_SNS_TIMEOUT_RETRY_BATCH = 4
 GEMINI_BANK_MAX_EXCLUDE_KEYS = 20
 GEMINI_DAILY_WORD_MIN_FRESH = 5
 GEMINI_DAILY_VERB_MIN_FRESH = 3
+ALLOW_DAILY_FRESH_BANK_FALLBACK = os.environ.get("ALLOW_DAILY_FRESH_BANK_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
+GEMINI_DAILY_WORD_RESERVE = read_int_env("GEMINI_DAILY_WORD_RESERVE", 4, 0, 12)
+GEMINI_DAILY_VERB_RESERVE = read_int_env("GEMINI_DAILY_VERB_RESERVE", 3, 0, 10)
+GEMINI_DAILY_GRAMMAR_RESERVE = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE", 3, 0, 10)
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
 GEMINI_BANK_MIN_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_VERB_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL", 10, 1, 100)
@@ -5228,6 +5232,18 @@ def quota_with_small_overage(quota, max_total, add_backup=True):
     return {level: count for level, count in requested.items() if count > 0}
 
 
+def quota_with_reserve(quota, reserve_count=0):
+    requested = {level: max(0, int(count or 0)) for level, count in (quota or {}).items() if int(count or 0) > 0}
+    reserve_count = max(0, int(reserve_count or 0))
+    if not requested or reserve_count <= 0:
+        return requested
+    levels = list(requested.keys())
+    for index in range(reserve_count):
+        level = levels[index % len(levels)]
+        requested[level] = requested.get(level, 0) + 1
+    return requested
+
+
 def gemini_daily_pack_steps(settings):
     target_levels = settings_target_levels(settings)
     jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
@@ -5238,6 +5254,15 @@ def gemini_daily_pack_steps(settings):
 
     basic_quota = {level: word_quota_all[level] for level in ("N5", "N4") if word_quota_all.get(level)}
     advanced_quota = {level: word_quota_all[level] for level in ("N3", "N2", "N1", "SNS") if word_quota_all.get(level)}
+    word_pack_count = int(bool(basic_quota)) + int(bool(advanced_quota))
+    basic_reserve = 0
+    advanced_reserve = 0
+    if word_pack_count == 1:
+        basic_reserve = GEMINI_DAILY_WORD_RESERVE if basic_quota else 0
+        advanced_reserve = GEMINI_DAILY_WORD_RESERVE if advanced_quota else 0
+    elif word_pack_count > 1:
+        basic_reserve = (GEMINI_DAILY_WORD_RESERVE + 1) // 2
+        advanced_reserve = GEMINI_DAILY_WORD_RESERVE // 2
     if basic_quota:
         steps.append(
             {
@@ -5245,7 +5270,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "word_basic",
                 "item_type": "word",
                 "quota_by_level": basic_quota,
-                "requested_by_level": quota_with_small_overage(basic_quota, 6, add_backup=True),
+                "requested_by_level": quota_with_reserve(basic_quota, basic_reserve),
             }
         )
     if advanced_quota:
@@ -5255,7 +5280,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "word_advanced",
                 "item_type": "word",
                 "quota_by_level": advanced_quota,
-                "requested_by_level": quota_with_small_overage(advanced_quota, 6, add_backup=True),
+                "requested_by_level": quota_with_reserve(advanced_quota, advanced_reserve),
             }
         )
     if verb_quota:
@@ -5265,7 +5290,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "verb",
                 "item_type": "verb",
                 "quota_by_level": verb_quota,
-                "requested_by_level": dict(verb_quota),
+                "requested_by_level": quota_with_reserve(verb_quota, GEMINI_DAILY_VERB_RESERVE),
             }
         )
     if grammar_quota:
@@ -5275,7 +5300,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "grammar",
                 "item_type": "grammar",
                 "quota_by_level": grammar_quota,
-                "requested_by_level": quota_with_small_overage(grammar_quota, 5, add_backup=False),
+                "requested_by_level": quota_with_reserve(grammar_quota, GEMINI_DAILY_GRAMMAR_RESERVE),
                 "best_effort": True,
             }
         )
@@ -5686,6 +5711,22 @@ def text_has_cjk_kanji(value):
     return any("\u4e00" <= char <= "\u9fff" for char in simple_text(value))
 
 
+def text_has_katakana(value):
+    return any("\u30a0" <= char <= "\u30ff" for char in simple_text(value))
+
+
+def is_safe_daily_fresh_suru_surface(surface):
+    text = simple_text(surface)
+    if text == "する":
+        return True
+    if not text.endswith("する"):
+        return False
+    stem = text[: -len("する")]
+    if not stem:
+        return False
+    return text_has_cjk_kanji(stem) or text_has_katakana(stem)
+
+
 def verb_pos_allows_candidate(pos):
     text = simple_text(pos)
     if not text:
@@ -5742,6 +5783,8 @@ def audit_verb_candidate(candidate, row=None, log=False):
         return audit_result(False, "counter_or_number", "word")
     if text in DAILY_FRESH_NON_VERB_SURFACES:
         return audit_result(False, "known_non_verb", "word")
+    if is_safe_daily_fresh_suru_surface(text):
+        return audit_result(True)
 
     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
     pos_allowed = verb_pos_allows_candidate(pos)
@@ -7042,6 +7085,8 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
             "continue_same_step": False,
         }, 200
     daily_batch_id = job_id
+    planned_call_count = 0
+    reserve_candidate_count = 0
     for step in gemini_daily_fresh_steps(job):
         pack_type = str(step.get("pack_type") or "").strip().lower()
         item_type = str(step.get("item_type") or "").strip().lower()
@@ -7133,6 +7178,11 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
                 job_id, pack_type, item_type, error_code, candidate_plan, elapsed_ms
             ), 200
         candidate_count = len(candidate_plan.get("items") or [])
+        chunk_size = daily_fresh_enrich_chunk_size(item_type)
+        chunk_count = len(chunked_list(candidate_plan.get("items") or [], chunk_size))
+        quota_count = sum(int(count or 0) for count in (step.get("quota_by_level") or {}).values())
+        planned_call_count += chunk_count
+        reserve_candidate_count += max(0, candidate_count - quota_count)
         pack_state = {
             **pack_state,
             "item_type": item_type,
@@ -7141,7 +7191,10 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
             "candidate_plan": candidate_plan,
             "candidate_count": candidate_count,
             "candidate_missing": candidate_plan.get("missing") or [],
-            "chunk_size": daily_fresh_enrich_chunk_size(item_type),
+            "chunk_size": chunk_size,
+            "chunk_count": chunk_count,
+            "quota_count": quota_count,
+            "reserve_candidate_count": max(0, candidate_count - quota_count),
             "completed_chunks": pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [],
             "daily_batch_id": daily_batch_id,
             "generated_for_date": material_date,
@@ -7161,6 +7214,10 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
         )
         job = load_gemini_generation_job(job_id) or job
     print("[gemini-flow] candidates_ready=true")
+    print(f"[gemini-cost] planned_calls={planned_call_count}")
+    print("[gemini-cost] reserve_calls_used=0")
+    print(f"[gemini-cost] max_calls={planned_call_count}")
+    print(f"[gemini-cost] reserve_candidates_planned={reserve_candidate_count}")
     return None, 200
 
 
@@ -10944,6 +11001,13 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     f"rejected={rejected_count}"
                 )
                 return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": rejected_count}
+            if not chunk_items and item_type == "word":
+                print(
+                    "[gemini-bank] word_chunk_skipped "
+                    f"pack={pack_type} chunk={chunk_label} reason=candidate_rejected_or_invalid "
+                    f"skipped={len(chunk_candidates)}"
+                )
+                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": len(chunk_candidates)}
             if not chunk_items:
                 raise ValueError("daily_fresh_items_invalid:empty_chunk")
             result = upsert_gemini_bank_items(
@@ -11141,6 +11205,48 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     level=",".join(levels),
                     elapsed_ms=round((time.perf_counter() - started) * 1000),
                 ), 200
+            if item_type in {"word", "verb"} and reason in {"json_parse_error", "json_truncated", "timeout", "unknown_error"}:
+                warning = f"{item_type}_chunk_skipped:{reason}"
+                completed_chunks.add(chunk_index)
+                has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+                pack_state.update(
+                    {
+                        "inserted": inserted_total,
+                        "skipped": skipped_total + len(chunk_candidates),
+                        "completed_chunks": sorted(completed_chunks),
+                        "chunk_size": chunk_size,
+                        "chunk_count": len(chunks),
+                        "warning": warning,
+                        "last_error": last_error,
+                    }
+                )
+                persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}:chunk_{chunk_index}_skipped")
+                completed_steps = gemini_completed_step_keys(load_gemini_generation_job(job_id) or job)
+                if not has_more_chunks:
+                    completed_steps = mark_gemini_generation_step_completed_key(job_id, gemini_daily_fresh_step_key(pack_type))
+                    persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_done")
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                print(
+                    "[gemini-bank] daily_fresh chunk skipped "
+                    f"pack={pack_type} chunk={chunk_index} item_type={item_type} reason={reason}"
+                )
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "daily_batch_id": daily_batch_id,
+                    "stage": "daily_fresh",
+                    "micro_step": "enrich_chunk",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "chunk_index": chunk_index,
+                    "warning": warning,
+                    "done": not has_more_chunks,
+                    "continued": has_more_chunks,
+                    "continue_same_step": has_more_chunks,
+                    "next_step": {"stage": "daily_fresh", "pack_type": pack_type} if has_more_chunks else None,
+                    "completed_steps": completed_steps,
+                    "elapsed_ms": elapsed_ms,
+                }, 200
             if item_type == "grammar":
                 warning = f"grammar_chunk_skipped:{reason}"
                 completed_chunks.add(chunk_index)
@@ -11810,67 +11916,71 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         print(f"[gemini-finalize] initial selected_counts_by_level={initial_counts}")
         requested_words = int(settings.get("vocab_count") or 0)
         requested_verbs = int(settings.get("verb_count") or 0)
+        requested_grammar = int(sum(grammar_quota.values()))
         daily_fresh_counts = {"word": len(selected_words), "verb": len(selected_verbs), "grammar": len(selected_grammar)}
-        word_daily_deficit = max(0, requested_words - len(selected_words))
-        verb_daily_deficit = max(0, requested_verbs - len(selected_verbs))
-        if len(selected_words) < min(GEMINI_DAILY_WORD_MIN_FRESH, requested_words) or word_daily_deficit > 2:
-            print(f"[gemini-finalize] insufficient_daily_fresh item_type=word selected={len(selected_words)} requested={requested_words}")
-            if sum((daily_batch_summary.get("word") or {}).values()) == 0:
-                raise ValueError("daily_fresh_items_not_persisted:word")
-            raise ValueError("gemini_daily_fresh_insufficient:word")
-        if len(selected_verbs) < min(GEMINI_DAILY_VERB_MIN_FRESH, requested_verbs) or verb_daily_deficit > 2:
-            print(f"[gemini-finalize] insufficient_daily_fresh item_type=verb selected={len(selected_verbs)} requested={requested_verbs}")
-            if sum((daily_batch_summary.get("verb") or {}).values()) == 0:
-                raise ValueError("daily_fresh_items_not_persisted:verb")
-            raise ValueError("gemini_daily_fresh_insufficient:verb")
         top_up = {
             "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
             "verb": {"needed": max(0, requested_verbs - len(selected_verbs)), "added": 0},
-            "grammar": {"needed": max(0, sum(grammar_quota.values()) - len(selected_grammar)), "added": 0},
+            "grammar": {"needed": max(0, requested_grammar - len(selected_grammar)), "added": 0},
             "grammar_warning": [],
         }
-        if top_up["word"]["needed"] > 0:
-            selected_keys = {row.get("normalized_key") for row in selected_words}
-            extra_words = select_gemini_bank_top_up_items(
-                "word",
-                top_up["word"]["needed"],
-                selected_keys,
-                recent_used_keys=recent_word_keys,
-                exclude_daily_batch_id=daily_batch_id,
+        print(f"[gemini-finalize] bank_fallback_allowed={str(ALLOW_DAILY_FRESH_BANK_FALLBACK).lower()}")
+        fresh_shortfall = {
+            item_type: values.get("needed", 0)
+            for item_type, values in top_up.items()
+            if isinstance(values, dict) and int(values.get("needed") or 0) > 0
+        }
+        if fresh_shortfall and not ALLOW_DAILY_FRESH_BANK_FALLBACK:
+            print(
+                "[gemini-finalize] fresh_generation_incomplete "
+                f"daily_batch_selected word={daily_fresh_counts['word']} verb={daily_fresh_counts['verb']} grammar={daily_fresh_counts['grammar']} "
+                f"requested word={requested_words} verb={requested_verbs} grammar={requested_grammar} missing={fresh_shortfall}"
             )
-            selected_words.extend(extra_words)
-            reserved.extend(extra_words)
-            top_up["word"]["added"] = len(extra_words)
-        if top_up["verb"]["needed"] > 0:
-            selected_keys = {row.get("normalized_key") for row in selected_verbs}
-            extra_verbs = select_gemini_bank_top_up_items(
-                "verb",
-                top_up["verb"]["needed"],
-                selected_keys,
-                recent_used_keys=recent_verb_keys,
-                exclude_daily_batch_id=daily_batch_id,
-            )
-            selected_verbs.extend(extra_verbs)
-            reserved.extend(extra_verbs)
-            top_up["verb"]["added"] = len(extra_verbs)
-        if top_up["grammar"]["needed"] > 0:
-            selected_keys = {row.get("normalized_key") for row in selected_grammar}
-            extra_grammar = select_gemini_bank_top_up_items(
-                "grammar",
-                top_up["grammar"]["needed"],
-                selected_keys,
-                exclude_daily_batch_id=daily_batch_id,
-            )
-            selected_grammar.extend(extra_grammar)
-            reserved.extend(extra_grammar)
-            top_up["grammar"]["added"] = len(extra_grammar)
-            top_up["grammar"]["needed"] = max(0, sum(grammar_quota.values()) - len(selected_grammar))
+            print("[gemini-finalize] fallback_selected word=0 verb=0 grammar=0")
+            raise ValueError("fresh_generation_incomplete:" + ",".join(f"{key}={value}" for key, value in fresh_shortfall.items()))
+        if ALLOW_DAILY_FRESH_BANK_FALLBACK:
+            if top_up["word"]["needed"] > 0:
+                selected_keys = {row.get("normalized_key") for row in selected_words}
+                extra_words = select_gemini_bank_top_up_items(
+                    "word",
+                    top_up["word"]["needed"],
+                    selected_keys,
+                    recent_used_keys=recent_word_keys,
+                    exclude_daily_batch_id=daily_batch_id,
+                )
+                selected_words.extend(extra_words)
+                reserved.extend(extra_words)
+                top_up["word"]["added"] = len(extra_words)
+            if top_up["verb"]["needed"] > 0:
+                selected_keys = {row.get("normalized_key") for row in selected_verbs}
+                extra_verbs = select_gemini_bank_top_up_items(
+                    "verb",
+                    top_up["verb"]["needed"],
+                    selected_keys,
+                    recent_used_keys=recent_verb_keys,
+                    exclude_daily_batch_id=daily_batch_id,
+                )
+                selected_verbs.extend(extra_verbs)
+                reserved.extend(extra_verbs)
+                top_up["verb"]["added"] = len(extra_verbs)
+            if top_up["grammar"]["needed"] > 0:
+                selected_keys = {row.get("normalized_key") for row in selected_grammar}
+                extra_grammar = select_gemini_bank_top_up_items(
+                    "grammar",
+                    top_up["grammar"]["needed"],
+                    selected_keys,
+                    exclude_daily_batch_id=daily_batch_id,
+                )
+                selected_grammar.extend(extra_grammar)
+                reserved.extend(extra_grammar)
+                top_up["grammar"]["added"] = len(extra_grammar)
+                top_up["grammar"]["needed"] = max(0, requested_grammar - len(selected_grammar))
         if not selected_grammar:
             top_up["grammar_warning"].append("gemini_bank_grammar_empty")
             print("[gemini-finalize] grammar_warning=gemini_bank_grammar_empty")
-        elif len(selected_grammar) < sum(grammar_quota.values()):
+        elif len(selected_grammar) < requested_grammar:
             top_up["grammar_warning"].append("gemini_bank_grammar_insufficient")
-            print(f"[gemini-finalize] grammar_warning=gemini_bank_grammar_insufficient selected={len(selected_grammar)} requested={sum(grammar_quota.values())}")
+            print(f"[gemini-finalize] grammar_warning=gemini_bank_grammar_insufficient selected={len(selected_grammar)} requested={requested_grammar}")
         selected_recent_words = {row.get("normalized_key") for row in selected_words if row.get("normalized_key")} & recent_word_keys
         selected_recent_verbs = {row.get("normalized_key") for row in selected_verbs if row.get("normalized_key")} & recent_verb_keys
         duplicate_recent = bool(selected_recent_words or selected_recent_verbs)
@@ -11947,6 +12057,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
                 "top_up": top_up,
+                "bank_fallback_allowed": ALLOW_DAILY_FRESH_BANK_FALLBACK,
                 "daily_fresh_count": daily_fresh_counts,
                 "fallback_count": {
                     "word": top_up["word"].get("added", 0),
@@ -12011,6 +12122,9 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "daily_fresh_items_not_persisted"
             if "daily_fresh_items_not_persisted" in str(exc)
             else
+            "fresh_generation_incomplete"
+            if "fresh_generation_incomplete" in str(exc)
+            else
             "gemini_bank_insufficient"
             if "gemini_bank_insufficient" in str(exc)
             or "gemini_daily_fresh_insufficient" in str(exc)
@@ -12019,7 +12133,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         )
         message = f"{reason}:{str(exc)[:240]}"
         update_gemini_generation_job(job_id, status="failed", current_stage="finalize", error_message=message)
-        if error_code == "gemini_bank_insufficient":
+        if error_code in {"gemini_bank_insufficient", "fresh_generation_incomplete"}:
             print("[gemini-flow] bank_insufficient_at=finalize")
             print(f"[gemini-flow] reason={str(exc)[:240]}")
         print(f"[gemini-stage] failed job_id={job_id} stage=finalize error={message} elapsed_ms={elapsed_ms}")
@@ -12027,8 +12141,16 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "ok": False,
             "error": error_code,
             "stage": "finalize",
-            "reason": "Gemini returned data but no usable daily batch items were persisted" if error_code == "daily_fresh_items_not_persisted" else "daily fresh batch and fallback bank cannot safely satisfy requested word/verb count" if error_code == "gemini_bank_insufficient" else reason,
-            "missing": [str(exc).split(":", 1)[1]] if error_code == "gemini_bank_insufficient" and ":" in str(exc) else [],
+            "reason": (
+                "Gemini returned data but no usable daily batch items were persisted"
+                if error_code == "daily_fresh_items_not_persisted"
+                else "今日新鮮教材補全不足，未使用既有題庫補足。請查看 Render Logs。"
+                if error_code == "fresh_generation_incomplete"
+                else "daily fresh batch and fallback bank cannot safely satisfy requested word/verb count"
+                if error_code == "gemini_bank_insufficient"
+                else reason
+            ),
+            "missing": [str(exc).split(":", 1)[1]] if error_code in {"gemini_bank_insufficient", "fresh_generation_incomplete"} and ":" in str(exc) else [],
             "job_id": job_id,
             "pack_summary": {"daily_batch_summary": daily_batch_summary or gemini_daily_batch_summary(job_id)},
             "elapsed_ms": elapsed_ms,
