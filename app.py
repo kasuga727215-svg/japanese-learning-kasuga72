@@ -6306,6 +6306,11 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
+                    try:
+                        cur.execute("SET LOCAL statement_timeout = '4500ms'")
+                    except Exception as timeout_cfg_exc:
+                        print(f"[vocabulary-pool] selector_statement_timeout_config_failed reason={timeout_cfg_exc}")
+
                     def fetch_id_batch(batch_size_value, offset_value):
                         cur.execute(id_sql, (*id_params_base, batch_size_value, offset_value))
                         return [row[0] for row in cur.fetchall() if row and row[0] is not None]
@@ -6344,6 +6349,22 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
 
             return scan_candidate_rows(fetch_id_batch, hydrate_ids)
     except Exception as exc:
+        error_text = str(exc)
+        if "statement timeout" in error_text.lower() or "canceling statement due to statement timeout" in error_text.lower():
+            print("[vocabulary-pool] selector_timeout_controlled=true")
+            print("[vocabulary-pool] selector_aborted_before_worker_timeout=true")
+            print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} reason={exc}")
+            return [
+                {
+                    "__selector_meta": True,
+                    "candidate_exhausted": False,
+                    "selector_timeout_warning": True,
+                    "selector_scan_incomplete": True,
+                    "selector_failed": False,
+                    "bad_rows": [],
+                    "skipped_bad_encoding": 0,
+                }
+            ]
         if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
             log_candidate_fetch_error(item_type, level, "selector", "unknown", "", exc)
             print("[vocabulary-pool] candidate_decode_error_recoverable=false")
@@ -6545,7 +6566,32 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
             f"[fresh-candidate] insufficient source=vocabulary_pool pack={pack_type or item_type} "
             f"item_type={item_type} missing={missing}"
         )
-    return {"candidates_by_level": selected_by_level, "items": selected_items, "missing": missing, "fetch_errors": fetch_errors, "skipped_bad_encoding": skipped_bad_encoding}
+    selector_timeout_warning = any(
+        bool(meta.get("selector_timeout_warning"))
+        for meta in selector_meta_by_level.values()
+        if isinstance(meta, dict)
+    )
+    selector_scan_incomplete = any(
+        bool(meta.get("selector_scan_incomplete"))
+        for meta in selector_meta_by_level.values()
+        if isinstance(meta, dict)
+    )
+    selector_failed = any(
+        bool(meta.get("selector_failed"))
+        for meta in selector_meta_by_level.values()
+        if isinstance(meta, dict)
+    )
+    return {
+        "candidates_by_level": selected_by_level,
+        "items": selected_items,
+        "missing": missing,
+        "fetch_errors": fetch_errors,
+        "skipped_bad_encoding": skipped_bad_encoding,
+        "selector_timeout_warning": selector_timeout_warning,
+        "selector_scan_incomplete": selector_scan_incomplete,
+        "selector_failed": selector_failed,
+        "selector_meta_by_level": selector_meta_by_level,
+    }
 
 
 def grammar_pool_candidate_inventory():
@@ -6889,6 +6935,233 @@ def cached_daily_fresh_candidate_plan(pack_state):
 
 
 SIMPLIFIED_ZH_WARNING_CHARS = set("发表会议会说过这为与国门问题实学体广区医药后时个")
+
+
+def gemini_daily_fresh_field_name(item_type):
+    return {"word": "vocab_json", "verb": "verbs_json", "grammar": "grammar_json"}.get(str(item_type or "").strip().lower())
+
+
+def gemini_daily_fresh_steps(job):
+    steps = gemini_job_json((job or {}).get("planned_steps_json"), [])
+    return [
+        step
+        for step in steps
+        if isinstance(step, dict)
+        and str(step.get("stage") or "").strip().lower() == "daily_fresh"
+        and str(step.get("pack_type") or "").strip()
+    ]
+
+
+def gemini_daily_fresh_pack_state(job, step):
+    item_type = str((step or {}).get("item_type") or "").strip().lower()
+    pack_type = str((step or {}).get("pack_type") or "").strip().lower()
+    field_name = gemini_daily_fresh_field_name(item_type)
+    if not field_name:
+        return {}, {}, {}, None
+    cache = gemini_job_json((job or {}).get(field_name), {})
+    if not isinstance(cache, dict):
+        cache = {}
+    pack_cache = cache.get("daily_fresh") if isinstance(cache.get("daily_fresh"), dict) else {}
+    pack_state = pack_cache.get(pack_type) if isinstance(pack_cache.get(pack_type), dict) else {}
+    return cache, pack_cache, pack_state, field_name
+
+
+def gemini_daily_fresh_all_candidates_ready(job):
+    daily_steps = gemini_daily_fresh_steps(job)
+    if not daily_steps:
+        return True
+    for step in daily_steps:
+        _cache, _pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
+        if not field_name or not cached_daily_fresh_candidate_plan(pack_state):
+            return False
+    return True
+
+
+def gemini_daily_fresh_plan_error(candidate_plan, item_type, requested_total, best_effort=False):
+    if not isinstance(candidate_plan, dict):
+        return "fresh_candidate_pool_insufficient"
+    if candidate_plan.get("selector_timeout_warning") or candidate_plan.get("selector_scan_incomplete"):
+        return "selector_timeout"
+    if candidate_plan.get("selector_failed"):
+        return "fresh_candidate_selector_failed"
+    if candidate_plan.get("fetch_errors"):
+        return "fresh_candidate_decode_error"
+    item_count = len(candidate_plan.get("items") or [])
+    if item_type in {"word", "verb"} and item_count < int(requested_total or 0):
+        return "fresh_candidate_pool_insufficient"
+    if item_type == "grammar" and not best_effort and item_count < int(requested_total or 0):
+        return "fresh_candidate_pool_insufficient"
+    if item_type == "grammar" and int(requested_total or 0) > 0 and item_count <= 0:
+        return "fresh_candidate_pool_insufficient"
+    if candidate_plan.get("missing") and item_type in {"word", "verb"}:
+        return "fresh_candidate_pool_insufficient"
+    return ""
+
+
+def gemini_daily_fresh_prepare_error_payload(job_id, pack_type, item_type, error_code, candidate_plan=None, elapsed_ms=0):
+    reason = "候選準備逾時，未消耗 Gemini API" if error_code == "selector_timeout" else "候選準備失敗，未消耗 Gemini API"
+    if error_code == "fresh_candidate_decode_error":
+        reason = "日文候選詞讀取失敗，未消耗 Gemini API"
+    payload = {
+        "ok": False,
+        "error": error_code,
+        "reason": reason,
+        "job_id": job_id,
+        "stage": "daily_fresh",
+        "phase": "prepare_all_candidates",
+        "pack_type": pack_type,
+        "item_type": item_type,
+        "gemini_call_count": 0,
+        "retryable": error_code == "selector_timeout",
+        "continue_same_step": False,
+        "elapsed_ms": elapsed_ms,
+    }
+    if isinstance(candidate_plan, dict):
+        if candidate_plan.get("missing"):
+            payload["missing"] = candidate_plan.get("missing") or []
+        if candidate_plan.get("fetch_errors"):
+            payload["fetch_errors"] = candidate_plan.get("fetch_errors") or []
+        if candidate_plan.get("selector_meta_by_level"):
+            payload["selector_meta_by_level"] = candidate_plan.get("selector_meta_by_level") or {}
+    return payload
+
+
+def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, material_date, started):
+    print("[gemini-flow] phase=prepare_all_candidates start")
+    print("[gemini-flow] candidates_ready=false")
+    print("[gemini-flow] api_guard gemini_calls_blocked_until_candidates_ready=true")
+    print("[gemini-cost] phase=prepare_all_candidates gemini_call_count=0")
+    job = current_job or load_gemini_generation_job(job_id)
+    if not job:
+        return {
+            "ok": False,
+            "error": "job_not_found",
+            "reason": "Gemini generation job not found",
+            "job_id": job_id,
+            "gemini_call_count": 0,
+            "continue_same_step": False,
+        }, 200
+    daily_batch_id = job_id
+    for step in gemini_daily_fresh_steps(job):
+        pack_type = str(step.get("pack_type") or "").strip().lower()
+        item_type = str(step.get("item_type") or "").strip().lower()
+        requested_by_level = {
+            str(level): int(count or 0)
+            for level, count in (step.get("requested_by_level") or {}).items()
+            if int(count or 0) > 0
+        }
+        requested_total = sum(requested_by_level.values())
+        best_effort = bool(step.get("best_effort"))
+        cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
+        if not field_name:
+            continue
+        if cached_daily_fresh_candidate_plan(pack_state):
+            print(f"[daily-fresh-candidates] phase_a_cached pack={pack_type} item_type={item_type}")
+            continue
+        warning = ""
+        candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
+        if item_type in {"word", "verb"}:
+            inventory = vocabulary_pool_candidate_inventory()
+            inventory_levels = inventory.get("by_level") or {}
+            print(f"[vocabulary-pool] candidate_inventory total={inventory.get('total', 0)}")
+            print(
+                "[vocabulary-pool] by_level "
+                f"N5={inventory_levels.get('N5', 0)} "
+                f"N4={inventory_levels.get('N4', 0)} "
+                f"N3={inventory_levels.get('N3', 0)} "
+                f"N2={inventory_levels.get('N2', 0)} "
+                f"N1={inventory_levels.get('N1', 0)}"
+            )
+            if int(inventory.get("total") or 0) < 1000:
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                update_gemini_generation_job(
+                    job_id,
+                    status="failed",
+                    current_stage=f"daily_fresh:{pack_type}:prepare_all_candidates",
+                    error_message="fresh_candidate_pool_insufficient",
+                )
+                print("[gemini-cost] job_failed_before_enrich gemini_call_count=0")
+                return gemini_daily_fresh_prepare_error_payload(
+                    job_id, pack_type, item_type, "fresh_candidate_pool_insufficient", None, elapsed_ms
+                ), 200
+            recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_DAILY_CANDIDATE_RECENT_DAYS, material_date=material_date)
+            recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
+            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+        elif item_type == "grammar":
+            inventory = grammar_pool_candidate_inventory()
+            inventory_levels = inventory.get("by_level") or {}
+            print(f"[grammar-pool] candidate_inventory total={inventory.get('total', 0)}")
+            print(
+                "[grammar-pool] by_level "
+                f"N5={inventory_levels.get('N5', 0)} "
+                f"N4={inventory_levels.get('N4', 0)} "
+                f"N3={inventory_levels.get('N3', 0)} "
+                f"N2={inventory_levels.get('N2', 0)} "
+                f"N1={inventory_levels.get('N1', 0)}"
+            )
+            recent_keys = get_recent_used_grammar_keys(material_date, days=GEMINI_BANK_RECENT_EXCLUSION_DAYS)
+            try:
+                candidate_plan = select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type=pack_type)
+            except Exception as exc:
+                warning = "grammar_pool_unavailable"
+                candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
+                print(f"[grammar-pool] candidate_fetch_failed pack={pack_type} reason={exc}")
+            if candidate_plan.get("missing"):
+                warning = warning or "grammar_pool_candidate_shortage"
+                print(
+                    "[daily-fresh-candidates] grammar best_effort "
+                    f"job_id={job_id} pack={pack_type} missing={candidate_plan.get('missing')}"
+                )
+        error_code = gemini_daily_fresh_plan_error(candidate_plan, item_type, requested_total, best_effort=best_effort)
+        if error_code:
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            if error_code == "selector_timeout":
+                print("[vocabulary-pool] selector_timeout_controlled=true")
+                print("[vocabulary-pool] selector_aborted_before_worker_timeout=true")
+            update_gemini_generation_job(
+                job_id,
+                status="failed",
+                current_stage=f"daily_fresh:{pack_type}:prepare_all_candidates",
+                error_message=error_code,
+            )
+            print(
+                f"[gemini-flow] prepare_all_candidates_failed pack={pack_type} "
+                f"item_type={item_type} error={error_code}"
+            )
+            print("[gemini-cost] job_failed_before_enrich gemini_call_count=0")
+            return gemini_daily_fresh_prepare_error_payload(
+                job_id, pack_type, item_type, error_code, candidate_plan, elapsed_ms
+            ), 200
+        candidate_count = len(candidate_plan.get("items") or [])
+        pack_state = {
+            **pack_state,
+            "item_type": item_type,
+            "requested_by_level": requested_by_level,
+            "requested": candidate_count,
+            "candidate_plan": candidate_plan,
+            "candidate_count": candidate_count,
+            "candidate_missing": candidate_plan.get("missing") or [],
+            "chunk_size": daily_fresh_enrich_chunk_size(item_type),
+            "completed_chunks": pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [],
+            "daily_batch_id": daily_batch_id,
+            "generated_for_date": material_date,
+            "candidate_source": "grammar_pool" if item_type == "grammar" else "vocabulary_pool",
+            "warning": warning,
+        }
+        pack_cache[pack_type] = make_json_safe(pack_state)
+        cache["daily_fresh"] = pack_cache
+        update_gemini_generation_job(
+            job_id,
+            current_stage=f"daily_fresh:{pack_type}_candidates_selected",
+            **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+        )
+        print(
+            f"[daily-fresh-candidates] phase_a_prepared pack={pack_type} "
+            f"item_type={item_type} candidate_count={candidate_count}"
+        )
+        job = load_gemini_generation_job(job_id) or job
+    print("[gemini-flow] candidates_ready=true")
+    return None, 200
 
 
 def has_simplified_zh_warning(value):
@@ -10228,6 +10501,42 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         "[gemini-step] micro_step_start "
         f"job_id={job_id} step=daily_fresh pack={pack_type}"
     )
+    if not gemini_daily_fresh_all_candidates_ready(job):
+        prepare_payload, prepare_status = prepare_all_gemini_daily_fresh_candidates(
+            job_id, job, settings, material_date, started
+        )
+        if prepare_payload is not None:
+            return prepare_payload, prepare_status
+        job = load_gemini_generation_job(job_id) or job
+        cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
+        candidate_plan_for_response = cached_daily_fresh_candidate_plan(pack_state) or {"items": []}
+        candidate_items_for_response = list(candidate_plan_for_response.get("items") or [])
+        chunk_size_for_response = daily_fresh_enrich_chunk_size(item_type)
+        chunks_for_response = chunked_list(candidate_items_for_response, chunk_size_for_response)
+        elapsed_ms = round((time.perf_counter() - started) * 1000)
+        print(
+            "[gemini-step] micro_step_done "
+            f"job_id={job_id} step=prepare_all_candidates pack={pack_type} elapsed_ms={elapsed_ms}"
+        )
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "daily_batch_id": daily_batch_id,
+            "stage": "daily_fresh",
+            "phase": "prepare_all_candidates",
+            "micro_step": "prepare_all_candidates",
+            "pack_type": pack_type,
+            "item_type": item_type,
+            "candidate_count": len(candidate_items_for_response),
+            "chunk_size": chunk_size_for_response,
+            "chunk_count": len(chunks_for_response),
+            "gemini_call_count": 0,
+            "candidates_ready": True,
+            "done": False,
+            "continue_same_step": bool(chunks_for_response),
+            "next_step": {"stage": "daily_fresh", "pack_type": pack_type} if chunks_for_response else None,
+            "elapsed_ms": elapsed_ms,
+        }, 200
 
     requested_by_level = {str(level): int(count or 0) for level, count in (step.get("requested_by_level") or {}).items() if int(count or 0) > 0}
     levels = list(requested_by_level.keys())
@@ -10503,6 +10812,24 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "done": False,
                 "continue_same_step": bool(chunks),
                 "next_step": {"stage": "daily_fresh", "pack_type": pack_type} if chunks else None,
+                "elapsed_ms": elapsed_ms,
+            }, 200
+
+        if not gemini_daily_fresh_all_candidates_ready(load_gemini_generation_job(job_id) or job):
+            elapsed_ms = round((time.perf_counter() - started) * 1000)
+            print("[gemini-flow] api_guard gemini_enrich_blocked candidates_ready=false")
+            return {
+                "ok": False,
+                "error": "daily_fresh_candidates_not_ready",
+                "reason": "候選尚未全部準備完成，未消耗 Gemini API",
+                "job_id": job_id,
+                "stage": "daily_fresh",
+                "phase": "prepare_all_candidates",
+                "pack_type": pack_type,
+                "item_type": item_type,
+                "gemini_call_count": 0,
+                "retryable": True,
+                "continue_same_step": False,
                 "elapsed_ms": elapsed_ms,
             }, 200
 
