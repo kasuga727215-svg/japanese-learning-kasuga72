@@ -4975,6 +4975,13 @@ def gemini_bank_count_unused(item_type, level):
 GEMINI_BANK_ACTIVE_STATUSES = ("unused", "available", "active")
 
 
+def daily_batch_select_statuses(item_type):
+    statuses = list(GEMINI_BANK_ACTIVE_STATUSES)
+    if item_type == "grammar":
+        statuses.append("reserved")
+    return tuple(statuses)
+
+
 def gemini_bank_count_active_total(item_type, level):
     ensure_gemini_item_bank_store()
     level = normalize_gemini_bank_level(level, item_type)
@@ -8092,23 +8099,41 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
     selected = []
     now = utc_now_iso()
     daily_batch_id = simple_text(daily_batch_id)
+    select_statuses = daily_batch_select_statuses(item_type)
     recent_keys = gemini_bank_recent_keys_for_item_type({item_type: recent_used_keys or set()}, item_type)
     if not daily_batch_id:
         return []
     for level, count in quota.items():
         if int(count or 0) <= 0:
             continue
+        if item_type == "grammar":
+            print(
+                "[gemini-finalize-debug] grammar_select_query_filters="
+                + log_safe_text(
+                    json.dumps(
+                        {
+                            "item_type": item_type,
+                            "level": level,
+                            "daily_batch_id": daily_batch_id,
+                            "statuses": list(select_statuses),
+                            "recent_exclusion_count": len(recent_keys),
+                            "limit": int(count),
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            )
         if DATABASE_URL:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     recent_clause = "AND NOT (normalized_key = ANY(%s))" if recent_keys else ""
-                    params = [item_type, list(GEMINI_BANK_ACTIVE_STATUSES), level, daily_batch_id]
+                    params = [item_type, list(select_statuses), level, daily_batch_id]
                     if recent_keys:
                         params.append(list(recent_keys))
                     params.append(int(count))
                     cur.execute(
                         f"""
-                        SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                        SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json, status
                         FROM gemini_item_bank
                         WHERE item_type = %s
                           AND status = ANY(%s)
@@ -8128,7 +8153,7 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
                             (now, ids),
                         )
                 conn.commit()
-            keys = ["id", "item_type", "normalized_key", "display_text", "reading", "jlpt_level", "category", "source", "payload_json"]
+            keys = ["id", "item_type", "normalized_key", "display_text", "reading", "jlpt_level", "category", "source", "payload_json", "status"]
             selected.extend(dict(zip(keys, row)) for row in rows)
         else:
             recent_clause = ""
@@ -8140,17 +8165,17 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
                 conn.row_factory = sqlite3.Row
                 rows = conn.execute(
                     f"""
-                    SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json
+                    SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json, status
                     FROM gemini_item_bank
                     WHERE item_type = ?
-                      AND status IN ({",".join(["?"] * len(GEMINI_BANK_ACTIVE_STATUSES))})
+                      AND status IN ({",".join(["?"] * len(select_statuses))})
                       AND jlpt_level = ?
                       AND daily_batch_id = ?
                       {recent_clause}
                     ORDER BY created_at ASC, id ASC
                     LIMIT ?
                     """,
-                    (item_type, *GEMINI_BANK_ACTIVE_STATUSES, level, daily_batch_id, *recent_params, int(count)),
+                    (item_type, *select_statuses, level, daily_batch_id, *recent_params, int(count)),
                 ).fetchall()
                 ids = [row["id"] for row in rows]
                 if ids:
@@ -8161,6 +8186,33 @@ def select_gemini_bank_items_by_batch(item_type, quota, daily_batch_id, recent_u
                     )
                 conn.commit()
             selected.extend(dict(row) for row in rows)
+        if item_type == "grammar":
+            raw_candidates = [
+                {
+                    "id": row[0] if not isinstance(row, sqlite3.Row) else row["id"],
+                    "key": row[2] if not isinstance(row, sqlite3.Row) else row["normalized_key"],
+                    "level": row[5] if not isinstance(row, sqlite3.Row) else row["jlpt_level"],
+                    "status": row[9] if not isinstance(row, sqlite3.Row) else row["status"],
+                }
+                for row in rows
+            ]
+            print(
+                "[gemini-finalize-debug] grammar_select_raw_candidates="
+                + log_safe_text(json.dumps(raw_candidates, ensure_ascii=False))
+            )
+            print(
+                "[gemini-finalize-debug] grammar_select_selected="
+                + log_safe_text(
+                    json.dumps(
+                        {
+                            "level": level,
+                            "count": len(rows),
+                            "keys": [candidate.get("key") for candidate in raw_candidates],
+                        },
+                        ensure_ascii=False,
+                    )
+                )
+            )
         print(f"[gemini-bank] select_daily_batch item_type={item_type} level={level} selected={len(rows)} batch={daily_batch_id}")
     return selected
 
@@ -11959,6 +12011,10 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             f"word={daily_batch_summary.get('word', {})} "
             f"verb={daily_batch_summary.get('verb', {})} "
             f"grammar={daily_batch_summary.get('grammar', {})}"
+        )
+        print(
+            "[gemini-finalize-debug] grammar_summary_count_by_level="
+            + log_safe_text(json.dumps(daily_batch_summary.get("grammar", {}), ensure_ascii=False))
         )
         selected_words = select_gemini_bank_items_by_batch("word", word_quota, daily_batch_id, recent_used_keys=recent_word_keys)
         selected_verbs = select_gemini_bank_items_by_batch("verb", verb_quota, daily_batch_id, recent_used_keys=recent_verb_keys)
