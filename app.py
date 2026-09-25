@@ -116,6 +116,7 @@ ALLOW_DAILY_FRESH_BANK_FALLBACK = os.environ.get("ALLOW_DAILY_FRESH_BANK_FALLBAC
 GEMINI_DAILY_WORD_RESERVE = read_int_env("GEMINI_DAILY_WORD_RESERVE", 4, 0, 12)
 GEMINI_DAILY_VERB_RESERVE = read_int_env("GEMINI_DAILY_VERB_RESERVE", 3, 0, 10)
 GEMINI_DAILY_GRAMMAR_RESERVE = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE", 3, 0, 10)
+GEMINI_DAILY_GRAMMAR_RESERVE_PER_LEVEL = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE_PER_LEVEL", 2, 0, 5)
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
 GEMINI_BANK_MIN_VERB_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_VERB_PER_LEVEL", 15, 1, 100)
 GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_GRAMMAR_PER_LEVEL", 10, 1, 100)
@@ -5244,6 +5245,15 @@ def quota_with_reserve(quota, reserve_count=0):
     return requested
 
 
+def quota_with_reserve_per_level(quota, reserve_per_level=0):
+    reserve_per_level = max(0, int(reserve_per_level or 0))
+    return {
+        level: max(0, int(count or 0)) + reserve_per_level
+        for level, count in (quota or {}).items()
+        if int(count or 0) > 0
+    }
+
+
 def gemini_daily_pack_steps(settings):
     target_levels = settings_target_levels(settings)
     jlpt_levels = [level for level in target_levels if level in LEVELS] or [settings.get("target_level", "N5")]
@@ -5300,7 +5310,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "grammar",
                 "item_type": "grammar",
                 "quota_by_level": grammar_quota,
-                "requested_by_level": quota_with_reserve(grammar_quota, GEMINI_DAILY_GRAMMAR_RESERVE),
+                "requested_by_level": quota_with_reserve_per_level(grammar_quota, GEMINI_DAILY_GRAMMAR_RESERVE_PER_LEVEL),
                 "best_effort": True,
             }
         )
@@ -6814,24 +6824,10 @@ def select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_
         return candidates
 
     for level, needed in requested_by_level.items():
-        candidates = collect_candidates_for_level(level, min(1, needed))
+        candidates = collect_candidates_for_level(level, needed)
         selected_by_level[level] = candidates
-        if len(candidates) < min(1, needed):
-            missing.append({"level": level, "requested": min(1, needed), "available": len(candidates)})
-
-    remaining = max(0, sum(requested_by_level.values()) - len(selected_items))
-    if remaining > 0:
-        for fallback_level in [level for level in ("N3", "N2", "N1", "N4", "N5") if level in requested_by_level]:
-            if remaining <= 0:
-                break
-            candidates = collect_candidates_for_level(fallback_level, remaining)
-            if not candidates:
-                continue
-            selected_by_level.setdefault(fallback_level, []).extend(candidates)
-            remaining -= len(candidates)
-            print(f"[fresh-candidate] grammar_redistributed to={fallback_level} count={len(candidates)}")
-    if remaining <= 0:
-        missing = []
+        if len(candidates) < needed:
+            missing.append({"level": level, "requested": needed, "available": len(candidates)})
 
     level_counts = {level: len(items) for level, items in selected_by_level.items()}
     selected_keys = [candidate.get("grammar_key") for candidate in selected_items]
@@ -11134,6 +11130,36 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             skipped_total += int(result.get("skipped") or 0)
             completed_chunks.add(chunk_index)
             has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+            if item_type == "grammar" and int(result.get("inserted") or 0) > 0:
+                inserted_candidate = chunk_candidates[0] if chunk_candidates else {}
+                inserted_level = simple_text(inserted_candidate.get("level"))
+                inserted_key = simple_text(inserted_candidate.get("grammar_key") or inserted_candidate.get("k") or inserted_candidate.get("normalized_key"))
+                same_level_remaining = 0
+                for future_index in range(chunk_index + 1, len(chunks)):
+                    if future_index in completed_chunks:
+                        continue
+                    future_candidate = chunks[future_index][0] if chunks[future_index] else {}
+                    if simple_text(future_candidate.get("level")) == inserted_level:
+                        same_level_remaining += 1
+                required_for_level = int((step.get("quota_by_level") or {}).get(inserted_level) or 0)
+                selected_for_level = select_gemini_bank_items_by_batch(
+                    "grammar",
+                    {inserted_level: required_for_level},
+                    daily_batch_id,
+                ) if required_for_level > 0 else []
+                print(
+                    "[grammar-replacement] "
+                    f"inserted level={inserted_level} candidate={log_safe_text(inserted_key)}"
+                )
+                print(
+                    "[grammar-replacement] "
+                    f"reserve_remaining level={inserted_level} count={same_level_remaining}"
+                )
+                if required_for_level > 0 and len(selected_for_level) >= required_for_level:
+                    print(
+                        "[grammar-replacement] "
+                        f"level_quota_satisfied level={inserted_level} selected={len(selected_for_level)} required={required_for_level}"
+                    )
             pack_state.update(
                 {
                     "item_type": item_type,
@@ -11249,6 +11275,36 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 }, 200
             if item_type == "grammar":
                 warning = f"grammar_chunk_skipped:{reason}"
+                failed_candidate = chunk_candidates[0] if chunk_candidates else {}
+                failed_level = simple_text(failed_candidate.get("level"))
+                failed_key = simple_text(failed_candidate.get("grammar_key") or failed_candidate.get("k") or failed_candidate.get("normalized_key"))
+                same_level_reserve = []
+                for future_index in range(chunk_index + 1, len(chunks)):
+                    if future_index in completed_chunks:
+                        continue
+                    future_candidate = chunks[future_index][0] if chunks[future_index] else {}
+                    if simple_text(future_candidate.get("level")) == failed_level:
+                        same_level_reserve.append(future_candidate)
+                print(
+                    "[grammar-replacement] "
+                    f"failed_candidate={log_safe_text(failed_key)} level={failed_level} reason={reason}"
+                )
+                if same_level_reserve:
+                    next_reserve = same_level_reserve[0]
+                    next_key = simple_text(next_reserve.get("grammar_key") or next_reserve.get("k") or next_reserve.get("normalized_key"))
+                    print(
+                        "[grammar-replacement] "
+                        f"use_reserve level={failed_level} candidate={log_safe_text(next_key)}"
+                    )
+                    print(
+                        "[grammar-replacement] "
+                        f"reserve_remaining level={failed_level} count={len(same_level_reserve)}"
+                    )
+                else:
+                    print(
+                        "[grammar-replacement] "
+                        f"reserve_exhausted level={failed_level} missing=1"
+                    )
                 completed_chunks.add(chunk_index)
                 has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
                 pack_state.update(
@@ -11918,10 +11974,18 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         requested_verbs = int(settings.get("verb_count") or 0)
         requested_grammar = int(sum(grammar_quota.values()))
         daily_fresh_counts = {"word": len(selected_words), "verb": len(selected_verbs), "grammar": len(selected_grammar)}
+        selected_grammar_by_level = Counter(row.get("jlpt_level", "") for row in selected_grammar if row.get("jlpt_level"))
+        grammar_level_shortfall = {
+            level: max(0, int(required or 0) - int(selected_grammar_by_level.get(level, 0) or 0))
+            for level, required in grammar_quota.items()
+            if max(0, int(required or 0) - int(selected_grammar_by_level.get(level, 0) or 0)) > 0
+        }
+        if grammar_level_shortfall:
+            print(f"[gemini-finalize] grammar_level_shortfall={grammar_level_shortfall}")
         top_up = {
             "word": {"needed": max(0, requested_words - len(selected_words)), "added": 0},
             "verb": {"needed": max(0, requested_verbs - len(selected_verbs)), "added": 0},
-            "grammar": {"needed": max(0, requested_grammar - len(selected_grammar)), "added": 0},
+            "grammar": {"needed": max(max(0, requested_grammar - len(selected_grammar)), sum(grammar_level_shortfall.values())), "added": 0},
             "grammar_warning": [],
         }
         print(f"[gemini-finalize] bank_fallback_allowed={str(ALLOW_DAILY_FRESH_BANK_FALLBACK).lower()}")
