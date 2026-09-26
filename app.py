@@ -115,6 +115,7 @@ GEMINI_DAILY_VERB_MIN_FRESH = 3
 ALLOW_DAILY_FRESH_BANK_FALLBACK = os.environ.get("ALLOW_DAILY_FRESH_BANK_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_DAILY_WORD_RESERVE = read_int_env("GEMINI_DAILY_WORD_RESERVE", 4, 0, 12)
 GEMINI_DAILY_VERB_RESERVE = read_int_env("GEMINI_DAILY_VERB_RESERVE", 3, 0, 10)
+GEMINI_DAILY_VERB_RESERVE_PER_LEVEL = read_int_env("GEMINI_DAILY_VERB_RESERVE_PER_LEVEL", 1, 0, 5)
 GEMINI_DAILY_GRAMMAR_RESERVE = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE", 3, 0, 10)
 GEMINI_DAILY_GRAMMAR_RESERVE_PER_LEVEL = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE_PER_LEVEL", 2, 0, 5)
 GEMINI_BANK_MIN_WORD_PER_LEVEL = read_int_env("GEMINI_BANK_MIN_WORD_PER_LEVEL", 20, 1, 100)
@@ -5307,7 +5308,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "verb",
                 "item_type": "verb",
                 "quota_by_level": verb_quota,
-                "requested_by_level": quota_with_reserve(verb_quota, GEMINI_DAILY_VERB_RESERVE),
+                "requested_by_level": quota_with_reserve_per_level(verb_quota, GEMINI_DAILY_VERB_RESERVE_PER_LEVEL),
             }
         )
     if grammar_quota:
@@ -5744,6 +5745,15 @@ def is_safe_daily_fresh_suru_surface(surface):
     return text_has_cjk_kanji(stem) or text_has_katakana(stem)
 
 
+def is_daily_fresh_polite_phrase_surface(surface):
+    text = simple_text(surface).replace(" ", "")
+    if not text:
+        return False
+    if is_safe_daily_fresh_suru_surface(text):
+        return False
+    return text.endswith(("ませんでした", "ません", "ました", "ます"))
+
+
 def verb_pos_allows_candidate(pos):
     text = simple_text(pos)
     if not text:
@@ -5785,7 +5795,7 @@ def audit_verb_candidate(candidate, row=None, log=False):
             "suggested_type": suggested_type,
             "candidate": text,
         }
-        if log and not accepted and reason == "known_non_verb":
+        if log and not accepted and reason in {"known_non_verb", "polite_phrase_not_dictionary_form"}:
             print(
                 "[vocabulary-pool] verb_candidate_rejected "
                 f"candidate={log_safe_text(text)} reason={reason}"
@@ -5802,6 +5812,8 @@ def audit_verb_candidate(candidate, row=None, log=False):
         return audit_result(False, "known_non_verb", "word")
     if is_safe_daily_fresh_suru_surface(text):
         return audit_result(True)
+    if is_daily_fresh_polite_phrase_surface(text):
+        return audit_result(False, "polite_phrase_not_dictionary_form", "phrase")
 
     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
     pos_allowed = verb_pos_allows_candidate(pos)
@@ -10938,10 +10950,76 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 "elapsed_ms": elapsed_ms,
             }, 200
 
+        def log_verb_replacement_status(result, chunk_candidates, chunk_index):
+            if item_type != "verb" or not chunk_candidates:
+                return
+            current_candidate = chunk_candidates[0] if chunk_candidates else {}
+            current_level = simple_text(current_candidate.get("level"))
+            current_key = simple_text(
+                current_candidate.get("d")
+                or current_candidate.get("dictionary_form")
+                or current_candidate.get("normalized_key")
+            )
+            if not current_level:
+                return
+            same_level_reserve = []
+            for future_index in range(chunk_index + 1, len(chunks)):
+                if future_index in completed_chunks:
+                    continue
+                future_candidate = chunks[future_index][0] if chunks[future_index] else {}
+                if simple_text(future_candidate.get("level")) == current_level:
+                    same_level_reserve.append(future_candidate)
+            required_for_level = int((step.get("quota_by_level") or {}).get(current_level) or 0)
+            if int(result.get("inserted") or 0) > 0:
+                summary = gemini_daily_batch_summary(daily_batch_id).get("verb", {})
+                selected_for_level = int(summary.get(current_level) or 0)
+                print(
+                    "[verb-replacement] "
+                    f"inserted level={current_level} candidate={log_safe_text(current_key)}"
+                )
+                print(
+                    "[verb-replacement] "
+                    f"reserve_remaining level={current_level} count={len(same_level_reserve)}"
+                )
+                if required_for_level > 0 and selected_for_level >= required_for_level:
+                    print(
+                        "[verb-replacement] "
+                        f"level_quota_satisfied level={current_level} selected={selected_for_level} required={required_for_level}"
+                    )
+                return
+            if int(result.get("candidate_rejected") or 0) <= 0:
+                return
+            reason = result.get("rejection_reason") or "rejected_by_gemini"
+            print(
+                "[verb-replacement] "
+                f"failed_candidate={log_safe_text(current_key)} level={current_level} reason={reason}"
+            )
+            if same_level_reserve:
+                next_reserve = same_level_reserve[0]
+                next_key = simple_text(
+                    next_reserve.get("d")
+                    or next_reserve.get("dictionary_form")
+                    or next_reserve.get("normalized_key")
+                )
+                print(
+                    "[verb-replacement] "
+                    f"use_reserve level={current_level} candidate={log_safe_text(next_key)}"
+                )
+                print(
+                    "[verb-replacement] "
+                    f"reserve_remaining level={current_level} count={len(same_level_reserve)}"
+                )
+            else:
+                print(
+                    "[verb-replacement] "
+                    f"reserve_exhausted level={current_level} missing=1"
+                )
+
         def enrich_candidate_chunk(chunk_candidates, chunk_label):
             if item_type == "verb":
                 audited_candidates = []
                 rejected_before_gemini = 0
+                last_rejection_reason = ""
                 for candidate in chunk_candidates:
                     audit = audit_verb_candidate(candidate, log=True)
                     if audit.get("accepted"):
@@ -10950,6 +11028,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     rejected_before_gemini += 1
                     candidate_text = candidate.get("d") or candidate.get("normalized_key") or audit.get("candidate")
                     reason = audit.get("reason") or "not_verb"
+                    last_rejection_reason = reason
                     suggested_type = audit.get("suggested_type") or "word"
                     print(
                         "[gemini-bank] candidate_rejected "
@@ -10967,6 +11046,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         "skipped": len(chunk_candidates),
                         "duplicate": 0,
                         "candidate_rejected": rejected_before_gemini,
+                        "rejection_reason": last_rejection_reason or "local_audit_rejected",
                     }
                 chunk_candidates = audited_candidates
             chunk_candidates_by_level = daily_fresh_candidates_by_level(chunk_candidates)
@@ -11040,15 +11120,16 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         "[gemini-bank] candidate_rejected_by_gemini "
                         f"item_type=verb candidate={log_safe_text(rejected_candidate)}"
                     )
-                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": len(chunk_candidates)}
+                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": len(chunk_candidates), "rejection_reason": "rejected_by_gemini"}
             if not chunk_items and item_type == "verb":
                 rejected_count = len(rejected_items) or int(match_stats.get("invalid_pos") or 0) or len(chunk_candidates)
+                rejection_reason = "rejected_by_gemini" if rejected_items else "candidate_rejected_or_invalid"
                 print(
                     "[gemini-bank] verb_chunk_skipped "
                     f"pack={pack_type} chunk={chunk_label} reason=candidate_rejected_or_invalid "
                     f"rejected={rejected_count}"
                 )
-                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": rejected_count}
+                return {"inserted": 0, "skipped": len(chunk_candidates), "duplicate": 0, "candidate_rejected": rejected_count, "rejection_reason": rejection_reason}
             if not chunk_items and item_type == "word":
                 print(
                     "[gemini-bank] word_chunk_skipped "
@@ -11180,6 +11261,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             result = enrich_candidate_chunk(chunk_candidates, str(chunk_index))
             inserted_total += int(result.get("inserted") or 0)
             skipped_total += int(result.get("skipped") or 0)
+            log_verb_replacement_status(result, chunk_candidates, chunk_index)
             completed_chunks.add(chunk_index)
             has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
             if item_type == "grammar" and int(result.get("inserted") or 0) > 0:
@@ -11285,6 +11367,12 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 ), 200
             if item_type in {"word", "verb"} and reason in {"json_parse_error", "json_truncated", "timeout", "unknown_error"}:
                 warning = f"{item_type}_chunk_skipped:{reason}"
+                if item_type == "verb":
+                    log_verb_replacement_status(
+                        {"inserted": 0, "candidate_rejected": len(chunk_candidates), "rejection_reason": reason},
+                        chunk_candidates,
+                        chunk_index,
+                    )
                 completed_chunks.add(chunk_index)
                 has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
                 pack_state.update(
