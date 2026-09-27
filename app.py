@@ -5520,6 +5520,21 @@ DAILY_FRESH_NON_VERB_SURFACES = {
     "安全",
     "普通",
     "同じ",
+    "お早う",
+    "おはよう",
+    "お目出度う",
+    "おめでとう",
+    "ありがとう",
+    "すみません",
+    "いただきます",
+    "ごちそうさま",
+    "こんにちは",
+    "こんばんは",
+    "さようなら",
+    "お邪魔します",
+    "お願いします",
+    "失礼します",
+    "ございます",
 }
 DAILY_FRESH_VERB_ALLOWED_POS_TOKENS = {
     "verb",
@@ -5737,12 +5752,13 @@ def is_safe_daily_fresh_suru_surface(surface):
     text = simple_text(surface)
     if text == "する":
         return True
-    if not text.endswith("する"):
-        return False
-    stem = text[: -len("する")]
-    if not stem:
-        return False
-    return text_has_cjk_kanji(stem) or text_has_katakana(stem)
+    if text.endswith("ずる"):
+        stem = text[: -len("ずる")]
+        return bool(stem)
+    if text.endswith("する"):
+        stem = text[: -len("する")]
+        return bool(stem)
+    return False
 
 
 def is_daily_fresh_polite_phrase_surface(surface):
@@ -5853,13 +5869,17 @@ def is_daily_fresh_word_pool_row(row):
     surface = vocabulary_pool_candidate_surface(row)
     if has_variant_separator(surface):
         return False
+    if is_safe_daily_fresh_suru_surface(surface):
+        return False
+    if looks_like_daily_fresh_verb_surface(surface):
+        return False
     pos = first_text(row, ["part_of_speech", "pos"]).strip()
     pos_lower = pos.lower()
+    if pos in DAILY_FRESH_WORD_ALLOWED_POS or pos_lower in DAILY_FRESH_WORD_ALLOWED_POS:
+        return True
     if "動詞" in pos or pos_lower in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
         return False
-    if not pos and looks_like_daily_fresh_verb_surface(surface):
-        return False
-    return pos in DAILY_FRESH_WORD_ALLOWED_POS or pos_lower in DAILY_FRESH_WORD_ALLOWED_POS
+    return False
 
 
 def word_pos_allows_enriched_item(pos):
@@ -6989,6 +7009,263 @@ def daily_fresh_candidates_by_level(candidates):
     return grouped
 
 
+def daily_fresh_candidate_identity(candidate, item_type):
+    candidate = candidate if isinstance(candidate, dict) else {}
+    if item_type == "verb":
+        surface = candidate.get("d") or candidate.get("dictionary_form") or candidate.get("normalized_key")
+    elif item_type == "grammar":
+        surface = candidate.get("grammar_key") or candidate.get("k") or candidate.get("pattern") or candidate.get("normalized_key")
+    else:
+        surface = candidate.get("w") or candidate.get("word") or candidate.get("normalized_key")
+    return normalize_vocab_key(surface)
+
+
+def daily_fresh_candidate_display(candidate, item_type):
+    candidate = candidate if isinstance(candidate, dict) else {}
+    if item_type == "verb":
+        return simple_text(candidate.get("d") or candidate.get("dictionary_form") or candidate.get("normalized_key"))
+    if item_type == "grammar":
+        return simple_text(candidate.get("grammar_key") or candidate.get("k") or candidate.get("pattern") or candidate.get("normalized_key"))
+    return simple_text(candidate.get("w") or candidate.get("word") or candidate.get("normalized_key"))
+
+
+def normalize_daily_fresh_quota_by_level(quota_by_level, item_type):
+    normalized = {}
+    for level, count in (quota_by_level or {}).items():
+        normalized_level = normalize_gemini_bank_level(level, item_type)
+        value = int(count or 0)
+        if normalized_level and value > 0:
+            normalized[normalized_level] = value
+    return normalized
+
+
+def ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type="", pack_type=""):
+    if not isinstance(candidate_plan, dict):
+        return {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
+    item_type = str(item_type or "").strip().lower()
+    quota = normalize_daily_fresh_quota_by_level(quota_by_level, item_type)
+    if candidate_plan.get("primary_reserve_contract_version") == 1:
+        return candidate_plan
+
+    all_by_level = candidate_plan.get("candidates_by_level") if isinstance(candidate_plan.get("candidates_by_level"), dict) else {}
+    if not all_by_level:
+        all_by_level = daily_fresh_candidates_by_level(candidate_plan.get("items") or [])
+
+    primary_by_level = {}
+    reserve_by_level = {}
+    primary_items = []
+    for level, candidates in all_by_level.items():
+        normalized_level = normalize_gemini_bank_level(level, item_type)
+        candidate_list = list(candidates or [])
+        required = int(quota.get(normalized_level) or 0)
+        primary = candidate_list[:required]
+        reserve = candidate_list[required:]
+        if primary:
+            primary_by_level[normalized_level] = primary
+            primary_items.extend(primary)
+        if reserve:
+            reserve_by_level[normalized_level] = reserve
+
+    total_required = sum(quota.values())
+    if item_type == "word" and len(primary_items) < total_required:
+        remaining = total_required - len(primary_items)
+        for level in list(reserve_by_level.keys()):
+            if remaining <= 0:
+                break
+            if level == "SNS":
+                continue
+            while reserve_by_level.get(level) and remaining > 0:
+                candidate = reserve_by_level[level].pop(0)
+                primary_by_level.setdefault(level, []).append(candidate)
+                primary_items.append(candidate)
+                remaining -= 1
+
+    reserve_items = []
+    for candidates in reserve_by_level.values():
+        reserve_items.extend(candidates or [])
+    effective_quota_by_level = {
+        level: len(candidates or [])
+        for level, candidates in primary_by_level.items()
+        if len(candidates or []) > 0
+    }
+    primary_missing = []
+    if item_type == "word":
+        if len(primary_items) < total_required:
+            primary_missing.append(
+                {
+                    "level": "word",
+                    "requested": total_required,
+                    "available": len(primary_items),
+                    "remaining": total_required - len(primary_items),
+                }
+            )
+    else:
+        for level, required in quota.items():
+            available = len(primary_by_level.get(level) or [])
+            if available < required:
+                primary_missing.append(
+                    {
+                        "level": level,
+                        "requested": required,
+                        "available": available,
+                        "remaining": required - available,
+                    }
+                )
+    candidate_plan = {
+        **candidate_plan,
+        "primary_reserve_contract_version": 1,
+        "all_candidates_by_level": all_by_level,
+        "primary_candidates_by_level": primary_by_level,
+        "reserve_candidates_by_level": reserve_by_level,
+        "effective_quota_by_level": effective_quota_by_level,
+        "primary_items": primary_items,
+        "reserve_items": reserve_items,
+        "items": primary_items,
+        "missing": primary_missing,
+    }
+    print(
+        "[daily-fresh-candidates] primary_reserve "
+        f"pack={pack_type or item_type} item_type={item_type} "
+        f"primary={len(primary_items)} reserve={len(reserve_items)}"
+    )
+    print(
+        "[daily-fresh-candidates] primary_levels="
+        f"{ {level: len(items) for level, items in primary_by_level.items()} } "
+        f"reserve_levels={ {level: len(items) for level, items in reserve_by_level.items()} }"
+    )
+    return candidate_plan
+
+
+def daily_fresh_replacement_prefix(item_type):
+    if item_type == "verb":
+        return "verb-replacement"
+    if item_type == "grammar":
+        return "grammar-replacement"
+    return "word-replacement"
+
+
+def active_pending_count_for_level(candidate_items, completed_chunks, chunk_size, level):
+    pending = 0
+    for index, chunk in enumerate(chunked_list(candidate_items, chunk_size)):
+        if index in completed_chunks:
+            continue
+        pending += sum(1 for candidate in chunk if simple_text(candidate.get("level")) == level)
+    return pending
+
+
+def activate_daily_fresh_reserve_candidates(
+    candidate_plan,
+    item_type,
+    quota_by_level,
+    daily_batch_id,
+    completed_chunks,
+    chunk_size,
+    pack_type="",
+    last_result=None,
+    last_chunk_candidates=None,
+):
+    if not isinstance(candidate_plan, dict):
+        return 0
+    item_type = str(item_type or "").strip().lower()
+    quota = normalize_daily_fresh_quota_by_level(
+        candidate_plan.get("effective_quota_by_level") or quota_by_level,
+        item_type,
+    )
+    if not quota:
+        return 0
+    active_items = list(candidate_plan.get("items") or [])
+    reserve_by_level = {
+        normalize_gemini_bank_level(level, item_type): list(candidates or [])
+        for level, candidates in (candidate_plan.get("reserve_candidates_by_level") or {}).items()
+    }
+    active_keys = {
+        daily_fresh_candidate_identity(candidate, item_type)
+        for candidate in active_items
+        if daily_fresh_candidate_identity(candidate, item_type)
+    }
+    summary = gemini_daily_batch_summary(daily_batch_id).get(item_type, {})
+    prefix = daily_fresh_replacement_prefix(item_type)
+    result = last_result if isinstance(last_result, dict) else {}
+    failed_by_level = {}
+    if int(result.get("inserted") or 0) <= 0:
+        reason = result.get("rejection_reason") or result.get("warning") or result.get("error") or "candidate_rejected_or_invalid"
+        for candidate in last_chunk_candidates or []:
+            level = simple_text(candidate.get("level"))
+            if level:
+                failed_by_level.setdefault(level, []).append((candidate, reason))
+
+    added = 0
+    exhausted_by_level = dict(candidate_plan.get("reserve_exhausted_by_level") or {})
+    for level, required in quota.items():
+        required = int(required or 0)
+        if required <= 0:
+            continue
+        selected = int(summary.get(level) or 0)
+        if selected >= required:
+            print(
+                "[level-quota] satisfied "
+                f"item_type={item_type} level={level} selected={selected} "
+                f"required={required} skip_remaining_reserve=true"
+            )
+            continue
+        pending = active_pending_count_for_level(active_items, completed_chunks, chunk_size, level)
+        if failed_by_level.get(level):
+            failed_candidate, reason = failed_by_level[level][0]
+            print(
+                f"[{prefix}] failed_candidate={log_safe_text(daily_fresh_candidate_display(failed_candidate, item_type))} "
+                f"level={level} reason={reason}"
+            )
+        while selected + pending < required:
+            reserve_list = reserve_by_level.get(level) or []
+            next_candidate = None
+            while reserve_list:
+                candidate = reserve_list.pop(0)
+                key = daily_fresh_candidate_identity(candidate, item_type)
+                if not key or key in active_keys:
+                    continue
+                next_candidate = candidate
+                active_keys.add(key)
+                break
+            reserve_by_level[level] = reserve_list
+            if not next_candidate:
+                exhausted_by_level[level] = True
+                print(f"[{prefix}] reserve_exhausted level={level} missing={required - selected - pending}")
+                break
+            active_items.append(next_candidate)
+            pending += 1
+            added += 1
+            print(
+                f"[{prefix}] use_reserve level={level} "
+                f"candidate={log_safe_text(daily_fresh_candidate_display(next_candidate, item_type))}"
+            )
+            print(f"[{prefix}] reserve_remaining level={level} count={len(reserve_list)}")
+        if selected + pending >= required and selected < required:
+            print(
+                f"[{prefix}] reserve_pending level={level} "
+                f"selected={selected} pending={pending} required={required}"
+            )
+
+    if added:
+        candidate_plan["items"] = active_items
+        candidate_plan["primary_items"] = active_items
+        candidate_plan["reserve_candidates_by_level"] = reserve_by_level
+        candidate_plan["reserve_items"] = [
+            candidate
+            for candidates in reserve_by_level.values()
+            for candidate in (candidates or [])
+        ]
+        candidate_plan["active_candidates_by_level"] = daily_fresh_candidates_by_level(active_items)
+        candidate_plan["activated_reserve_keys"] = sorted(active_keys)
+        print(
+            "[daily-fresh-candidates] reserve_activated "
+            f"pack={pack_type or item_type} item_type={item_type} added={added} "
+            f"active={len(active_items)} reserve_remaining={len(candidate_plan.get('reserve_items') or [])}"
+        )
+    if exhausted_by_level:
+        candidate_plan["reserve_exhausted_by_level"] = exhausted_by_level
+    return added
+
+
 def cached_daily_fresh_candidate_plan(pack_state):
     if not isinstance(pack_state, dict):
         return None
@@ -6999,13 +7276,27 @@ def cached_daily_fresh_candidate_plan(pack_state):
     candidates_by_level = plan.get("candidates_by_level")
     if not isinstance(items, list) or not isinstance(candidates_by_level, dict):
         return None
-    return {
+    cached = {
         "candidates_by_level": candidates_by_level,
         "items": items,
         "missing": plan.get("missing") if isinstance(plan.get("missing"), list) else [],
         "fetch_errors": plan.get("fetch_errors") if isinstance(plan.get("fetch_errors"), list) else [],
         "skipped_bad_encoding": int(plan.get("skipped_bad_encoding") or 0),
     }
+    for key in [
+        "primary_reserve_contract_version",
+        "all_candidates_by_level",
+        "primary_candidates_by_level",
+        "reserve_candidates_by_level",
+        "effective_quota_by_level",
+        "primary_items",
+        "reserve_items",
+        "activated_reserve_keys",
+        "reserve_exhausted_by_level",
+    ]:
+        if key in plan:
+            cached[key] = plan.get(key)
+    return cached
 
 
 SIMPLIFIED_ZH_WARNING_CHARS = set("发表会议会说过这为与国门问题实学体广区医药后时个")
@@ -7126,7 +7417,12 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
             for level, count in (step.get("requested_by_level") or {}).items()
             if int(count or 0) > 0
         }
-        requested_total = sum(requested_by_level.values())
+        quota_by_level = {
+            str(level): int(count or 0)
+            for level, count in (step.get("quota_by_level") or {}).items()
+            if int(count or 0) > 0
+        }
+        requested_total = sum(quota_by_level.values()) or sum(requested_by_level.values())
         best_effort = bool(step.get("best_effort"))
         cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
         if not field_name:
@@ -7163,6 +7459,7 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
             recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_DAILY_CANDIDATE_RECENT_DAYS, material_date=material_date)
             recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
             candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+            candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
         elif item_type == "grammar":
             inventory = grammar_pool_candidate_inventory()
             inventory_levels = inventory.get("by_level") or {}
@@ -7178,6 +7475,7 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
             recent_keys = get_recent_used_grammar_keys(material_date, days=GEMINI_BANK_RECENT_EXCLUSION_DAYS)
             try:
                 candidate_plan = select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type=pack_type)
+                candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
             except Exception as exc:
                 warning = "grammar_pool_unavailable"
                 candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
@@ -7211,9 +7509,9 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
         candidate_count = len(candidate_plan.get("items") or [])
         chunk_size = daily_fresh_enrich_chunk_size(item_type)
         chunk_count = len(chunked_list(candidate_plan.get("items") or [], chunk_size))
-        quota_count = sum(int(count or 0) for count in (step.get("quota_by_level") or {}).values())
+        quota_count = sum(int(count or 0) for count in (quota_by_level or {}).values())
         planned_call_count += chunk_count
-        reserve_candidate_count += max(0, candidate_count - quota_count)
+        reserve_candidate_count += len(candidate_plan.get("reserve_items") or [])
         pack_state = {
             **pack_state,
             "item_type": item_type,
@@ -10798,6 +11096,12 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         job = load_gemini_generation_job(job_id) or job
         cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
         candidate_plan_for_response = cached_daily_fresh_candidate_plan(pack_state) or {"items": []}
+        candidate_plan_for_response = ensure_daily_fresh_candidate_plan_contract(
+            candidate_plan_for_response,
+            step.get("quota_by_level") or {},
+            item_type,
+            pack_type,
+        )
         candidate_items_for_response = list(candidate_plan_for_response.get("items") or [])
         chunk_size_for_response = daily_fresh_enrich_chunk_size(item_type)
         chunks_for_response = chunked_list(candidate_items_for_response, chunk_size_for_response)
@@ -10827,6 +11131,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         }, 200
 
     requested_by_level = {str(level): int(count or 0) for level, count in (step.get("requested_by_level") or {}).items() if int(count or 0) > 0}
+    quota_by_level = {str(level): int(count or 0) for level, count in (step.get("quota_by_level") or {}).items() if int(count or 0) > 0}
     levels = list(requested_by_level.keys())
     best_effort = bool(step.get("best_effort"))
     max_attempts = 1 if best_effort else 2
@@ -10847,7 +11152,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     if item_type in {"word", "verb"}:
         cached_plan = cached_daily_fresh_candidate_plan(pack_state)
         if cached_plan:
-            candidate_plan = cached_plan
+            candidate_plan = ensure_daily_fresh_candidate_plan_contract(cached_plan, quota_by_level, item_type, pack_type)
             print(
                 f"[daily-fresh-candidates] using_cached_candidates job_id={job_id} "
                 f"pack={pack_type} item_type={item_type} candidate_count={len(candidate_plan.get('items') or [])}"
@@ -10888,6 +11193,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_DAILY_CANDIDATE_RECENT_DAYS, material_date=material_date)
             recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
             candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+            candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
         if candidate_plan.get("fetch_errors"):
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             update_gemini_generation_job(
@@ -10967,7 +11273,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     if item_type == "grammar":
         cached_plan = cached_daily_fresh_candidate_plan(pack_state)
         if cached_plan:
-            candidate_plan = cached_plan
+            candidate_plan = ensure_daily_fresh_candidate_plan_contract(cached_plan, quota_by_level, item_type, pack_type)
             print(
                 f"[daily-fresh-candidates] using_cached_candidates job_id={job_id} "
                 f"pack={pack_type} item_type={item_type} candidate_count={len(candidate_plan.get('items') or [])}"
@@ -10986,6 +11292,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             )
             try:
                 candidate_plan = select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type=pack_type)
+                candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
             except Exception as exc:
                 warning = "grammar_pool_unavailable"
                 candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
@@ -11031,6 +11338,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         chunk_size = daily_fresh_enrich_chunk_size(item_type)
         candidate_items = list(candidate_plan.get("items") or [])
         chunks = chunked_list(candidate_items, chunk_size)
+        pack_state["candidate_plan"] = candidate_plan
         completed_chunks = {
             int(index)
             for index in (pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [])
@@ -11055,6 +11363,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "completed_chunks": sorted(completed_chunks),
                     "inserted": inserted_total,
                     "skipped": skipped_total,
+                    "candidate_plan": candidate_plan,
                 }
             )
             persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_candidates_selected")
@@ -11440,20 +11749,28 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             result = enrich_candidate_chunk(chunk_candidates, str(chunk_index))
             inserted_total += int(result.get("inserted") or 0)
             skipped_total += int(result.get("skipped") or 0)
-            log_verb_replacement_status(result, chunk_candidates, chunk_index)
             completed_chunks.add(chunk_index)
+            activate_daily_fresh_reserve_candidates(
+                candidate_plan,
+                item_type,
+                quota_by_level,
+                daily_batch_id,
+                completed_chunks,
+                chunk_size,
+                pack_type=pack_type,
+                last_result=result,
+                last_chunk_candidates=chunk_candidates,
+            )
+            candidate_items = list(candidate_plan.get("items") or [])
+            chunks = chunked_list(candidate_items, chunk_size)
             has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
             if item_type == "grammar" and int(result.get("inserted") or 0) > 0:
                 inserted_candidate = chunk_candidates[0] if chunk_candidates else {}
                 inserted_level = simple_text(inserted_candidate.get("level"))
                 inserted_key = simple_text(inserted_candidate.get("grammar_key") or inserted_candidate.get("k") or inserted_candidate.get("normalized_key"))
                 same_level_remaining = 0
-                for future_index in range(chunk_index + 1, len(chunks)):
-                    if future_index in completed_chunks:
-                        continue
-                    future_candidate = chunks[future_index][0] if chunks[future_index] else {}
-                    if simple_text(future_candidate.get("level")) == inserted_level:
-                        same_level_remaining += 1
+                reserve_by_level = candidate_plan.get("reserve_candidates_by_level") if isinstance(candidate_plan.get("reserve_candidates_by_level"), dict) else {}
+                same_level_remaining = len(reserve_by_level.get(inserted_level) or [])
                 required_for_level = int((step.get("quota_by_level") or {}).get(inserted_level) or 0)
                 selected_for_level = select_gemini_bank_items_by_batch(
                     "grammar",
@@ -11490,6 +11807,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "candidate_source": "grammar_pool" if item_type == "grammar" else "vocabulary_pool",
                     "candidate_count": len(candidate_plan.get("items") or []),
                     "candidate_missing": candidate_plan.get("missing") or [],
+                    "candidate_plan": candidate_plan,
                 }
             )
             persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_chunk_{chunk_index}_done")
