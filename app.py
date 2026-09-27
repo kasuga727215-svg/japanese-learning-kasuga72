@@ -6725,6 +6725,10 @@ def grammar_pool_candidate_key(row):
 def build_daily_fresh_grammar_candidate_payload(row, level):
     key = first_text(row, ["grammar_key", "pattern", "display_name"])
     pattern = first_text(row, ["pattern", "display_name", "grammar_key"])
+    try:
+        used_count = int(row.get("used_count") or 0)
+    except (TypeError, ValueError):
+        used_count = 0
     return {
         "level": level,
         "grammar_key": key,
@@ -6736,6 +6740,9 @@ def build_daily_fresh_grammar_candidate_payload(row, level):
         "category": first_text(row, ["category"]) or "basic",
         "normalized_key": normalize_vocab_key(key),
         "pool_id": row.get("id"),
+        "rotation_used_count": used_count,
+        "rotation_last_used_at": first_text(row, ["last_used_at"]),
+        "cycle_no": used_count + 1,
     }
 
 
@@ -6816,23 +6823,18 @@ def select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_
         for level, count in (requested_by_level or {}).items()
         if int(count or 0) > 0
     }
-    existing_bank_keys = daily_fresh_existing_bank_keys("grammar", requested_by_level.keys())
-    excluded_keys = (
-        set(existing_bank_keys)
-        | {normalize_vocab_key(key) for key in (recent_keys or set()) if normalize_vocab_key(key)}
-        | gemini_daily_duplicate_blacklist_keys()
-    )
+    print("[grammar-pool] selection_mode=rotation")
     selected_by_level = {}
     selected_items = []
     missing = []
     seen = set()
 
     def collect_candidates_for_level(level, needed):
-        rows = fetch_daily_fresh_grammar_candidate_rows(level, max(needed * 4, 4), excluded_keys | seen)
+        rows = fetch_daily_fresh_grammar_candidate_rows(level, max(needed * 4, 4), seen)
         candidates = []
         for row in rows:
             key = grammar_pool_candidate_key(row)
-            if not key or key in excluded_keys or key in seen:
+            if not key or key in seen:
                 continue
             candidate = build_daily_fresh_grammar_candidate_payload(row, level)
             candidates.append(candidate)
@@ -6847,6 +6849,20 @@ def select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_
         selected_by_level[level] = candidates
         if len(candidates) < needed:
             missing.append({"level": level, "requested": needed, "available": len(candidates)})
+        first = candidates[0] if candidates else {}
+        reused = int(first.get("rotation_used_count") or 0) > 0
+        if first:
+            print(
+                "[grammar-pool] "
+                f"level={level} selected=1 rotation_candidates={len(candidates)} "
+                f"reused={str(reused).lower()} cycle_no={first.get('cycle_no') or 1}"
+            )
+            print(
+                "[grammar-pool] "
+                f"level={level} candidate={log_safe_text(first.get('grammar_key') or first.get('k') or '')}"
+            )
+            if reused:
+                print("[grammar-pool] rotation_reason=fresh_cycle_exhausted")
 
     level_counts = {level: len(items) for level, items in selected_by_level.items()}
     selected_keys = [candidate.get("grammar_key") for candidate in selected_items]
@@ -7684,6 +7700,161 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                     inserted += 1
             conn.commit()
     return {"inserted": inserted, "skipped": skipped, "duplicate": duplicate}
+
+
+def grammar_candidate_bank_lookup_keys(candidate):
+    keys = set()
+    for field in ("grammar_key", "k", "pattern", "display_name", "normalized_key"):
+        value = simple_text((candidate or {}).get(field))
+        if not value:
+            continue
+        keys.add(value)
+        normalized = normalize_vocab_key(value)
+        if normalized:
+            keys.add(normalized)
+    return {key for key in keys if key}
+
+
+def tag_existing_grammar_bank_item_for_daily_batch(candidate, daily_batch_id="", generated_for_date=None):
+    keys = sorted(grammar_candidate_bank_lookup_keys(candidate))
+    if not keys:
+        return {"inserted": 0, "skipped": 1, "duplicate": 0, "reused": 0}
+    ensure_gemini_item_bank_store()
+    now = utc_now_iso()
+    daily_batch_id = simple_text(daily_batch_id)
+    generated_for_date = make_json_safe(canonical_material_date(generated_for_date or "")) if generated_for_date else None
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, normalized_key, jlpt_level, status
+                    FROM gemini_item_bank
+                    WHERE item_type = 'grammar'
+                      AND normalized_key = ANY(%s)
+                      AND COALESCE(status, '') <> 'rejected'
+                    ORDER BY COALESCE(used_count, 0) ASC, last_used_at ASC NULLS FIRST, id ASC
+                    LIMIT 1
+                    """,
+                    (keys,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0}
+                cur.execute(
+                    """
+                    UPDATE gemini_item_bank
+                    SET status = 'unused',
+                        daily_batch_id = %s,
+                        generated_for_date = %s,
+                        generated_source = 'grammar_rotation_reuse',
+                        updated_at = %s
+                    WHERE id = %s
+                    """,
+                    (daily_batch_id, generated_for_date, now, row[0]),
+                )
+            conn.commit()
+        print(
+            "[grammar-pool] rotation_reuse "
+            f"candidate={log_safe_text((candidate or {}).get('grammar_key') or (candidate or {}).get('k') or '')} "
+            f"bank_key={log_safe_text(row[1])} level={row[2]} gemini_call=false"
+        )
+        return {"inserted": 1, "skipped": 0, "duplicate": 0, "reused": 1}
+    with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+        conn.row_factory = sqlite3.Row
+        placeholders = ",".join(["?"] * len(keys))
+        row = conn.execute(
+            f"""
+            SELECT id, normalized_key, jlpt_level, status
+            FROM gemini_item_bank
+            WHERE item_type = 'grammar'
+              AND normalized_key IN ({placeholders})
+              AND COALESCE(status, '') <> 'rejected'
+            ORDER BY COALESCE(used_count, 0) ASC, last_used_at ASC, id ASC
+            LIMIT 1
+            """,
+            tuple(keys),
+        ).fetchone()
+        if not row:
+            return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0}
+        conn.execute(
+            """
+            UPDATE gemini_item_bank
+            SET status = 'unused',
+                daily_batch_id = ?,
+                generated_for_date = ?,
+                generated_source = 'grammar_rotation_reuse',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (daily_batch_id, generated_for_date, now, row["id"]),
+        )
+        conn.commit()
+    print(
+        "[grammar-pool] rotation_reuse "
+        f"candidate={log_safe_text((candidate or {}).get('grammar_key') or (candidate or {}).get('k') or '')} "
+        f"bank_key={log_safe_text(row['normalized_key'])} level={row['jlpt_level']} gemini_call=false"
+    )
+    return {"inserted": 1, "skipped": 0, "duplicate": 0, "reused": 1}
+
+
+def mark_grammar_pool_rotation_used(selected_grammar):
+    keys = set()
+    for row in selected_grammar or []:
+        key = simple_text(row.get("normalized_key"))
+        if key:
+            keys.add(key)
+        payload = gemini_job_json(row.get("payload_json"), {})
+        if isinstance(payload, dict):
+            for field in ("grammar_key", "k", "pattern", "display_name"):
+                value = simple_text(payload.get(field))
+                if not value:
+                    continue
+                keys.add(value)
+                normalized = normalize_vocab_key(value)
+                if normalized:
+                    keys.add(normalized)
+    keys = sorted({key for key in keys if key})
+    if not keys:
+        return 0
+    ensure_grammar_pool_store()
+    now = utc_now_iso()
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE grammar_pool
+                    SET used_count = COALESCE(used_count, 0) + 1,
+                        last_used_at = %s,
+                        updated_at = %s
+                    WHERE grammar_key = ANY(%s)
+                       OR pattern = ANY(%s)
+                       OR display_name = ANY(%s)
+                    """,
+                    (now, now, keys, keys, keys),
+                )
+                updated = cur.rowcount
+            conn.commit()
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            placeholders = ",".join(["?"] * len(keys))
+            cur = conn.execute(
+                f"""
+                UPDATE grammar_pool
+                SET used_count = COALESCE(used_count, 0) + 1,
+                    last_used_at = ?,
+                    updated_at = ?
+                WHERE grammar_key IN ({placeholders})
+                   OR pattern IN ({placeholders})
+                   OR display_name IN ({placeholders})
+                """,
+                (now, now, *keys, *keys, *keys),
+            )
+            updated = cur.rowcount
+            conn.commit()
+    print(f"[grammar-pool] rotation_mark_used count={int(updated or 0)}")
+    return int(updated or 0)
 
 
 def ensure_gemini_bank_level_capacity(item_type, level, min_unused_per_level, requested_count=None):
@@ -11049,6 +11220,14 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         "rejection_reason": last_rejection_reason or "local_audit_rejected",
                     }
                 chunk_candidates = audited_candidates
+            if item_type == "grammar" and chunk_candidates:
+                reuse_result = tag_existing_grammar_bank_item_for_daily_batch(
+                    chunk_candidates[0],
+                    daily_batch_id=daily_batch_id,
+                    generated_for_date=material_date,
+                )
+                if int(reuse_result.get("reused") or 0) > 0:
+                    return reuse_result
             chunk_candidates_by_level = daily_fresh_candidates_by_level(chunk_candidates)
             requested_count = len(chunk_candidates)
             prompt = build_gemini_daily_enrich_prompt(pack_type, item_type, chunk_candidates_by_level)
@@ -12114,6 +12293,10 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "grammar": dict(Counter(row.get("jlpt_level", "") for row in selected_grammar if row.get("jlpt_level"))),
         }
         print(f"[gemini-finalize] initial selected_counts_by_level={initial_counts}")
+        print(
+            "[gemini-finalize] grammar_rotation_selected "
+            + " ".join(f"{level}={initial_counts.get('grammar', {}).get(level, 0)}" for level in LEVELS)
+        )
         requested_words = int(settings.get("vocab_count") or 0)
         requested_verbs = int(settings.get("verb_count") or 0)
         requested_grammar = int(sum(grammar_quota.values()))
@@ -12136,7 +12319,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         fresh_shortfall = {
             item_type: values.get("needed", 0)
             for item_type, values in top_up.items()
-            if isinstance(values, dict) and int(values.get("needed") or 0) > 0
+            if item_type in {"word", "verb"} and isinstance(values, dict) and int(values.get("needed") or 0) > 0
         }
         if fresh_shortfall and not ALLOW_DAILY_FRESH_BANK_FALLBACK:
             print(
@@ -12264,6 +12447,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
                 "grammar_quota": grammar_quota,
                 "grammar_total_target": FIXED_DAILY_GRAMMAR_COUNT,
                 "grammar_total_actual": len(material.get("grammar_points") or []),
+                "grammar_selection_mode": "level_rotation",
                 "top_up": top_up,
                 "bank_fallback_allowed": ALLOW_DAILY_FRESH_BANK_FALLBACK,
                 "daily_fresh_count": daily_fresh_counts,
@@ -12299,6 +12483,7 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         )
         material["metadata"]["selection_log_warnings"] = save_info.get("selection_log_warnings", [])
         mark_gemini_bank_items_used(reserved)
+        mark_grammar_pool_rotation_used(selected_grammar)
         print(f"[gemini-bank] mark_used count={len(reserved)}")
         update_gemini_generation_job(job_id, status="completed", current_stage="finalized", error_message="")
         invalidate_dashboard_cache("gemini staged material generated")
