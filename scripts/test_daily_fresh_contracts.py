@@ -1,7 +1,10 @@
 import copy
 import datetime as dt
 import importlib.util
+import json
+import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -34,6 +37,15 @@ def build_plan(levels, quota_by_level, reserve_per_level, item_type, seed=""):
     return {"candidates_by_level": candidates_by_level, "items": [item for row in candidates_by_level.values() for item in row], "missing": []}
 
 
+def quota_for_total(levels, total):
+    quota = {level: 0 for level in levels}
+    index = 0
+    while sum(quota.values()) < total:
+        quota[levels[index % len(levels)]] += 1
+        index += 1
+    return quota
+
+
 def assert_primary_reserve_contract():
     levels = ["N5", "N4", "N3", "N2", "N1"]
     quota = {level: 1 for level in levels}
@@ -44,6 +56,23 @@ def assert_primary_reserve_contract():
         assert len(plan["reserve_items"]) == 10, f"{item_type} reserve should stay inactive"
         assert {level: len(items) for level, items in plan["primary_candidates_by_level"].items()} == quota
         assert {level: len(items) for level, items in plan["reserve_candidates_by_level"].items()} == {level: 2 for level in levels}
+
+
+def assert_word_advanced_required_level_reserve():
+    steps = app.gemini_daily_pack_steps(
+        {
+            "target_levels": ["N5", "N4", "N3", "N2", "N1"],
+            "target_level": "N5",
+            "vocab_count": 8,
+            "verb_count": 5,
+        }
+    )
+    word_advanced = next(step for step in steps if step.get("pack_type") == "word_advanced")
+    quota = word_advanced["quota_by_level"]
+    requested = word_advanced["requested_by_level"]
+    for level, count in quota.items():
+        assert requested.get(level, 0) >= count + app.GEMINI_DAILY_WORD_RESERVE_PER_LEVEL
+    assert requested.get("N1", 0) >= quota.get("N1", 0) + app.GEMINI_DAILY_WORD_RESERVE_PER_LEVEL
 
 
 def assert_verb_filter_contract():
@@ -82,6 +111,10 @@ def assert_word_filter_contract():
     for surface in word_like:
         row = {"surface": surface, "normalized_key": app.normalize_vocab_key(surface), "jlpt_level": "N5", "part_of_speech": "形容動詞"}
         assert app.is_daily_fresh_word_pool_row(row), f"{surface} should remain valid word material"
+    compound_pos = ["名詞・形容動詞", "名詞/形容動詞", "名詞・副詞", "形容動詞・副詞", "名詞・サ変接続"]
+    for pos in compound_pos:
+        assert app.word_pos_allows_enriched_item(pos), f"{pos} should be valid word POS"
+    assert not app.word_pos_allows_enriched_item("動詞")
 
 
 def assert_same_level_reserve_activation_contract():
@@ -125,20 +158,126 @@ def assert_same_level_reserve_activation_contract():
         app.gemini_daily_batch_summary = original_summary
 
 
+def assert_refill_from_source_contract():
+    quota = {"N1": 1}
+    plan = build_plan(["N1"], quota, 0, "word", seed="refill")
+    plan = app.ensure_daily_fresh_candidate_plan_contract(plan, quota, "word", "word_mock")
+    primary = list(plan["items"])
+    original_summary = app.gemini_daily_batch_summary
+    original_fetch = app.fetch_daily_fresh_candidate_rows
+    try:
+        app.gemini_daily_batch_summary = lambda _batch_id: {"word": {"N1": 0}}
+        app.fetch_daily_fresh_candidate_rows = lambda item_type, level, limit, excluded_keys, current_batch_keys=None: [
+            {
+                "id": 1,
+                "surface": "補充語",
+                "normalized_key": app.normalize_vocab_key("補充語"),
+                "jlpt_level": level,
+                "part_of_speech": "名詞",
+                "category": "general",
+                "source": "mock",
+                "status": "active",
+            }
+        ]
+        added = app.activate_daily_fresh_reserve_candidates(
+            plan,
+            "word",
+            quota,
+            "mock-batch",
+            completed_chunks={0},
+            chunk_size=2,
+            pack_type="word_advanced",
+            last_result={"inserted": 0, "candidate_rejected": 1, "rejection_reason": "invalid_pos"},
+            last_chunk_candidates=primary,
+        )
+        assert added == 1
+        assert len(plan["items"]) == 2
+        assert plan["items"][-1]["w"] == "補充語"
+        assert plan["reserve_refill_attempts_by_level"]["N1"] == 1
+    finally:
+        app.gemini_daily_batch_summary = original_summary
+        app.fetch_daily_fresh_candidate_rows = original_fetch
+
+
+def assert_bank_cache_reuse_contract():
+    original_db_url = app.DATABASE_URL
+    original_settings = app.SQLITE_SETTINGS_FILE
+    original_ready = app._GEMINI_BANK_SCHEMA_READY
+    try:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            db_path = str(Path(tmpdir) / "cache-test.sqlite3")
+            app.DATABASE_URL = ""
+            app.SQLITE_SETTINGS_FILE = db_path
+            app._GEMINI_BANK_SCHEMA_READY = False
+            app.ensure_gemini_item_bank_store()
+            payload = {
+                "w": "確認",
+                "r": "かくにん",
+                "m": "確認",
+                "p": "名詞",
+                "l": "N3",
+                "ex": "内容を確認します。",
+                "ex_zh": "確認內容。",
+                "word": "確認",
+                "reading": "かくにん",
+                "meaning": "確認",
+                "part_of_speech": "名詞",
+                "jlpt_level": "N3",
+                "normalized_key": app.normalize_vocab_key("確認"),
+            }
+            now = app.utc_now_iso()
+            with sqlite3.connect(db_path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO gemini_item_bank (
+                        item_type, normalized_key, display_text, reading, jlpt_level, category, source,
+                        status, payload_json, used_count, first_used_at, last_used_at, created_at, updated_at,
+                        daily_batch_id, generated_for_date, generated_source
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?, '', NULL, '')
+                    """,
+                    (
+                        "word",
+                        app.normalize_vocab_key("確認"),
+                        "確認",
+                        "かくにん",
+                        "N3",
+                        "general",
+                        "mock",
+                        "unused",
+                        json.dumps(payload, ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+                conn.commit()
+            result = app.tag_existing_bank_cache_item_for_daily_batch(
+                "word",
+                {"level": "N3", "w": "確認", "normalized_key": app.normalize_vocab_key("確認")},
+                daily_batch_id="mock-batch",
+                generated_for_date="2026-09-01",
+            )
+            assert result["reused"] == 1
+            assert result["gemini_call"] is False
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute("SELECT daily_batch_id, generated_source FROM gemini_item_bank WHERE normalized_key = ?", (app.normalize_vocab_key("確認"),)).fetchone()
+            assert row[0] == "mock-batch"
+            assert row[1] == "word_bank_cache_reuse"
+    finally:
+        app.DATABASE_URL = original_db_url
+        app.SQLITE_SETTINGS_FILE = original_settings
+        app._GEMINI_BANK_SCHEMA_READY = original_ready
+
+
 def simulate_three_days(levels):
     history = {"word": set(), "verb": set()}
     grammar_rotation_seen_by_level = {level: [] for level in levels}
     start = dt.date(2026, 9, 1)
     for day_offset in range(3):
         material_date = start + dt.timedelta(days=day_offset)
-        word_quota = {level: 1 for level in levels}
-        while sum(word_quota.values()) < 8:
-            for level in levels:
-                word_quota[level] += 1
-                if sum(word_quota.values()) >= 8:
-                    break
-        verb_quota = {level: 1 for level in levels[:5]}
-        grammar_quota = {level: 1 for level in levels[:5]}
+        word_quota = quota_for_total(levels, 8)
+        verb_quota = quota_for_total(levels[:5], 5)
+        grammar_quota = quota_for_total(levels[:5], 5)
 
         for item_type, quota in [("word", word_quota), ("verb", verb_quota), ("grammar", grammar_quota)]:
             plan = build_plan(list(quota.keys()), quota, 2, item_type, seed=f"d{day_offset}")
@@ -151,13 +290,14 @@ def simulate_three_days(levels):
                 normalized = app.ensure_daily_fresh_candidate_plan_contract(copy.deepcopy(plan), quota, item_type, f"{item_type}_mock")
                 for row in normalized["items"]:
                     selected_keys.append(app.daily_fresh_candidate_identity(row, item_type))
-                assert len(selected_keys) == sum(quota.values())
+                expected_total = 8 if item_type == "word" else 5
+                assert len(selected_keys) == expected_total
                 assert len(selected_keys) == len(set(selected_keys))
                 history[item_type].update(selected_keys)
             else:
                 normalized = app.ensure_daily_fresh_candidate_plan_contract(copy.deepcopy(plan), quota, item_type, "grammar_mock")
                 selected = normalized["items"]
-                assert len(selected) == sum(quota.values())
+                assert len(selected) == 5
                 assert len(selected) == len({app.daily_fresh_candidate_identity(row, item_type) for row in selected})
                 for row in selected:
                     grammar_rotation_seen_by_level[row["level"]].append((material_date.isoformat(), row["grammar_key"]))
@@ -179,16 +319,38 @@ def assert_three_day_mock_contracts():
             assert grammar_seen[level], f"{name} grammar rotation should select {level}"
 
 
+def assert_grammar_rotation_reuse_contract():
+    quota = {"N5": 5}
+    plan = {
+        "candidates_by_level": {
+            "N5": [candidate("N5", f"n5:grammar_{index % 2}", "grammar") for index in range(7)]
+        },
+        "items": [],
+        "missing": [],
+    }
+    normalized = app.ensure_daily_fresh_candidate_plan_contract(plan, quota, "grammar", "grammar_mock")
+    assert len(normalized["items"]) == 5
+    assert len(normalized["reserve_items"]) == 2
+
+
 def main():
     assert_primary_reserve_contract()
+    assert_word_advanced_required_level_reserve()
     assert_verb_filter_contract()
     assert_word_filter_contract()
     assert_same_level_reserve_activation_contract()
+    assert_refill_from_source_contract()
+    assert_bank_cache_reuse_contract()
+    assert_grammar_rotation_reuse_contract()
     assert_three_day_mock_contracts()
     print("[daily-fresh-contracts] PASS primary_reserve=true")
+    print("[daily-fresh-contracts] PASS word_advanced_required_level_reserve=true")
     print("[daily-fresh-contracts] PASS verb_filter=true")
     print("[daily-fresh-contracts] PASS word_filter=true")
     print("[daily-fresh-contracts] PASS same_level_reserve_activation=true")
+    print("[daily-fresh-contracts] PASS refill_from_source=true")
+    print("[daily-fresh-contracts] PASS bank_cache_reuse=true")
+    print("[daily-fresh-contracts] PASS grammar_rotation_reuse=true")
     print("[daily-fresh-contracts] PASS three_day_mock all_levels=true n5_only=true n1_only=true")
 
 

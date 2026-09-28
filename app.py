@@ -114,6 +114,7 @@ GEMINI_DAILY_WORD_MIN_FRESH = 5
 GEMINI_DAILY_VERB_MIN_FRESH = 3
 ALLOW_DAILY_FRESH_BANK_FALLBACK = os.environ.get("ALLOW_DAILY_FRESH_BANK_FALLBACK", "false").strip().lower() in {"1", "true", "yes", "on"}
 GEMINI_DAILY_WORD_RESERVE = read_int_env("GEMINI_DAILY_WORD_RESERVE", 4, 0, 12)
+GEMINI_DAILY_WORD_RESERVE_PER_LEVEL = read_int_env("GEMINI_DAILY_WORD_RESERVE_PER_LEVEL", 2, 0, 5)
 GEMINI_DAILY_VERB_RESERVE = read_int_env("GEMINI_DAILY_VERB_RESERVE", 3, 0, 10)
 GEMINI_DAILY_VERB_RESERVE_PER_LEVEL = read_int_env("GEMINI_DAILY_VERB_RESERVE_PER_LEVEL", 1, 0, 5)
 GEMINI_DAILY_GRAMMAR_RESERVE = read_int_env("GEMINI_DAILY_GRAMMAR_RESERVE", 3, 0, 10)
@@ -4824,6 +4825,18 @@ def gemini_bank_recent_keys_for_item_type(recent_usage, item_type):
     return {normalize_vocab_key(key) for key in (recent_usage.get(item_type) or set()) if normalize_vocab_key(key)}
 
 
+def gemini_bank_material_history_keys_for_item_type(item_type, material_date=None):
+    if item_type not in {"word", "verb"}:
+        return set()
+    snapshot = gemini_bank_material_usage_snapshot(days=36500, material_date=material_date)
+    keys = {normalize_vocab_key(key) for key in (snapshot.get(item_type) or set()) if normalize_vocab_key(key)}
+    print(
+        "[gemini-bank] material_history_keys "
+        f"item_type={item_type} count={len(keys)} material_count={snapshot.get('material_count', 0)}"
+    )
+    return keys
+
+
 def expand_gemini_bank_light_payload(item_type, payload, fallback_level):
     if not isinstance(payload, dict):
         return {}
@@ -5272,15 +5285,6 @@ def gemini_daily_pack_steps(settings):
 
     basic_quota = {level: word_quota_all[level] for level in ("N5", "N4") if word_quota_all.get(level)}
     advanced_quota = {level: word_quota_all[level] for level in ("N3", "N2", "N1", "SNS") if word_quota_all.get(level)}
-    word_pack_count = int(bool(basic_quota)) + int(bool(advanced_quota))
-    basic_reserve = 0
-    advanced_reserve = 0
-    if word_pack_count == 1:
-        basic_reserve = GEMINI_DAILY_WORD_RESERVE if basic_quota else 0
-        advanced_reserve = GEMINI_DAILY_WORD_RESERVE if advanced_quota else 0
-    elif word_pack_count > 1:
-        basic_reserve = (GEMINI_DAILY_WORD_RESERVE + 1) // 2
-        advanced_reserve = GEMINI_DAILY_WORD_RESERVE // 2
     if basic_quota:
         steps.append(
             {
@@ -5288,7 +5292,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "word_basic",
                 "item_type": "word",
                 "quota_by_level": basic_quota,
-                "requested_by_level": quota_with_reserve(basic_quota, basic_reserve),
+                "requested_by_level": quota_with_reserve_per_level(basic_quota, GEMINI_DAILY_WORD_RESERVE_PER_LEVEL),
             }
         )
     if advanced_quota:
@@ -5298,7 +5302,7 @@ def gemini_daily_pack_steps(settings):
                 "pack_type": "word_advanced",
                 "item_type": "word",
                 "quota_by_level": advanced_quota,
-                "requested_by_level": quota_with_reserve(advanced_quota, advanced_reserve),
+                "requested_by_level": quota_with_reserve_per_level(advanced_quota, GEMINI_DAILY_WORD_RESERVE_PER_LEVEL),
             }
         )
     if verb_quota:
@@ -5875,11 +5879,9 @@ def is_daily_fresh_word_pool_row(row):
         return False
     pos = first_text(row, ["part_of_speech", "pos"]).strip()
     pos_lower = pos.lower()
-    if pos in DAILY_FRESH_WORD_ALLOWED_POS or pos_lower in DAILY_FRESH_WORD_ALLOWED_POS:
-        return True
-    if "動詞" in pos or pos_lower in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
-        return False
-    return False
+    if pos:
+        return word_pos_allows_enriched_item(pos)
+    return True
 
 
 def word_pos_allows_enriched_item(pos):
@@ -5889,7 +5891,16 @@ def word_pos_allows_enriched_item(pos):
     lowered = text.lower()
     if text in DAILY_FRESH_WORD_ALLOWED_POS or lowered in DAILY_FRESH_WORD_ALLOWED_POS:
         return True
-    if "動詞" in text or lowered in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
+    allowed_parts = [
+        part.strip()
+        for part in re.split(r"[・/／,，、\s]+", text)
+        if part.strip()
+    ]
+    if any(part in DAILY_FRESH_WORD_ALLOWED_POS or part.lower() in DAILY_FRESH_WORD_ALLOWED_POS for part in allowed_parts):
+        return True
+    if any(token in text for token in ["名詞", "形容詞", "形容動詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞", "助詞", "助数詞", "接頭辞", "接尾辞", "サ変接続"]):
+        return True
+    if text == "動詞" or lowered in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
         return False
     return True
 
@@ -6148,9 +6159,8 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
         "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
         "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
-        "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = %s AND gib.normalized_key = " + normalized_expr + ")" if DATABASE_URL else "NOT EXISTS (SELECT 1 FROM gemini_item_bank gib WHERE gib.item_type = ? AND gib.normalized_key = " + normalized_expr + ")",
     ]
-    id_params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE, item_type]
+    id_params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE]
     if excluded:
         placeholders = sql_placeholders(len(excluded))
         id_where.append(f"{normalized_expr} NOT IN ({placeholders})")
@@ -6361,7 +6371,8 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         print(f"[vocabulary-pool] selector_scanned_ids={scanned_total} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_bad_rows={len(bad_rows)} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_excluded_generated={len(generated_keys)} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_excluded_bank={bank_count} item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_excluded_bank=0 item_type={item_type} level={level}")
+        print(f"[vocabulary-pool] selector_bank_cache_candidates={bank_count} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_rejected_by_filter={dict(rejected_by_reason)} item_type={item_type} level={level}")
         print(f"[vocabulary-pool] selector_excluded_current_batch={len(current_batch_keys)} item_type={item_type} level={level}")
         print(
@@ -6465,7 +6476,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         return []
 
 
-def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=""):
+def select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=""):
     if item_type not in {"word", "verb"}:
         return {"candidates_by_level": {}, "items": [], "missing": []}
     requested_by_level = {
@@ -6473,12 +6484,7 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
         for level, count in (requested_by_level or {}).items()
         if int(count or 0) > 0
     }
-    existing_bank_keys = daily_fresh_existing_bank_keys(item_type, requested_by_level.keys())
-    excluded_keys = (
-        set(existing_bank_keys)
-        | {normalize_vocab_key(key) for key in (recent_keys or set()) if normalize_vocab_key(key)}
-        | gemini_daily_duplicate_blacklist_keys()
-    )
+    excluded_keys = {normalize_vocab_key(key) for key in (material_history_keys or set()) if normalize_vocab_key(key)}
     selected_by_level = {}
     selected_items = []
     missing = []
@@ -6683,6 +6689,7 @@ def select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pa
         "selector_scan_incomplete": selector_scan_incomplete,
         "selector_failed": selector_failed,
         "selector_meta_by_level": selector_meta_by_level,
+        "material_history_keys": sorted(excluded_keys),
     }
 
 
@@ -7153,6 +7160,59 @@ def active_pending_count_for_level(candidate_items, completed_chunks, chunk_size
     return pending
 
 
+def refill_daily_fresh_candidate_from_source(candidate_plan, item_type, level, active_keys, pack_type=""):
+    if item_type not in {"word", "verb"}:
+        return None
+    attempts_by_level = dict(candidate_plan.get("reserve_refill_attempts_by_level") or {})
+    attempts = int(attempts_by_level.get(level) or 0)
+    prefix = daily_fresh_replacement_prefix(item_type)
+    material_history_keys = {
+        normalize_vocab_key(key)
+        for key in (candidate_plan.get("material_history_keys") or [])
+        if normalize_vocab_key(key)
+    }
+    while attempts < 3:
+        attempts += 1
+        attempts_by_level[level] = attempts
+        candidate_plan["reserve_refill_attempts_by_level"] = attempts_by_level
+        excluded = material_history_keys | {key for key in (active_keys or set()) if key}
+        print(f"[{prefix}] refill_from_vocabulary_pool level={level} attempt={attempts}")
+        rows = fetch_daily_fresh_candidate_rows(item_type, level, 1, excluded, current_batch_keys=set())
+        for row in rows:
+            if isinstance(row, dict) and row.get("__selector_meta"):
+                continue
+            if isinstance(row, dict) and row.get("__fetch_error"):
+                continue
+            try:
+                if vocabulary_pool_candidate_level(row, item_type) != level:
+                    continue
+                if not is_daily_fresh_quality_pool_row(row, item_type):
+                    continue
+                key = vocabulary_pool_candidate_key(row)
+                if not key or key in excluded:
+                    continue
+                candidate = build_daily_fresh_candidate_payload(row, item_type, level)
+                if item_type == "verb":
+                    audit = audit_verb_candidate(candidate, row=row, log=True)
+                    if not audit.get("accepted"):
+                        continue
+                print(
+                    f"[{prefix}] refill_candidate level={level} "
+                    f"candidate={log_safe_text(daily_fresh_candidate_display(candidate, item_type))}"
+                )
+                print(
+                    "[gemini-enrich] replacement_candidate "
+                    f"level={level} candidate={log_safe_text(daily_fresh_candidate_display(candidate, item_type))}"
+                )
+                return candidate
+            except Exception as exc:
+                if "codec can't decode" in str(exc):
+                    print(f"[{prefix}] refill_skip_bad_row level={level} reason={exc}")
+                    continue
+                raise
+    return None
+
+
 def activate_daily_fresh_reserve_candidates(
     candidate_plan,
     item_type,
@@ -7228,9 +7288,20 @@ def activate_daily_fresh_reserve_candidates(
                 break
             reserve_by_level[level] = reserve_list
             if not next_candidate:
-                exhausted_by_level[level] = True
                 print(f"[{prefix}] reserve_exhausted level={level} missing={required - selected - pending}")
-                break
+                next_candidate = refill_daily_fresh_candidate_from_source(
+                    candidate_plan,
+                    item_type,
+                    level,
+                    active_keys,
+                    pack_type=pack_type,
+                )
+                if not next_candidate:
+                    exhausted_by_level[level] = True
+                    break
+            next_key = daily_fresh_candidate_identity(next_candidate, item_type)
+            if next_key:
+                active_keys.add(next_key)
             active_items.append(next_candidate)
             pending += 1
             added += 1
@@ -7293,6 +7364,8 @@ def cached_daily_fresh_candidate_plan(pack_state):
         "reserve_items",
         "activated_reserve_keys",
         "reserve_exhausted_by_level",
+        "reserve_refill_attempts_by_level",
+        "material_history_keys",
     ]:
         if key in plan:
             cached[key] = plan.get(key)
@@ -7456,9 +7529,8 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
                 return gemini_daily_fresh_prepare_error_payload(
                     job_id, pack_type, item_type, "fresh_candidate_pool_insufficient", None, elapsed_ms
                 ), 200
-            recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_DAILY_CANDIDATE_RECENT_DAYS, material_date=material_date)
-            recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
-            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+            material_history_keys = gemini_bank_material_history_keys_for_item_type(item_type, material_date=material_date)
+            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=pack_type)
             candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
         elif item_type == "grammar":
             inventory = grammar_pool_candidate_inventory()
@@ -7998,6 +8070,103 @@ def upsert_gemini_bank_items(items, daily_batch_id="", generated_for_date=None, 
                     inserted += 1
             conn.commit()
     return {"inserted": inserted, "skipped": skipped, "duplicate": duplicate}
+
+
+def tag_existing_bank_cache_item_for_daily_batch(item_type, candidate, daily_batch_id="", generated_for_date=None):
+    item_type = str(item_type or "").strip().lower()
+    if item_type not in {"word", "verb"}:
+        return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0}
+    key = daily_fresh_candidate_identity(candidate, item_type)
+    if not key:
+        return {"inserted": 0, "skipped": 1, "duplicate": 0, "reused": 0}
+    ensure_gemini_item_bank_store()
+    now = utc_now_iso()
+    daily_batch_id = simple_text(daily_batch_id)
+    generated_for_date = make_json_safe(canonical_material_date(generated_for_date or "")) if generated_for_date else None
+    row = None
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json, status
+                    FROM gemini_item_bank
+                    WHERE item_type = %s
+                      AND normalized_key = %s
+                      AND COALESCE(status, '') <> 'rejected'
+                    ORDER BY COALESCE(used_count, 0) ASC, last_used_at ASC NULLS FIRST, id ASC
+                    LIMIT 1
+                    """,
+                    (item_type, key),
+                )
+                raw = cur.fetchone()
+                if raw:
+                    keys = ["id", "item_type", "normalized_key", "display_text", "reading", "jlpt_level", "category", "source", "payload_json", "status"]
+                    row = dict(zip(keys, raw))
+                    valid_rows, stats = filter_enriched_items_to_candidates([row], item_type, [candidate])
+                    if not valid_rows:
+                        print(
+                            "[bank-cache] invalid "
+                            f"item_type={item_type} key={log_safe_text(key)} stats={stats}"
+                        )
+                        return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0, "cache_invalid": 1}
+                    cur.execute(
+                        """
+                        UPDATE gemini_item_bank
+                        SET status = 'unused',
+                            daily_batch_id = %s,
+                            generated_for_date = %s,
+                            generated_source = %s,
+                            updated_at = %s
+                        WHERE id = %s
+                        """,
+                        (daily_batch_id, generated_for_date, f"{item_type}_bank_cache_reuse", now, row["id"]),
+                    )
+            conn.commit()
+    else:
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+            conn.row_factory = sqlite3.Row
+            raw = conn.execute(
+                """
+                SELECT id, item_type, normalized_key, display_text, reading, jlpt_level, category, source, payload_json, status
+                FROM gemini_item_bank
+                WHERE item_type = ?
+                  AND normalized_key = ?
+                  AND COALESCE(status, '') <> 'rejected'
+                ORDER BY COALESCE(used_count, 0) ASC, last_used_at ASC, id ASC
+                LIMIT 1
+                """,
+                (item_type, key),
+            ).fetchone()
+            if raw:
+                row = dict(raw)
+                valid_rows, stats = filter_enriched_items_to_candidates([row], item_type, [candidate])
+                if not valid_rows:
+                    print(
+                        "[bank-cache] invalid "
+                        f"item_type={item_type} key={log_safe_text(key)} stats={stats}"
+                    )
+                    return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0, "cache_invalid": 1}
+                conn.execute(
+                    """
+                    UPDATE gemini_item_bank
+                    SET status = 'unused',
+                        daily_batch_id = ?,
+                        generated_for_date = ?,
+                        generated_source = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (daily_batch_id, generated_for_date, f"{item_type}_bank_cache_reuse", now, row["id"]),
+                )
+                conn.commit()
+    if not row:
+        return {"inserted": 0, "skipped": 0, "duplicate": 0, "reused": 0}
+    print(
+        "[bank-cache] reuse "
+        f"item_type={item_type} key={log_safe_text(key)} reason=not_in_materials gemini_call=false"
+    )
+    return {"inserted": 1, "skipped": 0, "duplicate": 0, "reused": 1, "gemini_call": False}
 
 
 def grammar_candidate_bank_lookup_keys(candidate):
@@ -11190,9 +11359,8 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     "continue_same_step": False,
                     "elapsed_ms": elapsed_ms,
                 }, 200
-            recent_usage = gemini_bank_recent_usage_keys(days=GEMINI_DAILY_CANDIDATE_RECENT_DAYS, material_date=material_date)
-            recent_keys = gemini_bank_recent_keys_for_item_type(recent_usage, item_type)
-            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, recent_keys, pack_type=pack_type)
+            material_history_keys = gemini_bank_material_history_keys_for_item_type(item_type, material_date=material_date)
+            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=pack_type)
             candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
         if candidate_plan.get("fetch_errors"):
             elapsed_ms = round((time.perf_counter() - started) * 1000)
@@ -11355,6 +11523,35 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 current_stage=current_stage,
                 **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
             )
+
+        def daily_fresh_pack_level_shortfall():
+            quota = normalize_daily_fresh_quota_by_level(
+                candidate_plan.get("effective_quota_by_level") or quota_by_level,
+                item_type,
+            )
+            summary = gemini_daily_batch_summary(daily_batch_id).get(item_type, {})
+            return {
+                level: max(0, int(required or 0) - int(summary.get(level) or 0))
+                for level, required in quota.items()
+                if max(0, int(required or 0) - int(summary.get(level) or 0)) > 0
+            }
+
+        def persist_replacement_activation(stage_suffix):
+            nonlocal candidate_items, chunks
+            candidate_items = list(candidate_plan.get("items") or [])
+            chunks = chunked_list(candidate_items, chunk_size)
+            pack_state.update(
+                {
+                    "candidate_plan": candidate_plan,
+                    "candidate_count": len(candidate_items),
+                    "chunk_count": len(chunks),
+                    "completed_chunks": sorted(completed_chunks),
+                    "chunk_size": chunk_size,
+                    "warning": warning,
+                    "last_error": last_error,
+                }
+            )
+            persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_{stage_suffix}")
 
         if not cached_plan:
             pack_state.update(
@@ -11529,6 +11726,32 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         "rejection_reason": last_rejection_reason or "local_audit_rejected",
                     }
                 chunk_candidates = audited_candidates
+            bank_cache_inserted = 0
+            bank_cache_reused = 0
+            if item_type in {"word", "verb"} and chunk_candidates:
+                uncached_candidates = []
+                for candidate in chunk_candidates:
+                    reuse_result = tag_existing_bank_cache_item_for_daily_batch(
+                        item_type,
+                        candidate,
+                        daily_batch_id=daily_batch_id,
+                        generated_for_date=material_date,
+                    )
+                    if int(reuse_result.get("reused") or 0) > 0:
+                        bank_cache_inserted += int(reuse_result.get("inserted") or 0)
+                        bank_cache_reused += int(reuse_result.get("reused") or 0)
+                        continue
+                    uncached_candidates.append(candidate)
+                if not uncached_candidates:
+                    return {
+                        "inserted": bank_cache_inserted,
+                        "skipped": 0,
+                        "duplicate": 0,
+                        "reused": bank_cache_reused,
+                        "bank_cache_reused": bank_cache_reused,
+                        "gemini_call": False,
+                    }
+                chunk_candidates = uncached_candidates
             if item_type == "grammar" and chunk_candidates:
                 reuse_result = tag_existing_grammar_bank_item_for_daily_batch(
                     chunk_candidates[0],
@@ -11634,12 +11857,23 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 generated_source="daily_fresh_jit",
                 retag_existing=item_type in {"word", "verb"},
             )
+            if bank_cache_inserted:
+                result["inserted"] = int(result.get("inserted") or 0) + bank_cache_inserted
+                result["reused"] = int(result.get("reused") or 0) + bank_cache_reused
+                result["bank_cache_reused"] = bank_cache_reused
             if int(result.get("duplicate") or 0) > 0:
-                print(
-                    "[gemini-bank] candidate_selection_duplicate_leak "
-                    f"pack={pack_type} chunk={chunk_label} duplicate={result.get('duplicate', 0)} "
-                    f"skipped={result.get('skipped', 0)}"
-                )
+                if item_type in {"word", "verb"}:
+                    print(
+                        "[bank-cache] refreshed "
+                        f"item_type={item_type} pack={pack_type} chunk={chunk_label} "
+                        f"duplicate={result.get('duplicate', 0)} gemini_call=true"
+                    )
+                else:
+                    print(
+                        "[gemini-bank] candidate_selection_duplicate_leak "
+                        f"pack={pack_type} chunk={chunk_label} duplicate={result.get('duplicate', 0)} "
+                        f"skipped={result.get('skipped', 0)}"
+                    )
             print(
                 f"[gemini-bank] daily_fresh upserted pack={pack_type} chunk={chunk_label} "
                 f"inserted={result.get('inserted', 0)} skipped={result.get('skipped', 0)} "
@@ -11653,6 +11887,65 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
 
         next_chunk_index = next((index for index in range(len(chunks)) if index not in completed_chunks), None)
         if next_chunk_index is None:
+            shortfall = daily_fresh_pack_level_shortfall()
+            if shortfall:
+                added = activate_daily_fresh_reserve_candidates(
+                    candidate_plan,
+                    item_type,
+                    quota_by_level,
+                    daily_batch_id,
+                    completed_chunks,
+                    chunk_size,
+                    pack_type=pack_type,
+                    last_result={"inserted": 0, "rejection_reason": "pre_finalize_gate"},
+                    last_chunk_candidates=[],
+                )
+                if added:
+                    persist_replacement_activation("replacement_added")
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    print(
+                        "[gemini-flow] pre_finalize_gate replacement_added "
+                        f"pack={pack_type} item_type={item_type} shortfall={shortfall}"
+                    )
+                    return {
+                        "ok": True,
+                        "job_id": job_id,
+                        "daily_batch_id": daily_batch_id,
+                        "stage": "daily_fresh",
+                        "micro_step": "replacement_added",
+                        "pack_type": pack_type,
+                        "item_type": item_type,
+                        "shortfall": shortfall,
+                        "done": False,
+                        "continued": True,
+                        "continue_same_step": True,
+                        "next_step": {"stage": "daily_fresh", "pack_type": pack_type},
+                        "elapsed_ms": elapsed_ms,
+                    }, 200
+                update_gemini_generation_job(
+                    job_id,
+                    status="failed",
+                    current_stage=f"daily_fresh:{pack_type}:pre_finalize_gate",
+                    error_message="fresh_generation_incomplete",
+                )
+                elapsed_ms = round((time.perf_counter() - started) * 1000)
+                print(
+                    "[gemini-flow] pre_finalize_gate_incomplete "
+                    f"pack={pack_type} item_type={item_type} missing={shortfall}"
+                )
+                return {
+                    "ok": False,
+                    "error": "fresh_generation_incomplete",
+                    "reason": "daily fresh candidates could not satisfy required level quota before finalize",
+                    "job_id": job_id,
+                    "stage": "daily_fresh",
+                    "pack_type": pack_type,
+                    "item_type": item_type,
+                    "missing": shortfall,
+                    "retryable": False,
+                    "continue_same_step": False,
+                    "elapsed_ms": elapsed_ms,
+                }, 200
             pack_state.update(
                 {
                     "item_type": item_type,
@@ -11703,6 +11996,66 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
         if gemini_daily_fresh_chunk_already_persisted(item_type, daily_batch_id, chunk_candidates):
             completed_chunks.add(chunk_index)
             has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+            if not has_more_chunks:
+                shortfall = daily_fresh_pack_level_shortfall()
+                if shortfall:
+                    added = activate_daily_fresh_reserve_candidates(
+                        candidate_plan,
+                        item_type,
+                        quota_by_level,
+                        daily_batch_id,
+                        completed_chunks,
+                        chunk_size,
+                        pack_type=pack_type,
+                        last_result={"inserted": 0, "rejection_reason": "pre_finalize_gate"},
+                        last_chunk_candidates=[],
+                    )
+                    if added:
+                        persist_replacement_activation("replacement_added")
+                        elapsed_ms = round((time.perf_counter() - started) * 1000)
+                        print(
+                            "[gemini-flow] pre_finalize_gate replacement_added "
+                            f"pack={pack_type} item_type={item_type} shortfall={shortfall}"
+                        )
+                        return {
+                            "ok": True,
+                            "job_id": job_id,
+                            "daily_batch_id": daily_batch_id,
+                            "stage": "daily_fresh",
+                            "micro_step": "replacement_added",
+                            "pack_type": pack_type,
+                            "item_type": item_type,
+                            "shortfall": shortfall,
+                            "done": False,
+                            "continued": True,
+                            "continue_same_step": True,
+                            "next_step": {"stage": "daily_fresh", "pack_type": pack_type},
+                            "elapsed_ms": elapsed_ms,
+                        }, 200
+                    update_gemini_generation_job(
+                        job_id,
+                        status="failed",
+                        current_stage=f"daily_fresh:{pack_type}:pre_finalize_gate",
+                        error_message="fresh_generation_incomplete",
+                    )
+                    elapsed_ms = round((time.perf_counter() - started) * 1000)
+                    print(
+                        "[gemini-flow] pre_finalize_gate_incomplete "
+                        f"pack={pack_type} item_type={item_type} missing={shortfall}"
+                    )
+                    return {
+                        "ok": False,
+                        "error": "fresh_generation_incomplete",
+                        "reason": "daily fresh candidates could not satisfy required level quota before finalize",
+                        "job_id": job_id,
+                        "stage": "daily_fresh",
+                        "pack_type": pack_type,
+                        "item_type": item_type,
+                        "missing": shortfall,
+                        "retryable": False,
+                        "continue_same_step": False,
+                        "elapsed_ms": elapsed_ms,
+                    }, 200
             pack_state.update(
                 {
                     "inserted": inserted_total,
@@ -12601,8 +12954,8 @@ def finalize_gemini_generation_job(job_id, app_url=None):
             "[gemini-finalize-debug] grammar_summary_count_by_level="
             + log_safe_text(json.dumps(daily_batch_summary.get("grammar", {}), ensure_ascii=False))
         )
-        selected_words = select_gemini_bank_items_by_batch("word", word_quota, daily_batch_id, recent_used_keys=recent_word_keys)
-        selected_verbs = select_gemini_bank_items_by_batch("verb", verb_quota, daily_batch_id, recent_used_keys=recent_verb_keys)
+        selected_words = select_gemini_bank_items_by_batch("word", word_quota, daily_batch_id)
+        selected_verbs = select_gemini_bank_items_by_batch("verb", verb_quota, daily_batch_id)
         selected_grammar = select_gemini_bank_items_by_batch("grammar", grammar_quota, daily_batch_id)
         reserved = [*(selected_words or []), *(selected_verbs or []), *(selected_grammar or [])]
         initial_counts = {
