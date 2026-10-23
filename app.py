@@ -24,6 +24,7 @@ import pandas as pd
 from flask import Flask, has_request_context, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 from services.grammar_debugger import debug_grammar
+from services.verb_candidate_audit import verified_verb_evidence
 
 
 app = Flask(__name__, template_folder=".")
@@ -4828,11 +4829,36 @@ def gemini_bank_recent_keys_for_item_type(recent_usage, item_type):
 def gemini_bank_material_history_keys_for_item_type(item_type, material_date=None):
     if item_type not in {"word", "verb"}:
         return set()
-    snapshot = gemini_bank_material_usage_snapshot(days=36500, material_date=material_date)
-    keys = {normalize_vocab_key(key) for key in (snapshot.get(item_type) or set()) if normalize_vocab_key(key)}
+    keys = set()
+    material_count = 0
+
+    def collect(raw):
+        nonlocal material_count
+        payload = raw if isinstance(raw, dict) else json.loads(safe_text(raw))
+        usage = gemini_bank_extract_material_usage_keys(payload)
+        keys.update(usage["word"] | usage["verb"])
+        material_count += 1
+
+    # No recent window or row limit: failed jobs and bank usage are not history.
+    if DATABASE_URL:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT {postgres_text_as_bytea('material_json')} FROM materials WHERE COALESCE(material_json, '') <> ''")
+                while True:
+                    rows = cur.fetchmany(500)
+                    if not rows:
+                        break
+                    for row in rows:
+                        collect(row[0])
+    else:
+        frame = read_database()
+        if "material_json" in frame.columns:
+            for raw in frame["material_json"]:
+                if safe_text(raw).strip():
+                    collect(raw)
     print(
         "[gemini-bank] material_history_keys "
-        f"item_type={item_type} count={len(keys)} material_count={snapshot.get('material_count', 0)}"
+        f"item_type={item_type} count={len(keys)} material_count={material_count} exclusion_source=materials_only"
     )
     return keys
 
@@ -5771,6 +5797,9 @@ def is_daily_fresh_polite_phrase_surface(surface):
         return False
     if is_safe_daily_fresh_suru_surface(text):
         return False
+    # A dictionary verb such as だます is not a polite inflection.
+    if verified_verb_evidence(text).get("accepted"):
+        return False
     return text.endswith(("ませんでした", "ません", "ました", "ます"))
 
 
@@ -5779,7 +5808,10 @@ def verb_pos_allows_candidate(pos):
     if not text:
         return None
     lowered = text.lower()
-    if any(token.lower() in lowered for token in DAILY_FRESH_VERB_ALLOWED_POS_TOKENS):
+    parts = {p for p in re.split(r"[・/／,，、;\s]+", lowered) if p}
+    if parts & {token.lower() for token in DAILY_FRESH_VERB_ALLOWED_POS_TOKENS}:
+        return True
+    if re.match(r"^(動詞(?:-|$)|五段動詞|一段動詞|サ変動詞|v[1-5](?:[a-z-]*)(?:$|[,;]))", lowered):
         return True
     if any(token.lower() in lowered for token in DAILY_FRESH_VERB_BLOCKED_POS_TOKENS):
         return False
@@ -5830,49 +5862,20 @@ def audit_verb_candidate(candidate, row=None, log=False):
         return audit_result(False, "counter_or_number", "word")
     if text in DAILY_FRESH_NON_VERB_SURFACES:
         return audit_result(False, "known_non_verb", "word")
-    if is_safe_daily_fresh_suru_surface(text):
-        return audit_result(True)
-    if is_daily_fresh_polite_phrase_surface(text):
-        return audit_result(False, "polite_phrase_not_dictionary_form", "phrase")
-
     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
     pos_allowed = verb_pos_allows_candidate(pos)
     if pos_allowed is False:
         return audit_result(False, "blocked_pos", "word")
-    try:
-        group = int(source.get("verb_group") or row.get("verb_group") or 0)
-    except (TypeError, ValueError):
-        group = 0
-
-    if text.endswith("する") and text != "する":
-        category = (first_text(source, ["category"]) or first_text(row, ["category"])).lower()
-        source_name = (first_text(source, ["source"]) or first_text(row, ["source"])).lower()
-        if (category or source_name) and (
-            category not in {"manual_core", "jlpt_core", "general", "daily", "common"}
-            or source_name in DAILY_FRESH_BLOCKED_SOURCES
-        ):
-            return audit_result(False, "unsafe_suru_candidate", "word")
-
-    if pos_allowed is True:
-        if looks_like_daily_fresh_verb_surface(text) or group in {1, 2, 3}:
-            return audit_result(True)
-        return audit_result(False, "not_verb_shape", "word")
-
-    if group in {1, 2, 3}:
-        return audit_result(True)
-    if not looks_like_daily_fresh_verb_surface(text):
-        return audit_result(False, "not_verb_shape", "word")
-    if text.endswith("く") and not text_has_cjk_kanji(text):
-        return audit_result(False, "weak_ku_suffix", "word")
-    if is_probable_japanese_verb_surface(text):
-        return audit_result(True)
-    return audit_result(False, "uncertain_verb", "word")
+    evidence = verified_verb_evidence(text)
+    return {**audit_result(evidence["accepted"], evidence["reason"], evidence.get("suggested_type", "")),
+            "evidence": evidence.get("evidence", "")}
 
 
 def is_daily_fresh_word_pool_row(row):
     surface = vocabulary_pool_candidate_surface(row)
     if has_variant_separator(surface):
         return False
+    surface = re.split(r"[（(]", surface, maxsplit=1)[0].strip()
     if is_safe_daily_fresh_suru_surface(surface):
         return False
     if looks_like_daily_fresh_verb_surface(surface):
@@ -6017,8 +6020,11 @@ def daily_fresh_candidate_rejection_reason(row, item_type, level, excluded_keys)
         return "level_mismatch"
     if not key or not surface:
         return "empty_key_or_surface"
-    if key in excluded_keys:
-        return "excluded_generated_or_recent"
+    history_aliases = gemini_bank_material_key_candidates(
+        {"normalized_key": key, "word": surface, "dictionary_form": surface}, item_type
+    )
+    if history_aliases & excluded_keys:
+        return "excluded_material_history_or_current_batch"
     category = first_text(row, ["category"]).lower() or "general"
     source = first_text(row, ["source"]).lower()
     quality = first_text(row, ["quality"]).lower() or "normal"
@@ -6140,7 +6146,7 @@ def daily_fresh_bank_key_count(item_type, level):
         return 0
 
 
-def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None):
+def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None, source_state=None):
     ensure_vocabulary_pool_store()
     level = normalize_gemini_bank_level(level, item_type)
     limit = max(1, min(int(limit or 20), 100))
@@ -6148,12 +6154,20 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
     generated_keys = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
     current_batch_keys = {normalize_vocab_key(key) for key in (current_batch_keys or set()) if normalize_vocab_key(key)}
     excluded = generated_keys | current_batch_keys
+    source_state = source_state if isinstance(source_state, dict) else {}
+    context = [item_type, level, sorted(generated_keys)]
+    if source_state.get("context") != context:
+        source_state.clear()
+        source_state["context"] = context
+    if source_state.get("source_exhausted"):
+        print(f"[vocabulary-pool] source_scan_already_exhausted item_type={item_type} level={level} rescan=false")
+        return [{"__selector_meta": True, "candidate_exhausted": True, "source_state": source_state,
+                 "rejected_by_filter": source_state.get("rejected_by_filter", {}), "rescanned_ids": 0}]
     id_batch_size = min(max(limit * 200, 500), 1000)
     hydrate_batch_size = 50
     max_id_batches = 4
     selector_deadline = time.perf_counter() + 5.0
     active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
-    normalized_expr = "COALESCE(NULLIF(vp.normalized_key, ''), NULLIF(vp.base_form, ''), NULLIF(vp.surface, ''))"
     id_where = [
         active_clause,
         "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
@@ -6161,24 +6175,15 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
     ]
     id_params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE]
-    if excluded:
-        placeholders = sql_placeholders(len(excluded))
-        id_where.append(f"{normalized_expr} NOT IN ({placeholders})")
-        id_params_base.extend(sorted(excluded))
-    id_order_by = f"""
-        ORDER BY
-            COALESCE(vp.used_in_material_count, 0) ASC,
-            {'vp.frequency_rank ASC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.frequency_rank IS NULL THEN 1 ELSE 0 END ASC, vp.frequency_rank ASC,'}
-            {'vp.commonness_score DESC NULLS LAST,' if DATABASE_URL else 'CASE WHEN vp.commonness_score IS NULL THEN 1 ELSE 0 END ASC, vp.commonness_score DESC,'}
-            COALESCE(vp.priority, 1) DESC,
-            vp.id ASC
-    """
+    # Stable numeric cursor survives replacements and changing current-batch keys.
+    # Text is decoded only in the existing small hydration batches.
+    id_where.append("vp.id > %s" if DATABASE_URL else "vp.id > ?")
     id_sql = f"""
         SELECT vp.id
         FROM vocabulary_pool vp
         WHERE {' AND '.join(id_where)}
-        {id_order_by}
-        LIMIT {'%s' if DATABASE_URL else '?'} OFFSET {'%s' if DATABASE_URL else '?'}
+        ORDER BY vp.id ASC
+        LIMIT {'%s' if DATABASE_URL else '?'}
     """
     if DATABASE_URL:
         row_columns = [
@@ -6232,6 +6237,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
         skipped_bad_encoding = 0
         bad_rows = []
         rejected_by_reason = Counter()
+        rejected_samples = {}
         scanned_total = 0
         id_query_ms_total = 0.0
         hydration_ms_total = 0.0
@@ -6245,7 +6251,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                 selector_timed_out = True
                 print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} selected={len(rows)}")
                 break
-            offset = (batch_index - 1) * id_batch_size
+            offset = int(source_state.get("last_id") or 0)
             id_query_started = time.perf_counter()
             candidate_ids = fetch_id_batch(id_batch_size, offset)
             id_query_ms = round((time.perf_counter() - id_query_started) * 1000, 2)
@@ -6293,6 +6299,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                 else:
                     hydration_ms_total += round((time.perf_counter() - hydration_started) * 1000, 2)
                 for raw_row in raw_rows:
+                    source_state["last_id"] = int(raw_row["id"])
                     try:
                         candidate_row = sanitize_vocabulary_pool_candidate_row(raw_row)
                     except UnicodeDecodeError as row_exc:
@@ -6344,6 +6351,11 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                     if reason:
                         rejected_by_reason[reason] += 1
                         batch_rejected[reason] += 1
+                        samples = rejected_samples.setdefault(reason, [])
+                        if len(samples) < 5:
+                            samples.append({"id": candidate_row.get("id"), "surface": vocabulary_pool_candidate_surface(candidate_row),
+                                            "category": candidate_row.get("category"), "source": candidate_row.get("source"),
+                                            "part_of_speech": candidate_row.get("part_of_speech")})
                         continue
                     rows.append(candidate_row)
                     excluded.add(vocabulary_pool_candidate_key(candidate_row))
@@ -6351,6 +6363,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                         break
                 if len(rows) >= limit:
                     break
+                source_state["last_id"] = max(int(source_state.get("last_id") or 0), max(id_chunk))
             if selector_timed_out:
                 break
             print(
@@ -6383,7 +6396,13 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
             f"[vocabulary-pool] candidate_scan_done item_type={item_type} level={level} "
             f"selected={len(rows)} scanned_ids={scanned_total}"
         )
-        exhausted = id_scan_exhausted and not selector_timed_out and len(rows) < limit
+        source_state["bad_rows"] = sorted(set(source_state.get("bad_rows") or []) | {int(row_id) for row_id in bad_rows if str(row_id).isdigit()})
+        exhausted = id_scan_exhausted and not selector_timed_out and not source_state["bad_rows"] and len(rows) < limit
+        source_state["source_exhausted"] = exhausted
+        cumulative_rejections = Counter(source_state.get("rejected_by_filter") or {})
+        cumulative_rejections.update(rejected_by_reason)
+        source_state["rejected_by_filter"] = dict(cumulative_rejections)
+        print(f"[vocabulary-pool] selector_rejected_samples={log_safe_text(json.dumps(rejected_samples, ensure_ascii=False))}")
         if exhausted:
             print(
                 f"[vocabulary-pool] candidate_exhausted=true item_type={item_type} level={level} "
@@ -6399,8 +6418,10 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                 "candidate_exhausted": exhausted,
                 "selector_timeout_warning": selector_timed_out,
                 "selector_scan_incomplete": not exhausted and len(rows) < limit,
-                "bad_rows": bad_rows,
+                "bad_rows": list(source_state["bad_rows"]),
                 "skipped_bad_encoding": skipped_bad_encoding,
+                "rejected_by_filter": dict(cumulative_rejections),
+                "source_state": dict(source_state),
             }
         )
         return rows
@@ -6415,7 +6436,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
                         print(f"[vocabulary-pool] selector_statement_timeout_config_failed reason={timeout_cfg_exc}")
 
                     def fetch_id_batch(batch_size_value, offset_value):
-                        cur.execute(id_sql, (*id_params_base, batch_size_value, offset_value))
+                        cur.execute(id_sql, (*id_params_base, offset_value, batch_size_value))
                         return [row[0] for row in cur.fetchall() if row and row[0] is not None]
 
                     def hydrate_ids(candidate_ids):
@@ -6436,7 +6457,7 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
             def fetch_id_batch(batch_size_value, offset_value):
                 return [
                     row[0]
-                    for row in conn.execute(id_sql, (*id_params_base, batch_size_value, offset_value)).fetchall()
+                    for row in conn.execute(id_sql, (*id_params_base, offset_value, batch_size_value)).fetchall()
                     if row and row[0] is not None
                 ]
 
@@ -6473,7 +6494,8 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
             print("[vocabulary-pool] candidate_decode_error_recoverable=false")
             return [{"__selector_meta": True, "candidate_exhausted": False, "selector_failed": True, "bad_rows": [], "skipped_bad_encoding": 0}]
         print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
-        return []
+        return [{"__selector_meta": True, "selector_failed": True, "candidate_exhausted": False,
+                 "reason": str(exc), "source_state": dict(source_state)}]
 
 
 def select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=""):
@@ -6491,13 +6513,15 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
     shortages = []
     fetch_errors = []
     selector_meta_by_level = {}
+    source_state_by_level = {}
     skipped_bad_encoding = 0
     verb_audit_rejected = 0
     seen = set()
 
     def collect_candidates_for_level(level, needed):
         nonlocal skipped_bad_encoding, verb_audit_rejected
-        rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys, current_batch_keys=seen)
+        rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys, current_batch_keys=seen,
+                                                source_state=source_state_by_level.setdefault(level, {}))
         candidates = []
         for row in rows:
             if isinstance(row, dict) and row.get("__selector_meta"):
@@ -6603,36 +6627,8 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
     for shortage in shortages:
         source_level = shortage["level"]
         remaining = int(shortage.get("remaining") or 0)
-        fallback_levels = [
-            level
-            for level in requested_by_level
-            if level != source_level and level != "SNS"
-        ]
-        for fallback_level in fallback_levels:
-            if remaining <= 0:
-                break
-            fallback_candidates = collect_candidates_for_level(fallback_level, remaining)
-            if not fallback_candidates:
-                continue
-            selected_by_level.setdefault(fallback_level, []).extend(fallback_candidates)
-            remaining -= len(fallback_candidates)
-            print(
-                "[fresh-candidate] redistributed_shortage "
-                f"item_type={item_type} from={source_level} to={fallback_level} "
-                f"count={len(fallback_candidates)} remaining={remaining}"
-            )
         if remaining > 0:
-            attempted_levels = [
-                level
-                for level in requested_by_level
-                if level != source_level and level != "SNS"
-            ]
             exhausted = bool(shortage.get("candidate_exhausted"))
-            if attempted_levels:
-                exhausted = exhausted and all(
-                    bool(selector_meta_by_level.get(fallback_level, {}).get("candidate_exhausted"))
-                    for fallback_level in attempted_levels
-                )
             if exhausted:
                 missing.append(
                     {
@@ -6657,6 +6653,11 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
     print(f"[fresh-candidate] levels={level_counts}")
     print(f"[fresh-candidate] candidates pack={pack_type or item_type} items={log_safe_text(json.dumps(selected_surfaces, ensure_ascii=False))}")
     if item_type == "verb":
+        verb_audit_rejected += sum(
+            count for meta in selector_meta_by_level.values()
+            for reason, count in (meta.get("rejected_by_filter") or {}).items()
+            if reason.startswith("non_verb:")
+        )
         print(f"[vocabulary-pool] verb_candidate_audit selected={len(selected_items)} rejected={verb_audit_rejected}")
     print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
     if missing:
@@ -6690,6 +6691,8 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
         "selector_failed": selector_failed,
         "selector_meta_by_level": selector_meta_by_level,
         "material_history_keys": sorted(excluded_keys),
+        "source_state_by_level": source_state_by_level,
+        "requested_by_level": requested_by_level,
     }
 
 
@@ -7074,8 +7077,8 @@ def ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, i
             reserve_by_level[normalized_level] = reserve
 
     total_required = sum(quota.values())
-    if item_type == "word" and len(primary_items) < total_required:
-        remaining = total_required - len(primary_items)
+    if item_type == "word" and quota.get("SNS", 0) > len(primary_by_level.get("SNS") or []):
+        remaining = quota["SNS"] - len(primary_by_level.get("SNS") or [])
         for level in list(reserve_by_level.keys()):
             if remaining <= 0:
                 break
@@ -7090,34 +7093,29 @@ def ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, i
     reserve_items = []
     for candidates in reserve_by_level.values():
         reserve_items.extend(candidates or [])
-    effective_quota_by_level = {
-        level: len(candidates or [])
-        for level, candidates in primary_by_level.items()
-        if len(candidates or []) > 0
-    }
+    effective_quota_by_level = dict(quota)
+    if item_type == "word" and quota.get("SNS"):
+        effective_quota_by_level["SNS"] = len(primary_by_level.get("SNS") or [])
+        for level in quota:
+            if level != "SNS":
+                effective_quota_by_level[level] = max(quota[level], len(primary_by_level.get(level) or []))
     primary_missing = []
-    if item_type == "word":
-        if len(primary_items) < total_required:
-            primary_missing.append(
-                {
-                    "level": "word",
-                    "requested": total_required,
-                    "available": len(primary_items),
-                    "remaining": total_required - len(primary_items),
-                }
-            )
-    else:
-        for level, required in quota.items():
-            available = len(primary_by_level.get(level) or [])
-            if available < required:
-                primary_missing.append(
-                    {
-                        "level": level,
-                        "requested": required,
-                        "available": available,
-                        "remaining": required - available,
-                    }
-                )
+    for level, required in effective_quota_by_level.items():
+        available = len(primary_by_level.get(level) or [])
+        if available < required:
+            meta = (candidate_plan.get("selector_meta_by_level") or {}).get(level) or {}
+            primary_missing.append({"level": level, "requested": required, "available": available,
+                                    "remaining": required - available,
+                                    "candidate_exhausted": bool(meta.get("candidate_exhausted")),
+                                    "excluded_by_reason": meta.get("rejected_by_filter") or {}})
+    reserve_shortages = []
+    for level, requested in (candidate_plan.get("requested_by_level") or {}).items():
+        reserve_required = max(0, int(requested) - int(quota.get(level) or 0))
+        available = len(reserve_by_level.get(level) or [])
+        if available < reserve_required:
+            reserve_shortages.append({"level": level, "requested": reserve_required, "available": available})
+            print(f"[daily-fresh-candidates] reserve_shortage item_type={item_type} level={level} "
+                  f"available={available} requested={reserve_required} redistributed=false")
     candidate_plan = {
         **candidate_plan,
         "primary_reserve_contract_version": 1,
@@ -7129,6 +7127,7 @@ def ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, i
         "reserve_items": reserve_items,
         "items": primary_items,
         "missing": primary_missing,
+        "reserve_shortages": reserve_shortages,
     }
     print(
         "[daily-fresh-candidates] primary_reserve "
@@ -7172,18 +7171,30 @@ def refill_daily_fresh_candidate_from_source(candidate_plan, item_type, level, a
         if normalize_vocab_key(key)
     }
     while attempts < 3:
+        source_state = candidate_plan.setdefault("source_state_by_level", {}).setdefault(level, {})
+        if source_state.get("source_exhausted"):
+            print(f"[{prefix}] source_exhausted level={level} rescan=false")
+            return None
         attempts += 1
         attempts_by_level[level] = attempts
         candidate_plan["reserve_refill_attempts_by_level"] = attempts_by_level
-        excluded = material_history_keys | {key for key in (active_keys or set()) if key}
+        attempted = candidate_plan.setdefault("refill_attempted_keys", [])
+        excluded = material_history_keys | set(active_keys or set()) | set(attempted)
         print(f"[{prefix}] refill_from_vocabulary_pool level={level} attempt={attempts}")
-        rows = fetch_daily_fresh_candidate_rows(item_type, level, 1, excluded, current_batch_keys=set())
+        rows = fetch_daily_fresh_candidate_rows(item_type, level, 1, material_history_keys,
+                                                current_batch_keys=excluded - material_history_keys,
+                                                source_state=source_state)
         for row in rows:
             if isinstance(row, dict) and row.get("__selector_meta"):
+                if row.get("candidate_exhausted"):
+                    source_state["source_exhausted"] = True
                 continue
             if isinstance(row, dict) and row.get("__fetch_error"):
                 continue
             try:
+                row_key = vocabulary_pool_candidate_key(row)
+                if row_key and row_key not in attempted:
+                    attempted.append(row_key)
                 if vocabulary_pool_candidate_level(row, item_type) != level:
                     continue
                 if not is_daily_fresh_quality_pool_row(row, item_type):
@@ -7366,6 +7377,11 @@ def cached_daily_fresh_candidate_plan(pack_state):
         "reserve_exhausted_by_level",
         "reserve_refill_attempts_by_level",
         "material_history_keys",
+        "source_state_by_level",
+        "selector_meta_by_level",
+        "reserve_shortages",
+        "refill_attempted_keys",
+        "requested_by_level",
     ]:
         if key in plan:
             cached[key] = plan.get(key)
@@ -7410,7 +7426,12 @@ def gemini_daily_fresh_all_candidates_ready(job):
         return True
     for step in daily_steps:
         _cache, _pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
-        if not field_name or not cached_daily_fresh_candidate_plan(pack_state):
+        plan = cached_daily_fresh_candidate_plan(pack_state)
+        if not field_name or not plan:
+            return False
+        quota = normalize_daily_fresh_quota_by_level(step.get("quota_by_level") or {}, step.get("item_type"))
+        primary_counts = Counter(simple_text(c.get("level")) for c in plan.get("primary_items") or plan.get("items") or [])
+        if plan.get("missing") or any(primary_counts.get(level, 0) < count for level, count in quota.items() if level != "SNS"):
             return False
     return True
 
@@ -7500,7 +7521,11 @@ def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, mat
         cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
         if not field_name:
             continue
-        if cached_daily_fresh_candidate_plan(pack_state):
+        cached_candidate_plan = cached_daily_fresh_candidate_plan(pack_state)
+        cached_primary_counts = Counter(simple_text(c.get("level")) for c in (cached_candidate_plan or {}).get("primary_items") or [])
+        if cached_candidate_plan and not cached_candidate_plan.get("missing") and all(
+            cached_primary_counts.get(level, 0) >= count for level, count in quota_by_level.items() if level != "SNS"
+        ):
             print(f"[daily-fresh-candidates] phase_a_cached pack={pack_type} item_type={item_type}")
             continue
         warning = ""
@@ -7716,6 +7741,13 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 f"item_type={item_type} surface={log_safe_text(surface)}"
             )
         item["jlpt_level"] = normalize_gemini_bank_level(candidate.get("level") or item.get("jlpt_level"), item_type)
+        # Compact rows omit level; the fixed source candidate owns the level,
+        # including the payload that is later copied into a material.
+        payload["jlpt_level"] = item["jlpt_level"]
+        for level_field in ("l", "level"):
+            if level_field in payload:
+                payload[level_field] = item["jlpt_level"]
+        item["payload_json"] = json.dumps(payload, ensure_ascii=False)
         filtered.append(item)
         stats["matched"] += 1
     return filtered, stats
@@ -9118,6 +9150,11 @@ def bank_rows_to_payload(rows):
     for row in rows:
         parsed = gemini_job_json(row.get("payload_json"), {})
         if isinstance(parsed, dict):
+            if row.get("jlpt_level"):
+                parsed["jlpt_level"] = row["jlpt_level"]
+                for field in ("l", "level"):
+                    if field in parsed:
+                        parsed[field] = row["jlpt_level"]
             payloads.append(parsed)
     return payloads
 
@@ -11220,6 +11257,10 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
     job = load_gemini_generation_job(job_id)
     if not job:
         return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
+    if job.get("status") in {"completed", "failed"}:
+        return {"ok": job.get("status") == "completed", "job_id": job_id,
+                "already_done": job.get("status") == "completed", "done": True,
+                "error": job.get("error_message") or "", "continue_same_step": False}, 200
     pack_type = str(pack_type or "").strip().lower()
     steps = gemini_job_json(job.get("planned_steps_json"), [])
     step = next(
@@ -11552,6 +11593,23 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 }
             )
             persist_daily_fresh_pack_state(f"daily_fresh:{pack_type}_{stage_suffix}")
+
+        def replace_failed_chunk(reason):
+            completed_chunks.add(chunk_index)
+            activate_daily_fresh_reserve_candidates(
+                candidate_plan, item_type, step.get("quota_by_level") or {}, daily_batch_id,
+                completed_chunks, chunk_size, pack_type=pack_type,
+                last_result={"inserted": 0, "warning": reason}, last_chunk_candidates=chunk_candidates,
+            )
+            persist_replacement_activation("replacement_after_failure")
+            has_more = any(index not in completed_chunks for index in range(len(chunks)))
+            shortfall = daily_fresh_pack_level_shortfall()
+            if not has_more and shortfall:
+                update_gemini_generation_job(job_id, status="failed", error_message="fresh_generation_incomplete")
+                return False, ({"ok": False, "error": "fresh_generation_incomplete", "job_id": job_id,
+                                "stage": "daily_fresh", "pack_type": pack_type, "missing_by_level": shortfall,
+                                "continue_same_step": False}, 200)
+            return has_more, None
 
         if not cached_plan:
             pack_state.update(
@@ -12223,8 +12281,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         chunk_candidates,
                         chunk_index,
                     )
-                completed_chunks.add(chunk_index)
-                has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+                has_more_chunks, failure = replace_failed_chunk(reason)
+                if failure:
+                    return failure
                 pack_state.update(
                     {
                         "inserted": inserted_total,
@@ -12295,8 +12354,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         "[grammar-replacement] "
                         f"reserve_exhausted level={failed_level} missing=1"
                     )
-                completed_chunks.add(chunk_index)
-                has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+                has_more_chunks, failure = replace_failed_chunk(reason)
+                if failure:
+                    return failure
                 pack_state.update(
                     {
                         "inserted": inserted_total,
@@ -12887,6 +12947,9 @@ def finalize_gemini_generation_job(job_id, app_url=None):
     job = load_gemini_generation_job(job_id)
     if not job:
         return {"ok": False, "error": "gemini_job_not_found", "reason": "job_id not found"}, 404
+    if job.get("status") == "completed":
+        cached_result = gemini_job_json(job.get("vocab_json"), {}).get("finalize_result") or {}
+        return {**cached_result, "ok": True, "job_id": job_id, "already_done": True, "status": "completed"}, 200
     if job.get("status") == "failed":
         return {
             "ok": False,
@@ -13156,7 +13219,12 @@ def finalize_gemini_generation_job(job_id, app_url=None):
         mark_gemini_bank_items_used(reserved)
         mark_grammar_pool_rotation_used(selected_grammar)
         print(f"[gemini-bank] mark_used count={len(reserved)}")
-        update_gemini_generation_job(job_id, status="completed", current_stage="finalized", error_message="")
+        final_cache = gemini_job_json((load_gemini_generation_job(job_id) or job).get("vocab_json"), {})
+        final_cache["finalize_result"] = {"material_key": save_info.get("material_key"),
+                                          "material_date": save_info.get("material_date"),
+                                          "version_no": save_info.get("version_no")}
+        update_gemini_generation_job(job_id, status="completed", current_stage="finalized", error_message="",
+                                     vocab_json=json.dumps(make_json_safe(final_cache), ensure_ascii=False))
         invalidate_dashboard_cache("gemini staged material generated")
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         print(f"[gemini-bank] finalize material_key={save_info.get('material_key')}")

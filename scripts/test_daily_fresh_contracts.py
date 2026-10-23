@@ -167,7 +167,7 @@ def assert_refill_from_source_contract():
     original_fetch = app.fetch_daily_fresh_candidate_rows
     try:
         app.gemini_daily_batch_summary = lambda _batch_id: {"word": {"N1": 0}}
-        app.fetch_daily_fresh_candidate_rows = lambda item_type, level, limit, excluded_keys, current_batch_keys=None: [
+        app.fetch_daily_fresh_candidate_rows = lambda item_type, level, limit, excluded_keys, current_batch_keys=None, **kwargs: [
             {
                 "id": 1,
                 "surface": "補充語",
@@ -323,7 +323,7 @@ def assert_grammar_rotation_reuse_contract():
     quota = {"N5": 5}
     plan = {
         "candidates_by_level": {
-            "N5": [candidate("N5", f"n5:grammar_{index % 2}", "grammar") for index in range(7)]
+            "N5": [candidate("N5", f"n5:grammar_{index}", "grammar") for index in range(7)]
         },
         "items": [],
         "missing": [],
