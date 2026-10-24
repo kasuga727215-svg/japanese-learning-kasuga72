@@ -29,18 +29,18 @@ class Harness:
     def __init__(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.path = str(Path(self.tmp.name) / "test.sqlite3")
-        self.saved, self.calls = [], []
-        self.reject_once, self.truncate_once = set(), set()
+        self.calls = []
+        self.reject_once, self.truncate_once, self.invalid_pos_once = set(), set(), set()
         self.stack = contextlib.ExitStack()
         for key, value in {
             "DATABASE_URL": "", "SQLITE_SETTINGS_FILE": self.path,
+            "DATABASE_FILE": str(Path(self.tmp.name) / "materials.csv"), "_MATERIALS_SCHEMA_READY": True,
             "_GEMINI_JOBS_SCHEMA_READY": False, "_GEMINI_BANK_SCHEMA_READY": False,
             "_SETTINGS_SCHEMA_READY": False,
             "GEMINI_API_KEY": "mock-no-network", "RUN_MIGRATIONS_ON_STARTUP": False,
         }.items():
             self.stack.enter_context(patch.object(app, key, value))
-        self.stack.enter_context(patch.object(app, "read_database", self.history_frame))
-        self.stack.enter_context(patch.object(app, "save_material_for_date", self.save))
+        app.pd.DataFrame(columns=app.COLUMNS).to_csv(app.DATABASE_FILE, index=False, encoding="utf-8-sig")
         self.stack.enter_context(patch.object(app, "call_gemini", self.gemini))
         self.stack.enter_context(patch.object(app.urllib.request, "urlopen", side_effect=AssertionError("network forbidden in regression")))
         with contextlib.closing(sqlite3.connect(self.path)) as conn:
@@ -86,16 +86,19 @@ class Harness:
                         ["grammar_key", "pattern", "display_name", "jlpt_level", "meaning_seed", "connection_seed", "category", "source", "status"]))
             conn.commit()
 
-    def history_frame(self):
-        return app.pd.DataFrame([{"material_json": json.dumps(m, ensure_ascii=False), "material_date": m["date"]}
-                                 for m in self.saved], columns=["material_json", "material_date"])
+    @property
+    def saved(self):
+        frame = app.read_database()
+        return [json.loads(raw) for raw in frame.get("material_json", []) if str(raw).strip()]
 
-    def save(self, day, material, settings, **kwargs):
-        day = str(day)
-        material = copy.deepcopy(material)
-        material["date"] = day
-        self.saved.append(material)
-        return {"material_key": f"{day}-1", "material_date": day, "version_no": 1, "selection_log_warnings": []}
+    @saved.setter
+    def saved(self, materials):
+        rows = []
+        for material in materials:
+            row = {column: "" for column in app.COLUMNS}
+            row.update(material_json=json.dumps(material, ensure_ascii=False), material_date=material["date"], date=material["date"])
+            rows.append(row)
+        app.pd.DataFrame(rows, columns=app.COLUMNS).to_csv(app.DATABASE_FILE, index=False, encoding="utf-8-sig")
 
     def gemini(self, prompt, **config):
         raw = prompt.split("Input candidates: ", 1)[1]
@@ -109,10 +112,12 @@ class Harness:
         if failure_key in self.reject_once:
             self.reject_once.remove(failure_key)
             return json.dumps({"items": [], "rejected": [[inputs[0].get("d", inputs[0].get("w", "")), "not_verb", "word", "測試拒絕"]]})
+        invalid_pos = failure_key in self.invalid_pos_once
+        self.invalid_pos_once.discard(failure_key)
         items = []
         for candidate in inputs:
             if item_type == "word":
-                items.append([candidate["w"], "よみ", "意思", "名詞・形容動詞", "短い例です。", "簡短例句。"])
+                items.append([candidate["w"], "よみ", "意思", "動詞" if invalid_pos else "名詞・形容動詞", "短い例です。", "簡短例句。"])
             elif item_type == "verb":
                 d = candidate["d"]
                 items.append([d, "よみ", "意思", 1, d + "ます", d + "て", d + "ない", d + "た", "短い例です。", "簡短例句。"])
@@ -186,7 +191,7 @@ class DailyFreshRegression(unittest.TestCase):
             payload = self.h.complete(job, steps)
             if not payload.get("ok"):
                 self.assertTrue(allow_exhaustion, payload)
-                self.assertEqual(payload["error"], "fresh_candidate_pool_insufficient", payload)
+                self.assertEqual(payload["error"], "candidate_pool_exhausted", payload)
                 self.assertEqual(len(self.h.calls), before, "exhaustion must be caught before enrichment")
                 self.assertTrue(payload.get("missing"), payload)
                 continue
@@ -234,6 +239,15 @@ class DailyFreshRegression(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assert_material(job, LEVELS)
         self.assertIn("[verb-replacement] use_reserve level=N5", self.output.getvalue())
+
+    def test_E_word_wrong_pos_same_level_reserve(self):
+        self.h.invalid_pos_once.add(("word", "N5"))
+        job, steps = self.h.job(LEVELS, "2026-10-22")
+        result = self.h.complete(job, steps)
+        self.assertTrue(result["ok"], result)
+        self.assert_material(job, LEVELS)
+        self.assertIn("invalid_pos=2", self.output.getvalue())
+        self.assertIn("[word-replacement] use_reserve level=N5", self.output.getvalue())
 
     def test_F_reserve_empty_source_refill(self):
         plan = app.select_daily_fresh_candidates("verb", {"N5": 1}, set(), "verb")
@@ -367,7 +381,7 @@ if __name__ == "__main__":
         args.report.write_text(json.dumps({
             "tests_run": program.result.testsRun, "failures": len(program.result.failures),
             "errors": len(program.result.errors), "successful": program.result.wasSuccessful(),
-            "scope": "temporary SQLite + checked-in OpenJLPT files; model output and material persistence mocked",
+            "scope": "temporary SQLite jobs/bank + checked-in OpenJLPT + real material CSV save/reload; only Gemini output mocked",
             "production_postgres_verified": False, "real_gemini_calls": 0,
             "scenarios": SCENARIOS, "evidence": EVIDENCE,
         }, ensure_ascii=False, indent=2), encoding="utf-8")

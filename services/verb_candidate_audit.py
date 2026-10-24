@@ -63,3 +63,17 @@ def verified_verb_evidence(surface):
         if len(alias_nodes) == 1 and _dictionary_form(alias_nodes[0]) and alias_nodes[0][2][6] == reading:
             return {"accepted": True, "reason": "verified_dictionary_alias", "evidence": f"unidic-lite:1.0.8:{orthography}"}
     return {"accepted": False, "reason": "not_verified_dictionary_verb", "suggested_type": "word"}
+
+
+@lru_cache(maxsize=32768)
+def verified_word_evidence(surface):
+    text = unicodedata.normalize("NFKC", str(surface or "")).strip()
+    if verified_verb_evidence(text)["accepted"]:
+        return False
+    nodes = _nodes(text)
+    allowed = {"名詞", "形容詞", "形状詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞"}
+    # Verify whole lexical entries, not a guessed kana suffix (e.g. いす).
+    if len(nodes) == 1:
+        _, stat, fields = nodes[0]
+        return stat == 0 and fields[0] in allowed
+    return bool(nodes) and all(stat == 0 and fields[0] in allowed for _, stat, fields in nodes)

@@ -1,5 +1,7 @@
 import csv
+import copy
 import html
+import hashlib
 import json
 import os
 import random
@@ -24,7 +26,7 @@ import pandas as pd
 from flask import Flask, has_request_context, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 from services.grammar_debugger import debug_grammar
-from services.verb_candidate_audit import verified_verb_evidence
+from services.verb_candidate_audit import verified_verb_evidence, verified_word_evidence
 
 
 app = Flask(__name__, template_folder=".")
@@ -4835,8 +4837,22 @@ def gemini_bank_material_history_keys_for_item_type(item_type, material_date=Non
     def collect(raw):
         nonlocal material_count
         payload = raw if isinstance(raw, dict) else json.loads(safe_text(raw))
-        usage = gemini_bank_extract_material_usage_keys(payload)
-        keys.update(usage["word"] | usage["verb"])
+        # Only lexical identities of saved word/verb entries count as history.
+        # Readings, translations, examples and display annotations are not keys.
+        for kind, items in (("word", payload.get("vocab") or payload.get("vocabulary") or []),
+                            ("verb", payload.get("verbs") or [])):
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                fields = (["word", "surface", "term", "vocab_word", "base_form"] if kind == "word"
+                          else ["dictionary_form", "base_form", "surface", "word", "term", "base"])
+                value = first_text(item, fields) or safe_text(item.get("normalized_key"))
+                if not value and kind == "verb" and isinstance(item.get("forms"), dict):
+                    value = safe_text(item["forms"].get("dictionary"))
+                value = re.split(r"[（(｜|]| - ", value, maxsplit=1)[0].strip()
+                key = normalize_vocab_key(value)
+                if key:
+                    keys.add(key)
         material_count += 1
 
     # No recent window or row limit: failed jobs and bank usage are not history.
@@ -5876,15 +5892,13 @@ def is_daily_fresh_word_pool_row(row):
     if has_variant_separator(surface):
         return False
     surface = re.split(r"[（(]", surface, maxsplit=1)[0].strip()
-    if is_safe_daily_fresh_suru_surface(surface):
-        return False
-    if looks_like_daily_fresh_verb_surface(surface):
+    if verified_verb_evidence(surface)["accepted"]:
         return False
     pos = first_text(row, ["part_of_speech", "pos"]).strip()
     pos_lower = pos.lower()
     if pos:
         return word_pos_allows_enriched_item(pos)
-    return True
+    return verified_word_evidence(surface)
 
 
 def word_pos_allows_enriched_item(pos):
@@ -6146,359 +6160,48 @@ def daily_fresh_bank_key_count(item_type, level):
         return 0
 
 
-def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None, source_state=None):
+def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None, source_state=None, deadline=None):
+    from services.candidate_selector import select_slice
+
     ensure_vocabulary_pool_store()
     level = normalize_gemini_bank_level(level, item_type)
     limit = max(1, min(int(limit or 20), 100))
+    generated = {normalize_vocab_key(k) for k in (excluded_keys or []) if normalize_vocab_key(k)}
+    current = {normalize_vocab_key(k) for k in (current_batch_keys or []) if normalize_vocab_key(k)}
+    state = source_state if isinstance(source_state, dict) else {}
+    history_digest = hashlib.sha256(json.dumps(sorted(generated)).encode("ascii")).hexdigest()
+    context = [item_type, level, history_digest]
+    if state.get("context") != context:
+        state.clear()
+        state["context"] = context
+    if state.get("source_exhausted"):
+        return [{"__selector_meta": True, "candidate_exhausted": True, "source_state": dict(state),
+                 "rejected_by_filter": state.get("rejected_by_filter", {}), "rescanned_ids": 0}]
+    deadline = min(deadline or time.perf_counter() + 4.0, time.perf_counter() + 4.0)
     print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
-    generated_keys = {normalize_vocab_key(key) for key in (excluded_keys or set()) if normalize_vocab_key(key)}
-    current_batch_keys = {normalize_vocab_key(key) for key in (current_batch_keys or set()) if normalize_vocab_key(key)}
-    excluded = generated_keys | current_batch_keys
-    source_state = source_state if isinstance(source_state, dict) else {}
-    context = [item_type, level, sorted(generated_keys)]
-    if source_state.get("context") != context:
-        source_state.clear()
-        source_state["context"] = context
-    if source_state.get("source_exhausted"):
-        print(f"[vocabulary-pool] source_scan_already_exhausted item_type={item_type} level={level} rescan=false")
-        return [{"__selector_meta": True, "candidate_exhausted": True, "source_state": source_state,
-                 "rejected_by_filter": source_state.get("rejected_by_filter", {}), "rescanned_ids": 0}]
-    id_batch_size = min(max(limit * 200, 500), 1000)
-    hydrate_batch_size = 50
-    max_id_batches = 4
-    selector_deadline = time.perf_counter() + 5.0
-    active_clause = "COALESCE(vp.is_active, TRUE) = TRUE" if DATABASE_URL else "COALESCE(vp.is_active, 1) = 1"
-    id_where = [
-        active_clause,
-        "COALESCE(NULLIF(vp.jlpt_level, ''), '') = %s" if DATABASE_URL else "COALESCE(NULLIF(vp.jlpt_level, ''), '') = ?",
-        "LOWER(COALESCE(NULLIF(vp.status, ''), 'active')) IN ('active', 'approved', 'manual_core', 'enabled', 'unused')",
-        "(vp.commonness_score IS NULL OR vp.commonness_score >= %s)" if DATABASE_URL else "(vp.commonness_score IS NULL OR vp.commonness_score >= ?)",
-    ]
-    id_params_base = [level, VOCABULARY_POOL_MIN_COMMONNESS_SCORE]
-    # Stable numeric cursor survives replacements and changing current-batch keys.
-    # Text is decoded only in the existing small hydration batches.
-    id_where.append("vp.id > %s" if DATABASE_URL else "vp.id > ?")
-    id_sql = f"""
-        SELECT vp.id
-        FROM vocabulary_pool vp
-        WHERE {' AND '.join(id_where)}
-        ORDER BY vp.id ASC
-        LIMIT {'%s' if DATABASE_URL else '?'}
-    """
-    if DATABASE_URL:
-        row_columns = [
-            "vp.id",
-            postgres_text_as_bytea("vp.surface"),
-            postgres_text_as_bytea("vp.base_form"),
-            postgres_text_as_bytea("vp.reading_hiragana"),
-            postgres_text_as_bytea("vp.part_of_speech"),
-            postgres_text_as_bytea("vp.jlpt_level"),
-            "vp.verb_group",
-            postgres_text_as_bytea("vp.quality"),
-            postgres_text_as_bytea("vp.normalized_key"),
-            postgres_text_as_bytea("vp.category"),
-            postgres_text_as_bytea("vp.source"),
-            postgres_text_as_bytea("vp.status"),
-            "vp.commonness_score",
-            "vp.priority",
-            "vp.is_active",
-            "vp.used_in_material_count",
-            postgres_text_as_bytea("vp.last_used_at"),
-        ]
-    else:
-        row_columns = [
-            "vp.id",
-            "vp.surface",
-            "vp.base_form",
-            "vp.reading_hiragana",
-            "vp.part_of_speech",
-            "vp.jlpt_level",
-            "vp.verb_group",
-            "vp.quality",
-            "vp.normalized_key",
-            "vp.category",
-            "vp.source",
-            "vp.status",
-            "vp.commonness_score",
-            "vp.priority",
-            "vp.is_active",
-            "vp.used_in_material_count",
-            "vp.last_used_at",
-        ]
-    row_sql_template = f"""
-        SELECT {', '.join(row_columns)}
-        FROM vocabulary_pool vp
-        WHERE vp.id IN ({{placeholders}})
-        ORDER BY vp.id ASC
-    """
-
-    def scan_candidate_rows(fetch_id_batch, hydrate_ids):
-        rows = []
-        skipped_bad_encoding = 0
-        bad_rows = []
-        rejected_by_reason = Counter()
-        rejected_samples = {}
-        scanned_total = 0
-        id_query_ms_total = 0.0
-        hydration_ms_total = 0.0
-        id_scan_exhausted = False
-        selector_timed_out = False
-        bank_count = daily_fresh_bank_key_count(item_type, level)
-        print("[vocabulary-pool] selector_sql_mode=id_batch_safe_hydration")
-        print(f"[vocabulary-pool] candidate_scan_start item_type={item_type} level={level} requested={limit}")
-        for batch_index in range(1, max_id_batches + 1):
-            if time.perf_counter() > selector_deadline:
-                selector_timed_out = True
-                print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} selected={len(rows)}")
-                break
-            offset = int(source_state.get("last_id") or 0)
-            id_query_started = time.perf_counter()
-            candidate_ids = fetch_id_batch(id_batch_size, offset)
-            id_query_ms = round((time.perf_counter() - id_query_started) * 1000, 2)
-            id_query_ms_total += id_query_ms
-            print(
-                f"[vocabulary-pool] selector_id_query_ms={id_query_ms} item_type={item_type} "
-                f"level={level} batch={batch_index} ids={len(candidate_ids)}"
-            )
-            if not candidate_ids:
-                id_scan_exhausted = True
-                break
-            scanned_total += len(candidate_ids)
-            batch_rejected = Counter()
-            for id_chunk in chunked_list(candidate_ids, hydrate_batch_size):
-                if time.perf_counter() > selector_deadline:
-                    selector_timed_out = True
-                    print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} selected={len(rows)}")
-                    break
-                hydration_started = time.perf_counter()
-                try:
-                    raw_rows = hydrate_ids(id_chunk)
-                except Exception as chunk_exc:
-                    if isinstance(chunk_exc, UnicodeDecodeError) or "codec can't decode" in str(chunk_exc):
-                        hydration_ms_total += round((time.perf_counter() - hydration_started) * 1000, 2)
-                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
-                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                        raw_rows = []
-                        for candidate_id in id_chunk:
-                            row_started = time.perf_counter()
-                            try:
-                                raw_rows.extend(hydrate_ids([candidate_id]))
-                                hydration_ms_total += round((time.perf_counter() - row_started) * 1000, 2)
-                            except Exception as row_exc:
-                                if isinstance(row_exc, UnicodeDecodeError) or "codec can't decode" in str(row_exc):
-                                    skipped_bad_encoding += 1
-                                    bad_rows.append(candidate_id)
-                                    rejected_by_reason["bad_encoding"] += 1
-                                    batch_rejected["bad_encoding"] += 1
-                                    print(f"[vocabulary-pool] bad_candidate_row id={candidate_id} reason=utf8_decode_error")
-                                    print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                                    continue
-                                raise
-                    else:
-                        raise
-                else:
-                    hydration_ms_total += round((time.perf_counter() - hydration_started) * 1000, 2)
-                for raw_row in raw_rows:
-                    source_state["last_id"] = int(raw_row["id"])
-                    try:
-                        candidate_row = sanitize_vocabulary_pool_candidate_row(raw_row)
-                    except UnicodeDecodeError as row_exc:
-                        candidate_id = safe_text((raw_row or {}).get("id"))
-                        skipped_bad_encoding += 1
-                        bad_rows.append(candidate_id)
-                        rejected_by_reason["bad_encoding"] += 1
-                        batch_rejected["bad_encoding"] += 1
-                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
-                        print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
-                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                        continue
-                    except Exception as row_exc:
-                        if "codec can't decode" in str(row_exc):
-                            candidate_id = safe_text((raw_row or {}).get("id"))
-                            skipped_bad_encoding += 1
-                            bad_rows.append(candidate_id)
-                            rejected_by_reason["bad_encoding"] += 1
-                            batch_rejected["bad_encoding"] += 1
-                            print("[vocabulary-pool] candidate_decode_error_recoverable=true")
-                            print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
-                            print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                            continue
-                        raise
-                    try:
-                        reason = daily_fresh_candidate_rejection_reason(candidate_row, item_type, level, excluded)
-                    except UnicodeDecodeError as row_exc:
-                        candidate_id = safe_text(candidate_row.get("id"))
-                        skipped_bad_encoding += 1
-                        bad_rows.append(candidate_id)
-                        rejected_by_reason["bad_encoding"] += 1
-                        batch_rejected["bad_encoding"] += 1
-                        print("[vocabulary-pool] candidate_decode_error_recoverable=true")
-                        print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
-                        print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                        continue
-                    except Exception as row_exc:
-                        if "codec can't decode" in str(row_exc):
-                            candidate_id = safe_text(candidate_row.get("id"))
-                            skipped_bad_encoding += 1
-                            bad_rows.append(candidate_id)
-                            rejected_by_reason["bad_encoding"] += 1
-                            batch_rejected["bad_encoding"] += 1
-                            print("[vocabulary-pool] candidate_decode_error_recoverable=true")
-                            print(f"[vocabulary-pool] bad_candidate_row id={candidate_id or 'unknown'} reason=utf8_decode_error")
-                            print("[vocabulary-pool] continue_scan_after_decode_error=true")
-                            continue
-                        raise
-                    if reason:
-                        rejected_by_reason[reason] += 1
-                        batch_rejected[reason] += 1
-                        samples = rejected_samples.setdefault(reason, [])
-                        if len(samples) < 5:
-                            samples.append({"id": candidate_row.get("id"), "surface": vocabulary_pool_candidate_surface(candidate_row),
-                                            "category": candidate_row.get("category"), "source": candidate_row.get("source"),
-                                            "part_of_speech": candidate_row.get("part_of_speech")})
-                        continue
-                    rows.append(candidate_row)
-                    excluded.add(vocabulary_pool_candidate_key(candidate_row))
-                    if len(rows) >= limit:
-                        break
-                if len(rows) >= limit:
-                    break
-                source_state["last_id"] = max(int(source_state.get("last_id") or 0), max(id_chunk))
-            if selector_timed_out:
-                break
-            print(
-                f"[vocabulary-pool] candidate_scan_batch item_type={item_type} level={level} "
-                f"batch={batch_index} ids={len(candidate_ids)} selected_so_far={len(rows)} "
-                f"rejected={dict(batch_rejected)}"
-            )
-            if len(rows) >= limit:
-                break
-            if len(candidate_ids) < id_batch_size:
-                id_scan_exhausted = True
-                break
-        if not id_scan_exhausted and not selector_timed_out and len(rows) < limit:
-            print(f"[vocabulary-pool] selector_scan_incomplete item_type={item_type} level={level} selected={len(rows)}")
-        print(f"[vocabulary-pool] selector_id_query_ms={round(id_query_ms_total, 2)} item_type={item_type} level={level} total=true")
-        print(f"[vocabulary-pool] selector_hydration_ms={round(hydration_ms_total, 2)} item_type={item_type} level={level} total=true")
-        print(f"[vocabulary-pool] selector_selected={len(rows)} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_scanned_ids={scanned_total} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_bad_rows={len(bad_rows)} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_excluded_generated={len(generated_keys)} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_excluded_bank=0 item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_bank_cache_candidates={bank_count} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_rejected_by_filter={dict(rejected_by_reason)} item_type={item_type} level={level}")
-        print(f"[vocabulary-pool] selector_excluded_current_batch={len(current_batch_keys)} item_type={item_type} level={level}")
-        print(
-            f"[vocabulary-pool] candidate_row_fetch_success item_type={item_type} level={level} "
-            f"selected={len(rows)} skipped_bad_encoding={skipped_bad_encoding}"
-        )
-        print(
-            f"[vocabulary-pool] candidate_scan_done item_type={item_type} level={level} "
-            f"selected={len(rows)} scanned_ids={scanned_total}"
-        )
-        source_state["bad_rows"] = sorted(set(source_state.get("bad_rows") or []) | {int(row_id) for row_id in bad_rows if str(row_id).isdigit()})
-        exhausted = id_scan_exhausted and not selector_timed_out and not source_state["bad_rows"] and len(rows) < limit
-        source_state["source_exhausted"] = exhausted
-        cumulative_rejections = Counter(source_state.get("rejected_by_filter") or {})
-        cumulative_rejections.update(rejected_by_reason)
-        source_state["rejected_by_filter"] = dict(cumulative_rejections)
-        print(f"[vocabulary-pool] selector_rejected_samples={log_safe_text(json.dumps(rejected_samples, ensure_ascii=False))}")
-        if exhausted:
-            print(
-                f"[vocabulary-pool] candidate_exhausted=true item_type={item_type} level={level} "
-                f"selected={len(rows)} requested={limit} scanned_total={scanned_total} "
-                f"rejected_by_reason={dict(rejected_by_reason)}"
-            )
-        print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(rows)}")
-        print(f"[vocabulary-pool] skipped_bad_encoding count={skipped_bad_encoding}")
-        print("[vocabulary-pool] safe_text_applied=true")
-        rows.append(
-            {
-                "__selector_meta": True,
-                "candidate_exhausted": exhausted,
-                "selector_timeout_warning": selector_timed_out,
-                "selector_scan_incomplete": not exhausted and len(rows) < limit,
-                "bad_rows": list(source_state["bad_rows"]),
-                "skipped_bad_encoding": skipped_bad_encoding,
-                "rejected_by_filter": dict(cumulative_rejections),
-                "source_state": dict(source_state),
-            }
-        )
-        return rows
-
+    print(f"[vocabulary-pool] selector_excluded_generated={len(generated)} selector_excluded_current_batch={len(current)} selector_excluded_bank=0")
+    options = dict(
+        postgres=bool(DATABASE_URL), item_type=item_type, level=level, limit=limit, state=state,
+        excluded=generated | current, blocked_categories=DAILY_FRESH_BLOCKED_CATEGORIES,
+        blocked_sources=DAILY_FRESH_BLOCKED_SOURCES, min_commonness=VOCABULARY_POOL_MIN_COMMONNESS_SCORE,
+        sanitize=sanitize_vocabulary_pool_candidate_row, reject=daily_fresh_candidate_rejection_reason,
+        candidate_key=vocabulary_pool_candidate_key, deadline=deadline,
+    )
     try:
         if DATABASE_URL:
             with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    try:
-                        cur.execute("SET LOCAL statement_timeout = '4500ms'")
-                    except Exception as timeout_cfg_exc:
-                        print(f"[vocabulary-pool] selector_statement_timeout_config_failed reason={timeout_cfg_exc}")
-
-                    def fetch_id_batch(batch_size_value, offset_value):
-                        cur.execute(id_sql, (*id_params_base, offset_value, batch_size_value))
-                        return [row[0] for row in cur.fetchall() if row and row[0] is not None]
-
-                    def hydrate_ids(candidate_ids):
-                        if not candidate_ids:
-                            return []
-                        placeholders = sql_placeholders(len(candidate_ids))
-                        row_sql = row_sql_template.format(placeholders=placeholders)
-                        cur.execute(row_sql, tuple(candidate_ids))
-                        raw_rows = cur.fetchall()
-                        columns = [desc[0] for desc in cur.description]
-                        return [dict(zip(columns, row)) for row in raw_rows]
-
-                    return scan_candidate_rows(fetch_id_batch, hydrate_ids)
-        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=10) as conn:
+                return select_slice(conn, **options)
+        with sqlite3.connect(SQLITE_SETTINGS_FILE, timeout=1) as conn:
             conn.text_factory = lambda value: value.decode("utf-8", errors="replace")
-            conn.row_factory = sqlite3.Row
-
-            def fetch_id_batch(batch_size_value, offset_value):
-                return [
-                    row[0]
-                    for row in conn.execute(id_sql, (*id_params_base, offset_value, batch_size_value)).fetchall()
-                    if row and row[0] is not None
-                ]
-
-            def hydrate_ids(candidate_ids):
-                if not candidate_ids:
-                    return []
-                placeholders = sql_placeholders(len(candidate_ids))
-                row_sql = row_sql_template.format(placeholders=placeholders)
-                return [
-                    dict(row)
-                    for row in conn.execute(row_sql, tuple(candidate_ids)).fetchall()
-                ]
-
-            return scan_candidate_rows(fetch_id_batch, hydrate_ids)
+            conn.set_progress_handler(lambda: int(time.perf_counter() >= deadline), 1000)
+            return select_slice(conn, **options)
     except Exception as exc:
-        error_text = str(exc)
-        if "statement timeout" in error_text.lower() or "canceling statement due to statement timeout" in error_text.lower():
-            print("[vocabulary-pool] selector_timeout_controlled=true")
-            print("[vocabulary-pool] selector_aborted_before_worker_timeout=true")
-            print(f"[vocabulary-pool] selector_timeout_warning item_type={item_type} level={level} reason={exc}")
-            return [
-                {
-                    "__selector_meta": True,
-                    "candidate_exhausted": False,
-                    "selector_timeout_warning": True,
-                    "selector_scan_incomplete": True,
-                    "selector_failed": False,
-                    "bad_rows": [],
-                    "skipped_bad_encoding": 0,
-                }
-            ]
-        if isinstance(exc, UnicodeDecodeError) or "codec can't decode" in str(exc):
-            log_candidate_fetch_error(item_type, level, "selector", "unknown", "", exc)
-            print("[vocabulary-pool] candidate_decode_error_recoverable=false")
-            return [{"__selector_meta": True, "candidate_exhausted": False, "selector_failed": True, "bad_rows": [], "skipped_bad_encoding": 0}]
-        print(f"[daily-fresh-candidates] fetch failed item_type={item_type} level={level} reason={exc}")
+        print(f"[vocabulary-pool] selector_query_failed item_type={item_type} level={level} reason={exc}")
         return [{"__selector_meta": True, "selector_failed": True, "candidate_exhausted": False,
-                 "reason": str(exc), "source_state": dict(source_state)}]
+                 "reason": str(exc), "source_state": dict(state)}]
 
 
-def select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=""):
+def select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type="", previous_plan=None, deadline=None):
     if item_type not in {"word", "verb"}:
         return {"candidates_by_level": {}, "items": [], "missing": []}
     requested_by_level = {
@@ -6507,21 +6210,25 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
         if int(count or 0) > 0
     }
     excluded_keys = {normalize_vocab_key(key) for key in (material_history_keys or set()) if normalize_vocab_key(key)}
-    selected_by_level = {}
-    selected_items = []
+    previous_plan = previous_plan if isinstance(previous_plan, dict) else {}
+    selected_by_level = copy.deepcopy(previous_plan.get("candidates_by_level") or {})
+    selected_items = [candidate for items in selected_by_level.values() for candidate in items]
     missing = []
     shortages = []
     fetch_errors = []
     selector_meta_by_level = {}
-    source_state_by_level = {}
+    source_state_by_level = copy.deepcopy(previous_plan.get("source_state_by_level") or {})
     skipped_bad_encoding = 0
     verb_audit_rejected = 0
-    seen = set()
+    seen = {daily_fresh_candidate_identity(candidate, item_type) for candidate in selected_items}
 
     def collect_candidates_for_level(level, needed):
         nonlocal skipped_bad_encoding, verb_audit_rejected
+        if deadline is not None and time.perf_counter() >= deadline:
+            selector_meta_by_level[level] = {"selector_scan_incomplete": True, "candidate_exhausted": False}
+            return []
         rows = fetch_daily_fresh_candidate_rows(item_type, level, needed, excluded_keys, current_batch_keys=seen,
-                                                source_state=source_state_by_level.setdefault(level, {}))
+                                                source_state=source_state_by_level.setdefault(level, {}), deadline=deadline)
         candidates = []
         for row in rows:
             if isinstance(row, dict) and row.get("__selector_meta"):
@@ -6572,7 +6279,9 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
         return candidates
 
     for level, needed in requested_by_level.items():
-        candidates = collect_candidates_for_level(level, needed)
+        candidates = list(selected_by_level.get(level) or [])
+        if len(candidates) < needed:
+            candidates.extend(collect_candidates_for_level(level, needed - len(candidates)))
         selected_by_level[level] = candidates
         if len(candidates) < needed:
             shortage = needed - len(candidates)
@@ -6689,6 +6398,9 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
         "selector_timeout_warning": selector_timeout_warning,
         "selector_scan_incomplete": selector_scan_incomplete,
         "selector_failed": selector_failed,
+        "selector_error": next((m.get("selector_error") for m in selector_meta_by_level.values() if m.get("selector_error")), ""),
+        "candidate_validation_failed": any(m.get("candidate_validation_failed") for m in selector_meta_by_level.values()),
+        "preparation_complete": not selector_scan_incomplete and not selector_failed,
         "selector_meta_by_level": selector_meta_by_level,
         "material_history_keys": sorted(excluded_keys),
         "source_state_by_level": source_state_by_level,
@@ -7159,7 +6871,7 @@ def active_pending_count_for_level(candidate_items, completed_chunks, chunk_size
     return pending
 
 
-def refill_daily_fresh_candidate_from_source(candidate_plan, item_type, level, active_keys, pack_type=""):
+def refill_daily_fresh_candidate_from_source(candidate_plan, item_type, level, active_keys, pack_type="", deadline=None):
     if item_type not in {"word", "verb"}:
         return None
     attempts_by_level = dict(candidate_plan.get("reserve_refill_attempts_by_level") or {})
@@ -7183,9 +6895,14 @@ def refill_daily_fresh_candidate_from_source(candidate_plan, item_type, level, a
         print(f"[{prefix}] refill_from_vocabulary_pool level={level} attempt={attempts}")
         rows = fetch_daily_fresh_candidate_rows(item_type, level, 1, material_history_keys,
                                                 current_batch_keys=excluded - material_history_keys,
-                                                source_state=source_state)
+                                                source_state=source_state, deadline=deadline)
         for row in rows:
             if isinstance(row, dict) and row.get("__selector_meta"):
+                if row.get("selector_scan_incomplete") and not row.get("selector_error"):
+                    candidate_plan.setdefault("replacement_scan_pending", {})[level] = True
+                    attempts_by_level[level] = attempts - 1
+                    print(f"[{prefix}] refill_scan_pending level={level} progress_saved=true")
+                    return None
                 if row.get("candidate_exhausted"):
                     source_state["source_exhausted"] = True
                 continue
@@ -7266,6 +6983,8 @@ def activate_daily_fresh_reserve_candidates(
                 failed_by_level.setdefault(level, []).append((candidate, reason))
 
     added = 0
+    candidate_plan["replacement_scan_pending"] = {}
+    selector_deadline = time.perf_counter() + 4.0
     exhausted_by_level = dict(candidate_plan.get("reserve_exhausted_by_level") or {})
     for level, required in quota.items():
         required = int(required or 0)
@@ -7306,9 +7025,11 @@ def activate_daily_fresh_reserve_candidates(
                     level,
                     active_keys,
                     pack_type=pack_type,
+                    deadline=selector_deadline,
                 )
                 if not next_candidate:
-                    exhausted_by_level[level] = True
+                    if not (candidate_plan.get("replacement_scan_pending") or {}).get(level):
+                        exhausted_by_level[level] = True
                     break
             next_key = daily_fresh_candidate_identity(next_candidate, item_type)
             if next_key:
@@ -7382,6 +7103,13 @@ def cached_daily_fresh_candidate_plan(pack_state):
         "reserve_shortages",
         "refill_attempted_keys",
         "requested_by_level",
+        "selector_scan_incomplete",
+        "selector_timeout_warning",
+        "selector_failed",
+        "selector_error",
+        "candidate_validation_failed",
+        "preparation_complete",
+        "replacement_scan_pending",
     ]:
         if key in plan:
             cached[key] = plan.get(key)
@@ -7427,7 +7155,7 @@ def gemini_daily_fresh_all_candidates_ready(job):
     for step in daily_steps:
         _cache, _pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
         plan = cached_daily_fresh_candidate_plan(pack_state)
-        if not field_name or not plan:
+        if not field_name or not plan or plan.get("preparation_complete") is False:
             return False
         quota = normalize_daily_fresh_quota_by_level(step.get("quota_by_level") or {}, step.get("item_type"))
         primary_counts = Counter(simple_text(c.get("level")) for c in plan.get("primary_items") or plan.get("items") or [])
@@ -7438,27 +7166,34 @@ def gemini_daily_fresh_all_candidates_ready(job):
 
 def gemini_daily_fresh_plan_error(candidate_plan, item_type, requested_total, best_effort=False):
     if not isinstance(candidate_plan, dict):
-        return "fresh_candidate_pool_insufficient"
-    if candidate_plan.get("selector_timeout_warning") or candidate_plan.get("selector_scan_incomplete"):
-        return "selector_timeout"
+        return "candidate_validation_failed"
+    if candidate_plan.get("selector_error"):
+        return candidate_plan["selector_error"]
+    if candidate_plan.get("selector_scan_incomplete"):
+        return "selector_scan_incomplete"
     if candidate_plan.get("selector_failed"):
-        return "fresh_candidate_selector_failed"
+        return "candidate_validation_failed"
     if candidate_plan.get("fetch_errors"):
-        return "fresh_candidate_decode_error"
+        return "candidate_validation_failed"
     item_count = len(candidate_plan.get("items") or [])
     if item_type in {"word", "verb"} and item_count < int(requested_total or 0):
-        return "fresh_candidate_pool_insufficient"
+        return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
     if item_type == "grammar" and not best_effort and item_count < int(requested_total or 0):
         return "fresh_candidate_pool_insufficient"
     if item_type == "grammar" and int(requested_total or 0) > 0 and item_count <= 0:
         return "fresh_candidate_pool_insufficient"
     if candidate_plan.get("missing") and item_type in {"word", "verb"}:
-        return "fresh_candidate_pool_insufficient"
+        return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
     return ""
 
 
 def gemini_daily_fresh_prepare_error_payload(job_id, pack_type, item_type, error_code, candidate_plan=None, elapsed_ms=0):
-    reason = "候選準備逾時，未消耗 Gemini API" if error_code == "selector_timeout" else "候選準備失敗，未消耗 Gemini API"
+    reason = {
+        "selector_timeout": "候選準備逾時，未消耗 Gemini API",
+        "selector_scan_incomplete": "候選掃描尚未完成，已保存進度，未消耗 Gemini API",
+        "candidate_pool_exhausted": "指定等級的合格候選已掃描完畢，數量不足，未消耗 Gemini API",
+        "candidate_validation_failed": "候選資料驗證失敗，未消耗 Gemini API",
+    }.get(error_code, "候選準備失敗，未消耗 Gemini API")
     if error_code == "fresh_candidate_decode_error":
         reason = "日文候選詞讀取失敗，未消耗 Gemini API"
     payload = {
@@ -7487,163 +7222,77 @@ def gemini_daily_fresh_prepare_error_payload(job_id, pack_type, item_type, error
 
 def prepare_all_gemini_daily_fresh_candidates(job_id, current_job, settings, material_date, started):
     print("[gemini-flow] phase=prepare_all_candidates start")
-    print("[gemini-flow] candidates_ready=false")
     print("[gemini-flow] api_guard gemini_calls_blocked_until_candidates_ready=true")
     print("[gemini-cost] phase=prepare_all_candidates gemini_call_count=0")
     job = current_job or load_gemini_generation_job(job_id)
     if not job:
-        return {
-            "ok": False,
-            "error": "job_not_found",
-            "reason": "Gemini generation job not found",
-            "job_id": job_id,
-            "gemini_call_count": 0,
-            "continue_same_step": False,
-        }, 200
-    daily_batch_id = job_id
-    planned_call_count = 0
-    reserve_candidate_count = 0
+        return {"ok": False, "error": "job_not_found", "job_id": job_id}, 200
+    deadline = time.perf_counter() + 4.0
     for step in gemini_daily_fresh_steps(job):
-        pack_type = str(step.get("pack_type") or "").strip().lower()
-        item_type = str(step.get("item_type") or "").strip().lower()
-        requested_by_level = {
-            str(level): int(count or 0)
-            for level, count in (step.get("requested_by_level") or {}).items()
-            if int(count or 0) > 0
-        }
-        quota_by_level = {
-            str(level): int(count or 0)
-            for level, count in (step.get("quota_by_level") or {}).items()
-            if int(count or 0) > 0
-        }
-        requested_total = sum(quota_by_level.values()) or sum(requested_by_level.values())
-        best_effort = bool(step.get("best_effort"))
+        pack_type, item_type = step["pack_type"], step["item_type"]
+        requested = normalize_daily_fresh_quota_by_level(step.get("requested_by_level") or {}, item_type)
+        quota = normalize_daily_fresh_quota_by_level(step.get("quota_by_level") or {}, item_type)
         cache, pack_cache, pack_state, field_name = gemini_daily_fresh_pack_state(job, step)
-        if not field_name:
+        previous = cached_daily_fresh_candidate_plan(pack_state)
+        if previous and previous.get("preparation_complete") is not False and previous.get("primary_reserve_contract_version"):
             continue
-        cached_candidate_plan = cached_daily_fresh_candidate_plan(pack_state)
-        cached_primary_counts = Counter(simple_text(c.get("level")) for c in (cached_candidate_plan or {}).get("primary_items") or [])
-        if cached_candidate_plan and not cached_candidate_plan.get("missing") and all(
-            cached_primary_counts.get(level, 0) >= count for level, count in quota_by_level.items() if level != "SNS"
-        ):
-            print(f"[daily-fresh-candidates] phase_a_cached pack={pack_type} item_type={item_type}")
-            continue
-        warning = ""
-        candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
         if item_type in {"word", "verb"}:
-            inventory = vocabulary_pool_candidate_inventory()
-            inventory_levels = inventory.get("by_level") or {}
-            print(f"[vocabulary-pool] candidate_inventory total={inventory.get('total', 0)}")
-            print(
-                "[vocabulary-pool] by_level "
-                f"N5={inventory_levels.get('N5', 0)} "
-                f"N4={inventory_levels.get('N4', 0)} "
-                f"N3={inventory_levels.get('N3', 0)} "
-                f"N2={inventory_levels.get('N2', 0)} "
-                f"N1={inventory_levels.get('N1', 0)}"
+            # Reuse the cached material identities while this job resumes its keyset.
+            history = set(previous["material_history_keys"]) if previous and "material_history_keys" in previous else gemini_bank_material_history_keys_for_item_type(item_type, material_date)
+            plan = select_daily_fresh_candidates(
+                item_type, requested, history, pack_type=pack_type, previous_plan=previous, deadline=deadline,
             )
-            if int(inventory.get("total") or 0) < 1000:
-                elapsed_ms = round((time.perf_counter() - started) * 1000)
-                update_gemini_generation_job(
-                    job_id,
-                    status="failed",
-                    current_stage=f"daily_fresh:{pack_type}:prepare_all_candidates",
-                    error_message="fresh_candidate_pool_insufficient",
-                )
-                print("[gemini-cost] job_failed_before_enrich gemini_call_count=0")
-                return gemini_daily_fresh_prepare_error_payload(
-                    job_id, pack_type, item_type, "fresh_candidate_pool_insufficient", None, elapsed_ms
-                ), 200
-            material_history_keys = gemini_bank_material_history_keys_for_item_type(item_type, material_date=material_date)
-            candidate_plan = select_daily_fresh_candidates(item_type, requested_by_level, material_history_keys, pack_type=pack_type)
-            candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
-        elif item_type == "grammar":
-            inventory = grammar_pool_candidate_inventory()
-            inventory_levels = inventory.get("by_level") or {}
-            print(f"[grammar-pool] candidate_inventory total={inventory.get('total', 0)}")
-            print(
-                "[grammar-pool] by_level "
-                f"N5={inventory_levels.get('N5', 0)} "
-                f"N4={inventory_levels.get('N4', 0)} "
-                f"N3={inventory_levels.get('N3', 0)} "
-                f"N2={inventory_levels.get('N2', 0)} "
-                f"N1={inventory_levels.get('N1', 0)}"
-            )
-            recent_keys = get_recent_used_grammar_keys(material_date, days=GEMINI_BANK_RECENT_EXCLUSION_DAYS)
-            try:
-                candidate_plan = select_daily_fresh_grammar_candidates(requested_by_level, recent_keys, pack_type=pack_type)
-                candidate_plan = ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, item_type, pack_type)
-            except Exception as exc:
-                warning = "grammar_pool_unavailable"
-                candidate_plan = {"candidates_by_level": {}, "items": [], "missing": [], "fetch_errors": [], "skipped_bad_encoding": 0}
-                print(f"[grammar-pool] candidate_fetch_failed pack={pack_type} reason={exc}")
-            if candidate_plan.get("missing"):
-                warning = warning or "grammar_pool_candidate_shortage"
-                print(
-                    "[daily-fresh-candidates] grammar best_effort "
-                    f"job_id={job_id} pack={pack_type} missing={candidate_plan.get('missing')}"
-                )
-        error_code = gemini_daily_fresh_plan_error(candidate_plan, item_type, requested_total, best_effort=best_effort)
-        if error_code:
-            elapsed_ms = round((time.perf_counter() - started) * 1000)
-            if error_code == "selector_timeout":
-                print("[vocabulary-pool] selector_timeout_controlled=true")
-                print("[vocabulary-pool] selector_aborted_before_worker_timeout=true")
-            update_gemini_generation_job(
-                job_id,
-                status="failed",
-                current_stage=f"daily_fresh:{pack_type}:prepare_all_candidates",
-                error_message=error_code,
-            )
-            print(
-                f"[gemini-flow] prepare_all_candidates_failed pack={pack_type} "
-                f"item_type={item_type} error={error_code}"
-            )
-            print("[gemini-cost] job_failed_before_enrich gemini_call_count=0")
-            return gemini_daily_fresh_prepare_error_payload(
-                job_id, pack_type, item_type, error_code, candidate_plan, elapsed_ms
-            ), 200
-        candidate_count = len(candidate_plan.get("items") or [])
+        else:
+            recent = get_recent_used_grammar_keys(material_date, days=GEMINI_BANK_RECENT_EXCLUSION_DAYS)
+            plan = select_daily_fresh_grammar_candidates(requested, recent, pack_type=pack_type)
+            plan["preparation_complete"] = True
+        pending = plan.get("preparation_complete") is False and not plan.get("selector_failed") and not plan.get("selector_error")
+        if not pending:
+            plan = ensure_daily_fresh_candidate_plan_contract(plan, quota, item_type, pack_type)
+        error = "" if pending else gemini_daily_fresh_plan_error(plan, item_type, sum(quota.values()), bool(step.get("best_effort")))
         chunk_size = daily_fresh_enrich_chunk_size(item_type)
-        chunk_count = len(chunked_list(candidate_plan.get("items") or [], chunk_size))
-        quota_count = sum(int(count or 0) for count in (quota_by_level or {}).values())
-        planned_call_count += chunk_count
-        reserve_candidate_count += len(candidate_plan.get("reserve_items") or [])
         pack_state = {
-            **pack_state,
-            "item_type": item_type,
-            "requested_by_level": requested_by_level,
-            "requested": candidate_count,
-            "candidate_plan": candidate_plan,
-            "candidate_count": candidate_count,
-            "candidate_missing": candidate_plan.get("missing") or [],
-            "chunk_size": chunk_size,
-            "chunk_count": chunk_count,
-            "quota_count": quota_count,
-            "reserve_candidate_count": max(0, candidate_count - quota_count),
-            "completed_chunks": pack_state.get("completed_chunks") if isinstance(pack_state.get("completed_chunks"), list) else [],
-            "daily_batch_id": daily_batch_id,
-            "generated_for_date": material_date,
+            **pack_state, "item_type": item_type, "requested_by_level": requested,
+            "candidate_plan": plan, "candidate_count": len(plan.get("items") or []),
+            "candidate_missing": plan.get("missing") or [], "chunk_size": chunk_size,
+            "chunk_count": len(chunked_list(plan.get("items") or [], chunk_size)),
+            "quota_count": sum(quota.values()), "completed_chunks": pack_state.get("completed_chunks") or [],
+            "daily_batch_id": job_id, "generated_for_date": material_date,
             "candidate_source": "grammar_pool" if item_type == "grammar" else "vocabulary_pool",
-            "warning": warning,
         }
         pack_cache[pack_type] = make_json_safe(pack_state)
         cache["daily_fresh"] = pack_cache
         update_gemini_generation_job(
-            job_id,
-            current_stage=f"daily_fresh:{pack_type}_candidates_selected",
-            **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False, default=str)},
+            job_id, current_stage=f"daily_fresh:{pack_type}:prepare_all_candidates",
+            **{field_name: json.dumps(make_json_safe(cache), ensure_ascii=False)},
         )
-        print(
-            f"[daily-fresh-candidates] phase_a_prepared pack={pack_type} "
-            f"item_type={item_type} candidate_count={candidate_count}"
-        )
+        if error:
+            update_gemini_generation_job(job_id, status="failed", error_message=error)
+            print(f"[gemini-flow] prepare_all_candidates_failed pack={pack_type} error={error}")
+            print("[gemini-cost] job_failed_before_enrich gemini_call_count=0")
+            return gemini_daily_fresh_prepare_error_payload(
+                job_id, pack_type, item_type, error, plan, round((time.perf_counter() - started) * 1000),
+            ), 200
+        # Exactly one bounded pack-preparation slice per HTTP request.
         job = load_gemini_generation_job(job_id) or job
+        if not gemini_daily_fresh_all_candidates_ready(job):
+            print(f"[gemini-flow] candidates_ready=false progress_saved=true pack={pack_type}")
+            return {
+                "ok": True, "job_id": job_id, "stage": "prepare_all_candidates", "done": False,
+                "warning": "selector_scan_incomplete" if pending else "",
+                "continue_same_step": True, "candidates_ready": False, "gemini_call_count": 0,
+                "next_step": {"stage": "daily_fresh", "pack_type": gemini_daily_fresh_steps(job)[0]["pack_type"]},
+                "progress": {"phase": "prepare_all_candidates", "prepared_pack": pack_type},
+            }, 200
+        break
     print("[gemini-flow] candidates_ready=true")
-    print(f"[gemini-cost] planned_calls={planned_call_count}")
-    print("[gemini-cost] reserve_calls_used=0")
-    print(f"[gemini-cost] max_calls={planned_call_count}")
-    print(f"[gemini-cost] reserve_candidates_planned={reserve_candidate_count}")
+    planned_calls = reserve_count = 0
+    for step in gemini_daily_fresh_steps(job):
+        _, _, state, _ = gemini_daily_fresh_pack_state(job, step)
+        plan = state.get("candidate_plan") or {}
+        planned_calls += len(chunked_list(plan.get("primary_items") or [], daily_fresh_enrich_chunk_size(step["item_type"])))
+        reserve_count += len(plan.get("reserve_items") or [])
+    print(f"[gemini-cost] planned_calls={planned_calls} reserve_calls_used=0 max_calls={planned_calls + reserve_count}")
     return None, 200
 
 
@@ -11602,7 +11251,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 last_result={"inserted": 0, "warning": reason}, last_chunk_candidates=chunk_candidates,
             )
             persist_replacement_activation("replacement_after_failure")
-            has_more = any(index not in completed_chunks for index in range(len(chunks)))
+            has_more = bool(candidate_plan.get("replacement_scan_pending")) or any(index not in completed_chunks for index in range(len(chunks)))
             shortfall = daily_fresh_pack_level_shortfall()
             if not has_more and shortfall:
                 update_gemini_generation_job(job_id, status="failed", error_message="fresh_generation_incomplete")
@@ -11958,7 +11607,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     last_result={"inserted": 0, "rejection_reason": "pre_finalize_gate"},
                     last_chunk_candidates=[],
                 )
-                if added:
+                if added or candidate_plan.get("replacement_scan_pending"):
                     persist_replacement_activation("replacement_added")
                     elapsed_ms = round((time.perf_counter() - started) * 1000)
                     print(
@@ -12068,7 +11717,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                         last_result={"inserted": 0, "rejection_reason": "pre_finalize_gate"},
                         last_chunk_candidates=[],
                     )
-                    if added:
+                    if added or candidate_plan.get("replacement_scan_pending"):
                         persist_replacement_activation("replacement_added")
                         elapsed_ms = round((time.perf_counter() - started) * 1000)
                         print(
@@ -12174,7 +11823,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             )
             candidate_items = list(candidate_plan.get("items") or [])
             chunks = chunked_list(candidate_items, chunk_size)
-            has_more_chunks = any(index not in completed_chunks for index in range(len(chunks)))
+            has_more_chunks = bool(candidate_plan.get("replacement_scan_pending")) or any(index not in completed_chunks for index in range(len(chunks)))
             if item_type == "grammar" and int(result.get("inserted") or 0) > 0:
                 inserted_candidate = chunk_candidates[0] if chunk_candidates else {}
                 inserted_level = simple_text(inserted_candidate.get("level"))

@@ -1,0 +1,645 @@
+{
+  "production_postgresql_verified": false,
+  "local_sqlite": "C:\\Users\\88698\\Documents\\Codex\\2026-05-22\\vs-code\\state.sqlite3",
+  "local_materials_csv": "C:\\Users\\88698\\Documents\\Codex\\2026-05-22\\vs-code\\database.csv",
+  "local_inventory_total": 10389,
+  "local_saved_material_history_keys": 110,
+  "legacy_alias_key_count": 159,
+  "removed_display_alias_samples": [
+    "会う(あう)",
+    "会う(あう)-見面",
+    "会う(あう)-見面|五段|N5|動詞",
+    "伝える(つたえる)",
+    "伝える(つたえる)-傳達",
+    "伝える(つたえる)-傳達|一段|未標記|動詞",
+    "使う(つかう)",
+    "使う(つかう)-使用",
+    "使う(つかう)-使用|五段|N5|動詞",
+    "動く(うごく)",
+    "動く(うごく)-移動、運作",
+    "動く(うごく)-移動、運作|五段|N4|動詞",
+    "思う(おもう)",
+    "思う(おもう)-想、認為",
+    "思う(おもう)-想、認為|五段|N5|動詞",
+    "持つ(もつ)",
+    "持つ(もつ)-持有、拿",
+    "持つ(もつ)-持有、拿|五段|N5|動詞",
+    "曲がる(まがる)",
+    "曲がる(まがる)-轉彎"
+  ],
+  "local_inventory": {
+    "N5": {
+      "rows": 1341,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "seed_basic",
+          "count": 60
+        },
+        {
+          "category": "business",
+          "source": "seed_advanced",
+          "count": 651
+        },
+        {
+          "category": "advanced",
+          "source": "seed_advanced",
+          "count": 630
+        }
+      ],
+      "blocked_samples": [
+        {
+          "id": 130,
+          "surface": "業務改善",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 145,
+          "surface": "業務管理上",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 152,
+          "surface": "業務分析化",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 159,
+          "surface": "業務評価性",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 166,
+          "surface": "業務検討率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 173,
+          "surface": "業務導入力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 180,
+          "surface": "業務推進案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 187,
+          "surface": "業務支援策",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        }
+      ],
+      "word": {
+        "eligible_unique_remaining": 18,
+        "rejected_by_reason": {
+          "eligible": 18,
+          "excluded_material_history_or_current_batch": 40,
+          "non_word": 2,
+          "category": 1281
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 2,
+        "rejected_by_reason": {
+          "non_verb:blocked_pos": 17,
+          "excluded_material_history_or_current_batch": 40,
+          "non_verb:known_non_verb": 1,
+          "eligible": 2,
+          "category": 1281
+        }
+      }
+    },
+    "N4": {
+      "rows": 1328,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "seed_basic",
+          "count": 47
+        },
+        {
+          "category": "business",
+          "source": "seed_advanced",
+          "count": 651
+        },
+        {
+          "category": "advanced",
+          "source": "seed_advanced",
+          "count": 630
+        }
+      ],
+      "blocked_samples": [
+        {
+          "id": 131,
+          "surface": "業務改善策",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 138,
+          "surface": "業務管理",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 153,
+          "surface": "業務分析上",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 160,
+          "surface": "業務評価化",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 167,
+          "surface": "業務検討性",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 174,
+          "surface": "業務導入率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 181,
+          "surface": "業務推進力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 188,
+          "surface": "業務支援案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        }
+      ],
+      "word": {
+        "eligible_unique_remaining": 31,
+        "rejected_by_reason": {
+          "excluded_material_history_or_current_batch": 5,
+          "eligible": 31,
+          "non_word": 11,
+          "category": 1281
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 11,
+        "rejected_by_reason": {
+          "excluded_material_history_or_current_batch": 5,
+          "non_verb:blocked_pos": 25,
+          "non_verb:known_non_verb": 6,
+          "eligible": 11,
+          "category": 1281
+        }
+      }
+    },
+    "N3": {
+      "rows": 2584,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "seed_basic",
+          "count": 22
+        },
+        {
+          "category": "business",
+          "source": "seed_advanced",
+          "count": 1302
+        },
+        {
+          "category": "advanced",
+          "source": "seed_advanced",
+          "count": 1260
+        }
+      ],
+      "blocked_samples": [
+        {
+          "id": 132,
+          "surface": "業務改善案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 137,
+          "surface": "業務改善上",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 139,
+          "surface": "業務管理策",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 144,
+          "surface": "業務管理化",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 146,
+          "surface": "業務分析",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 151,
+          "surface": "業務分析性",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 158,
+          "surface": "業務評価率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 161,
+          "surface": "業務評価上",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        }
+      ],
+      "word": {
+        "eligible_unique_remaining": 17,
+        "rejected_by_reason": {
+          "excluded_material_history_or_current_batch": 2,
+          "eligible": 17,
+          "non_word": 3,
+          "category": 2562
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 3,
+        "rejected_by_reason": {
+          "excluded_material_history_or_current_batch": 2,
+          "non_verb:blocked_pos": 17,
+          "eligible": 3,
+          "category": 2562
+        }
+      }
+    },
+    "N2": {
+      "rows": 2563,
+      "category_source_counts": [
+        {
+          "category": "business",
+          "source": "seed_advanced",
+          "count": 1303
+        },
+        {
+          "category": "advanced",
+          "source": "seed_advanced",
+          "count": 1260
+        }
+      ],
+      "blocked_samples": [
+        {
+          "id": 133,
+          "surface": "業務改善力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 135,
+          "surface": "業務改善性",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 140,
+          "surface": "業務管理案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 142,
+          "surface": "業務管理率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 147,
+          "surface": "業務分析策",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 149,
+          "surface": "業務分析力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 154,
+          "surface": "業務評価",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 156,
+          "surface": "業務評価案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        }
+      ],
+      "word": {
+        "eligible_unique_remaining": 0,
+        "rejected_by_reason": {
+          "category": 2563
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 0,
+        "rejected_by_reason": {
+          "category": 2563
+        }
+      }
+    },
+    "N1": {
+      "rows": 2563,
+      "category_source_counts": [
+        {
+          "category": "business",
+          "source": "seed_advanced",
+          "count": 1303
+        },
+        {
+          "category": "advanced",
+          "source": "seed_advanced",
+          "count": 1260
+        }
+      ],
+      "blocked_samples": [
+        {
+          "id": 134,
+          "surface": "業務改善率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 136,
+          "surface": "業務改善化",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 141,
+          "surface": "業務管理力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 143,
+          "surface": "業務管理性",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 148,
+          "surface": "業務分析案",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 150,
+          "surface": "業務分析率",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 155,
+          "surface": "業務評価策",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        },
+        {
+          "id": 157,
+          "surface": "業務評価力",
+          "source": "seed_advanced",
+          "category": "business",
+          "part_of_speech": "名詞"
+        }
+      ],
+      "word": {
+        "eligible_unique_remaining": 0,
+        "rejected_by_reason": {
+          "category": 2563
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 0,
+        "rejected_by_reason": {
+          "category": 2563
+        }
+      }
+    }
+  },
+  "checked_in_openjlpt_not_imported": {
+    "N5": {
+      "rows": 662,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "openjlpt",
+          "count": 662
+        }
+      ],
+      "blocked_samples": [],
+      "word": {
+        "eligible_unique_remaining": 457,
+        "rejected_by_reason": {
+          "eligible": 457,
+          "non_word": 160,
+          "excluded_material_history_or_current_batch": 45
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 88,
+        "rejected_by_reason": {
+          "non_verb:not_verified_dictionary_verb": 467,
+          "eligible": 88,
+          "non_verb:variant_separator": 11,
+          "non_verb:known_non_verb": 10,
+          "non_verb:counter_or_number": 41,
+          "excluded_material_history_or_current_batch": 45
+        }
+      }
+    },
+    "N4": {
+      "rows": 632,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "openjlpt",
+          "count": 632
+        }
+      ],
+      "blocked_samples": [],
+      "word": {
+        "eligible_unique_remaining": 412,
+        "rejected_by_reason": {
+          "non_word": 210,
+          "eligible": 412,
+          "excluded_material_history_or_current_batch": 10
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 149,
+        "rejected_by_reason": {
+          "non_verb:not_verified_dictionary_verb": 462,
+          "eligible": 149,
+          "non_verb:variant_separator": 5,
+          "non_verb:known_non_verb": 3,
+          "non_verb:counter_or_number": 3,
+          "excluded_material_history_or_current_batch": 10
+        }
+      }
+    },
+    "N3": {
+      "rows": 1784,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "openjlpt",
+          "count": 1784
+        }
+      ],
+      "blocked_samples": [],
+      "word": {
+        "eligible_unique_remaining": 1451,
+        "rejected_by_reason": {
+          "eligible": 1451,
+          "non_word": 329,
+          "excluded_material_history_or_current_batch": 4
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 231,
+        "rejected_by_reason": {
+          "non_verb:not_verified_dictionary_verb": 1527,
+          "non_verb:known_non_verb": 8,
+          "eligible": 231,
+          "non_verb:counter_or_number": 14,
+          "excluded_material_history_or_current_batch": 4
+        }
+      }
+    },
+    "N2": {
+      "rows": 1793,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "openjlpt",
+          "count": 1793
+        }
+      ],
+      "blocked_samples": [],
+      "word": {
+        "eligible_unique_remaining": 1303,
+        "rejected_by_reason": {
+          "non_word": 490,
+          "eligible": 1303
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 374,
+        "rejected_by_reason": {
+          "non_verb:not_verified_dictionary_verb": 1409,
+          "non_verb:variant_separator": 3,
+          "eligible": 374,
+          "non_verb:known_non_verb": 4,
+          "non_verb:counter_or_number": 3
+        }
+      }
+    },
+    "N1": {
+      "rows": 3463,
+      "category_source_counts": [
+        {
+          "category": "general",
+          "source": "openjlpt",
+          "count": 3463
+        }
+      ],
+      "blocked_samples": [],
+      "word": {
+        "eligible_unique_remaining": 2701,
+        "rejected_by_reason": {
+          "eligible": 2701,
+          "non_word": 760,
+          "excluded_material_history_or_current_batch": 2
+        }
+      },
+      "verb": {
+        "eligible_unique_remaining": 504,
+        "rejected_by_reason": {
+          "non_verb:not_verified_dictionary_verb": 2941,
+          "eligible": 504,
+          "non_verb:known_non_verb": 4,
+          "non_verb:counter_or_number": 12,
+          "excluded_material_history_or_current_batch": 2
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Render inventory 18636 and history count 3237 were not accessible",
+    "File-level JLPT labels are source labels, not independently certified JLPT classifications",
+    "POS evidence uses existing UniDic dictionary; source-file counts do not prove production availability"
+  ]
+}
