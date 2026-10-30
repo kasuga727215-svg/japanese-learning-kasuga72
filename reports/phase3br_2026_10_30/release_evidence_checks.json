@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "backend": "SQLite",
+      "candidate_evidence_persisted_in_job": 13,
+      "same_job_survives_process_cache_clear": true,
+      "new_job_does_not_inherit_old_plan": true,
+      "same_process_lru_hit": true,
+      "history_keys_after_preparation": 0,
+      "mock_gemini_calls": 0,
+      "classifier_version": "unidic-lattice-contract-v2"
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "candidate_evidence_persisted_in_job": 13,
+      "same_job_survives_process_cache_clear": true,
+      "new_job_does_not_inherit_old_plan": true,
+      "same_process_lru_hit": true,
+      "history_keys_after_preparation": 0,
+      "mock_gemini_calls": 0,
+      "classifier_version": "unidic-lattice-contract-v2"
+    }
+  ],
+  "production_writes": 0,
+  "real_gemini_calls": 0
+}

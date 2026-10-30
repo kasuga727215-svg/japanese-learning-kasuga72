@@ -1,0 +1,528 @@
+{
+  "baseline": "69207c261d84a0fdb21f967a68cfa2e643713951",
+  "production_inventory": "NOT VERIFIED",
+  "production_244_analysis": "NOT VERIFIED",
+  "production_history_374_audit": "NOT VERIFIED",
+  "production_capacity_7_30": "NOT VERIFIED",
+  "local_source_before": {
+    "N5": {
+      "verified_word": 485,
+      "verified_verb": 105,
+      "unknown": 72
+    },
+    "N4": {
+      "unknown": 61,
+      "verified_word": 414,
+      "verified_verb": 155
+    },
+    "N3": {
+      "verified_word": 1389,
+      "unknown": 93,
+      "verified_verb": 227
+    },
+    "N2": {
+      "unknown": 115,
+      "verified_word": 1298,
+      "verified_verb": 372
+    },
+    "N1": {
+      "verified_word": 2568,
+      "verified_verb": 483,
+      "unknown": 252
+    }
+  },
+  "local_source_after": {
+    "N5": {
+      "verified_word": 454,
+      "verified_verb": 105,
+      "unknown": 102,
+      "rejected_invalid": 1
+    },
+    "N4": {
+      "verified_word": 375,
+      "verified_verb": 156,
+      "rejected_invalid": 3,
+      "unknown": 96
+    },
+    "N3": {
+      "unknown": 89,
+      "verified_word": 1394,
+      "verified_verb": 224,
+      "rejected_invalid": 2
+    },
+    "N2": {
+      "unknown": 154,
+      "verified_word": 1253,
+      "verified_verb": 373,
+      "rejected_invalid": 5
+    },
+    "N1": {
+      "verified_word": 2549,
+      "verified_verb": 477,
+      "rejected_invalid": 6,
+      "unknown": 271
+    }
+  },
+  "curated_sense_matrix_only_not_full_pool_gold": {
+    "before": {
+      "verified_verb -> verified_word": 2,
+      "verified_verb -> verified_verb": 5,
+      "verified_word -> verified_word": 6,
+      "unknown -> verified_word": 1
+    },
+    "after": {
+      "verified_verb -> verified_verb": 7,
+      "verified_word -> verified_word": 6,
+      "unknown -> unknown": 1
+    }
+  },
+  "changed_functions": {
+    "app.py": [
+      "verb_pos_allows_candidate",
+      "audit_verb_candidate",
+      "classify_daily_fresh_pool_row",
+      "is_daily_fresh_word_pool_row",
+      "word_pos_allows_enriched_item",
+      "build_daily_fresh_candidate_payload",
+      "daily_fresh_candidate_rejection_reason",
+      "fetch_daily_fresh_candidate_rows",
+      "select_daily_fresh_candidates",
+      "ensure_daily_fresh_candidate_plan_contract",
+      "cached_daily_fresh_candidate_plan",
+      "gemini_daily_fresh_plan_error",
+      "gemini_daily_fresh_prepare_error_payload",
+      "filter_enriched_items_to_candidates",
+      "run_gemini_daily_fresh_pack"
+    ],
+    "services/verb_candidate_audit.py": [
+      "_full_entries",
+      "_reading",
+      "pos_contract",
+      "_entry_evidence",
+      "classify_lexeme",
+      "verified_verb_evidence",
+      "verified_word_evidence"
+    ],
+    "services/candidate_selector.py": [
+      "select_slice"
+    ],
+    "scripts/test_daily_fresh_generation.py": [],
+    "scripts/test_selector_scan_regression.py": []
+  },
+  "protected_functions_unchanged": true,
+  "tests": {
+    "generation_tests.json": {
+      "tests_run": 18,
+      "failures": 0,
+      "errors": 0,
+      "skipped": null,
+      "successful": true
+    },
+    "selector_tests.json": {
+      "tests_run": 23,
+      "failures": 0,
+      "errors": 0,
+      "skipped": [
+        [
+          "test_bad_utf8_row_does_not_erase_good_rows (__main__.PostgreSQLRegression.test_bad_utf8_row_does_not_erase_good_rows)",
+          "PostgreSQL UTF8 rejects invalid text on insert; SQLite corruption test is separate"
+        ],
+        [
+          "test_material_history_only_canonical_terms (__main__.PostgreSQLRegression.test_material_history_only_canonical_terms)",
+          "Covered by SQLite real material CSV; PG E2E separately reads actual materials table"
+        ],
+        [
+          "test_recursive_hydration_isolates_driver_decode_error (__main__.PostgreSQLRegression.test_recursive_hydration_isolates_driver_decode_error)",
+          "Driver fault injection is explicitly a SQLite-backed unit test"
+        ]
+      ],
+      "successful": true
+    },
+    "lexical_tests.json": {
+      "tests_run": 22,
+      "failures": 0,
+      "errors": 0,
+      "skipped": [],
+      "successful": true
+    },
+    "lexical_final_checks.json": {
+      "tests_run": 10,
+      "failures": 0,
+      "errors": 0,
+      "skipped": [],
+      "successful": true
+    }
+  },
+  "new_contract_unique_cases": 24,
+  "isolated_capacity": [
+    {
+      "backend": "SQLite",
+      "days": 7,
+      "successful_days": 7,
+      "capacity_acceptance": "PASS",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history"
+    },
+    {
+      "backend": "SQLite",
+      "days": 30,
+      "successful_days": 30,
+      "capacity_acceptance": "PASS",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history"
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "days": 7,
+      "successful_days": 7,
+      "capacity_acceptance": "PASS",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history"
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "days": 30,
+      "successful_days": 30,
+      "capacity_acceptance": "PASS",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history"
+    }
+  ],
+  "real_gemini_calls": 0,
+  "formal_database_writes": 0,
+  "committed": false,
+  "deployed": false,
+  "possible_variant_collisions_not_auto_merged": [
+    {
+      "level": "N5",
+      "lemma": "書く",
+      "reading": "カク",
+      "surfaces": [
+        "かける",
+        "書く"
+      ]
+    },
+    {
+      "level": "N5",
+      "lemma": "着く",
+      "reading": "ツク",
+      "surfaces": [
+        "つける",
+        "着く"
+      ]
+    },
+    {
+      "level": "N5",
+      "lemma": "取る",
+      "reading": "トル",
+      "surfaces": [
+        "取る",
+        "撮る"
+      ]
+    },
+    {
+      "level": "N5",
+      "lemma": "締める",
+      "reading": "シメル",
+      "surfaces": [
+        "締める",
+        "閉める"
+      ]
+    },
+    {
+      "level": "N5",
+      "lemma": "並ぶ",
+      "reading": "ナラブ",
+      "surfaces": [
+        "並ぶ",
+        "並べる"
+      ]
+    },
+    {
+      "level": "N4",
+      "lemma": "暮れる",
+      "reading": "クレル",
+      "surfaces": [
+        "くれる",
+        "暮れる"
+      ]
+    },
+    {
+      "level": "N4",
+      "lemma": "塗る",
+      "reading": "ヌル",
+      "surfaces": [
+        "ぬれる",
+        "塗る"
+      ]
+    },
+    {
+      "level": "N4",
+      "lemma": "立てる",
+      "reading": "タテル",
+      "surfaces": [
+        "建てる",
+        "立てる"
+      ]
+    },
+    {
+      "level": "N4",
+      "lemma": "直る",
+      "reading": "ナオル",
+      "surfaces": [
+        "治る",
+        "直る"
+      ]
+    },
+    {
+      "level": "N4",
+      "lemma": "焼く",
+      "reading": "ヤク",
+      "surfaces": [
+        "焼く",
+        "焼ける"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "下ろす",
+      "reading": "オロス",
+      "surfaces": [
+        "下す",
+        "降ろす"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "解く",
+      "reading": "トク",
+      "surfaces": [
+        "解く",
+        "解ける"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "変える",
+      "reading": "カエル",
+      "surfaces": [
+        "換える",
+        "替える"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "表わす",
+      "reading": "アラワス",
+      "surfaces": [
+        "現す",
+        "表す"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "付く",
+      "reading": "ツク",
+      "surfaces": [
+        "付ける",
+        "就く"
+      ]
+    },
+    {
+      "level": "N3",
+      "lemma": "抜く",
+      "reading": "ヌク",
+      "surfaces": [
+        "抜く",
+        "抜ける"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "汲む",
+      "reading": "クム",
+      "surfaces": [
+        "汲む",
+        "酌む"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "上げる",
+      "reading": "アゲル",
+      "surfaces": [
+        "挙げる",
+        "揚げる"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "混ざる",
+      "reading": "マザル",
+      "surfaces": [
+        "交ざる",
+        "混ざる"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "交ぜる",
+      "reading": "マゼル",
+      "surfaces": [
+        "交ぜる",
+        "混ぜる"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "取る",
+      "reading": "トル",
+      "surfaces": [
+        "捕る",
+        "採る"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "差す-他動詞",
+      "reading": "サス",
+      "surfaces": [
+        "刺す",
+        "挿す",
+        "注す"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "収める",
+      "reading": "オサメル",
+      "surfaces": [
+        "治める",
+        "納める"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "増やす",
+      "reading": "フヤス",
+      "surfaces": [
+        "増やす",
+        "殖やす"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "焚く",
+      "reading": "タク",
+      "surfaces": [
+        "炊く",
+        "焚く"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "測る",
+      "reading": "ハカル",
+      "surfaces": [
+        "測る",
+        "量る"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "揃える",
+      "reading": "ソロエル",
+      "surfaces": [
+        "揃う",
+        "揃える"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "付ける",
+      "reading": "ツケル",
+      "surfaces": [
+        "点ける",
+        "着ける"
+      ]
+    },
+    {
+      "level": "N2",
+      "lemma": "溶ける",
+      "reading": "トケル",
+      "surfaces": [
+        "溶く",
+        "溶ける"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "沿う",
+      "reading": "ソウ",
+      "surfaces": [
+        "沿う",
+        "添う"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "演ずる",
+      "reading": "エンズル",
+      "surfaces": [
+        "演じる",
+        "演ずる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "禁ずる",
+      "reading": "キンズル",
+      "surfaces": [
+        "禁じる",
+        "禁ずる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "顧みる",
+      "reading": "カエリミル",
+      "surfaces": [
+        "省みる",
+        "顧みる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "収まる",
+      "reading": "オサマル",
+      "surfaces": [
+        "収まる",
+        "治まる",
+        "納まる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "重んずる",
+      "reading": "オモンズル",
+      "surfaces": [
+        "重んじる",
+        "重んずる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "準ずる",
+      "reading": "ジュンズル",
+      "surfaces": [
+        "準じる",
+        "準ずる"
+      ]
+    },
+    {
+      "level": "N1",
+      "lemma": "犯す",
+      "reading": "オカス",
+      "surfaces": [
+        "侵す",
+        "犯す"
+      ]
+    }
+  ]
+}

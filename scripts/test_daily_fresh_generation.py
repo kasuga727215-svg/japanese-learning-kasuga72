@@ -76,9 +76,9 @@ class Harness:
                             continue
                         seen.add(key)
                         conn.execute("""INSERT INTO vocabulary_pool
-                            (surface,base_form,normalized_key,jlpt_level,part_of_speech,category,source,status,is_active,priority)
-                            VALUES (?,?,?,?,?,'general','openjlpt','active',1,1)""",
-                                     (surface, surface, key, level, ""))
+                            (surface,base_form,normalized_key,jlpt_level,part_of_speech,reading_hiragana,category,source,status,is_active,priority)
+                            VALUES (?,?,?,?,?,?,'general','openjlpt','active',1,1)""",
+                                     (surface, surface, key, level, "", row.get("reading", "")))
             for row in json.loads((ROOT / "data" / "grammar_seed_n5_n1.json").read_text(encoding="utf-8")):
                 conn.execute("""INSERT INTO grammar_pool
                     (grammar_key,pattern,display_name,jlpt_level,meaning_seed,connection_seed,category,source,status,used_count)
@@ -184,6 +184,7 @@ class DailyFreshRegression(unittest.TestCase):
     def sequence(self, levels, days, allow_exhaustion=False):
         histories = {"word": set(), "verb": set()}
         succeeded = 0
+        errors_by_code = Counter()
         calls_at_start = len(self.h.calls)
         for index in range(days):
             job, steps = self.h.job(levels, (dt.date(2026, 10, 1) + dt.timedelta(days=index)).isoformat())
@@ -191,7 +192,10 @@ class DailyFreshRegression(unittest.TestCase):
             payload = self.h.complete(job, steps)
             if not payload.get("ok"):
                 self.assertTrue(allow_exhaustion, payload)
-                self.assertEqual(payload["error"], "candidate_pool_exhausted", payload)
+                self.assertIn(payload["error"], {"candidate_pool_exhausted", "classifier_uncertainty"}, payload)
+                if payload["error"] == "classifier_uncertainty":
+                    self.assertTrue(any(row.get("classifier_unknown_count") for row in payload["missing"]))
+                errors_by_code[payload["error"]] += 1
                 self.assertEqual(len(self.h.calls), before, "exhaustion must be caught before enrichment")
                 self.assertTrue(payload.get("missing"), payload)
                 continue
@@ -204,7 +208,9 @@ class DailyFreshRegression(unittest.TestCase):
                 histories[item_type].update(usage[item_type])
             succeeded += 1
         SCENARIOS.append({"levels": levels, "attempted_days": days, "successful_days": succeeded,
-                          "exhausted_days": days - succeeded, "external_gemini_calls": 0,
+                          "uncompleted_days": days - succeeded, "exhausted_days": errors_by_code["candidate_pool_exhausted"],
+                          "classifier_uncertainty_days": errors_by_code["classifier_uncertainty"],
+                          "errors_by_code": dict(errors_by_code), "external_gemini_calls": 0,
                           "mock_calls_by_type": dict(Counter(t for t, _ in self.h.calls[calls_at_start:]))})
         return succeeded
 
@@ -220,17 +226,17 @@ class DailyFreshRegression(unittest.TestCase):
     def test_D_thirty_days_with_real_source_exhaustion(self):
         completed = self.sequence(["N5"], 30, allow_exhaustion=True)
         self.assertGreaterEqual(completed, 3)
-        print(f"[regression] thirty_day_n5 completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
+        print(f"[regression] thirty_day_n5 completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
 
     def test_D_all_levels_thirty_days(self):
         completed = self.sequence(LEVELS, 30, allow_exhaustion=True)
         self.assertGreaterEqual(completed, 3)
-        print(f"[regression] thirty_day_all_levels completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
+        print(f"[regression] thirty_day_all_levels completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
 
     def test_D_n1_thirty_days(self):
         completed = self.sequence(["N1"], 30, allow_exhaustion=True)
         self.assertGreaterEqual(completed, 3)
-        print(f"[regression] thirty_day_n1 completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
+        print(f"[regression] thirty_day_n1 completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
 
     def test_E_primary_rejected_same_level_reserve(self):
         self.h.reject_once.add(("verb", "N5"))

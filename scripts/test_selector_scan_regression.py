@@ -118,7 +118,9 @@ class SelectorRegression(unittest.TestCase):
         self.assertFalse(app.gemini_daily_fresh_all_candidates_ready(saved))
         # A continued scan will discover missing required verbs, still before API use.
         result = self.h.complete(job, steps)
-        self.assertEqual(result["error"], "candidate_pool_exhausted", result)
+        self.assertEqual(result["error"], "classifier_uncertainty", result)
+        self.assertFalse(result["missing"][0]["candidate_exhausted"])
+        self.assertEqual(result["missing"][0]["classifier_unknown_count"], 4000)
         self.assertEqual(result["gemini_call_count"], 0)
         self.assertEqual(self.h.calls, [])
 

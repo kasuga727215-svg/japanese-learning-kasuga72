@@ -1,0 +1,294 @@
+{
+  "release_recommendation": "NOT READY",
+  "baseline": "69207c261d84a0fdb21f967a68cfa2e643713951",
+  "production_pool_replay": "NOT VERIFIED",
+  "production_writes": 0,
+  "real_gemini_calls": 0,
+  "fixture_files": [
+    {
+      "path": "data\\external_lexicon\\openjlpt-vocab-n1.csv",
+      "sha256": "7b23dc07e65fc07956754f6b9fc0d2322f6072c7729ff92aa558c8822daa9914",
+      "raw_rows": 3463,
+      "columns": [
+        "word",
+        "reading",
+        "meanings",
+        "level",
+        "example_ja",
+        "example_en"
+      ],
+      "missing_reading": 280
+    },
+    {
+      "path": "data\\external_lexicon\\openjlpt-vocab-n2.csv",
+      "sha256": "2dbb119e8f0b7796bea53bff04330486f668644b00dabc6c0a0e8d09be0385ed",
+      "raw_rows": 1793,
+      "columns": [
+        "word",
+        "reading",
+        "meanings",
+        "level",
+        "example_ja",
+        "example_en"
+      ],
+      "missing_reading": 295
+    },
+    {
+      "path": "data\\external_lexicon\\openjlpt-vocab-n3.csv",
+      "sha256": "8904a86f44e2306594dc5221855ca7f5b76d33dd93c288e7c41027c270e9c297",
+      "raw_rows": 1784,
+      "columns": [
+        "word",
+        "reading",
+        "meanings",
+        "level",
+        "example_ja",
+        "example_en"
+      ],
+      "missing_reading": 217
+    },
+    {
+      "path": "data\\external_lexicon\\openjlpt-vocab-n4.csv",
+      "sha256": "c613f7858a576637d03087d7ac9e9b4038c494d971a66e4ad06af43e361e28d5",
+      "raw_rows": 632,
+      "columns": [
+        "word",
+        "reading",
+        "meanings",
+        "level",
+        "example_ja",
+        "example_en"
+      ],
+      "missing_reading": 141
+    },
+    {
+      "path": "data\\external_lexicon\\openjlpt-vocab-n5.csv",
+      "sha256": "9c39394228f3cf3c91d33321d7203dfa70092a1a6086fcc6c663f1bf6e9c882c",
+      "raw_rows": 662,
+      "columns": [
+        "word",
+        "reading",
+        "meanings",
+        "level",
+        "example_ja",
+        "example_en"
+      ],
+      "missing_reading": 163
+    }
+  ],
+  "fixture_unique_inventory": {
+    "N5": {
+      "source_rows": 662,
+      "history_excluded": 0,
+      "verified_verb": 105,
+      "verified_word": 454,
+      "unknown": 102,
+      "rejected_invalid": 1,
+      "history_excluded_verified_verb": 0,
+      "history_excluded_verified_word": 0,
+      "history_excluded_unknown": 0,
+      "history_excluded_rejected_invalid": 0
+    },
+    "N4": {
+      "source_rows": 630,
+      "history_excluded": 0,
+      "verified_verb": 156,
+      "verified_word": 375,
+      "unknown": 96,
+      "rejected_invalid": 3,
+      "history_excluded_verified_verb": 0,
+      "history_excluded_verified_word": 0,
+      "history_excluded_unknown": 0,
+      "history_excluded_rejected_invalid": 0
+    },
+    "N3": {
+      "source_rows": 1709,
+      "history_excluded": 0,
+      "verified_verb": 224,
+      "verified_word": 1394,
+      "unknown": 89,
+      "rejected_invalid": 2,
+      "history_excluded_verified_verb": 0,
+      "history_excluded_verified_word": 0,
+      "history_excluded_unknown": 0,
+      "history_excluded_rejected_invalid": 0
+    },
+    "N2": {
+      "source_rows": 1785,
+      "history_excluded": 0,
+      "verified_verb": 373,
+      "verified_word": 1253,
+      "unknown": 154,
+      "rejected_invalid": 5,
+      "history_excluded_verified_verb": 0,
+      "history_excluded_verified_word": 0,
+      "history_excluded_unknown": 0,
+      "history_excluded_rejected_invalid": 0
+    },
+    "N1": {
+      "source_rows": 3303,
+      "history_excluded": 0,
+      "verified_verb": 477,
+      "verified_word": 2549,
+      "unknown": 271,
+      "rejected_invalid": 6,
+      "history_excluded_verified_verb": 0,
+      "history_excluded_verified_word": 0,
+      "history_excluded_unknown": 0,
+      "history_excluded_rejected_invalid": 0
+    }
+  },
+  "history_keys": 1169,
+  "history_material_rows": 151,
+  "n5_same_source_changes": [
+    {
+      "surface": "あびる",
+      "line": 9,
+      "meaning": "to bathe; to shower",
+      "old_verb": false,
+      "new_status": "verified_verb",
+      "new_reason": "verified_dictionary_form",
+      "in_captured_history": false
+    },
+    {
+      "surface": "ある",
+      "line": 11,
+      "meaning": "to be; to have (used for inanimate objects)",
+      "old_verb": true,
+      "new_status": "unknown",
+      "new_reason": "ambiguous_word_verb_sense",
+      "in_captured_history": true
+    },
+    {
+      "surface": "かかる",
+      "line": 42,
+      "meaning": "to take time or money",
+      "old_verb": true,
+      "new_status": "unknown",
+      "new_reason": "ambiguous_word_verb_sense",
+      "in_captured_history": true
+    },
+    {
+      "surface": "かける",
+      "line": 44,
+      "meaning": "to call by phone",
+      "old_verb": false,
+      "new_status": "verified_verb",
+      "new_reason": "verified_dictionary_form",
+      "in_captured_history": false
+    }
+  ],
+  "n5_same_source_totals": {
+    "old_verified": 105,
+    "new_verified": 105,
+    "old_unused_with_captured_history": 0,
+    "new_unused_with_captured_history": 2
+  },
+  "test_results": {
+    "generation": {
+      "tests_run": 18,
+      "failures": 0,
+      "errors": 0,
+      "successful": true
+    },
+    "selector": {
+      "tests_run": 23,
+      "failures": 0,
+      "errors": 0,
+      "successful": true
+    },
+    "lexical": {
+      "tests_run": 24,
+      "failures": 0,
+      "errors": 0,
+      "successful": true
+    }
+  },
+  "skips": [
+    [
+      "test_bad_utf8_row_does_not_erase_good_rows (__main__.PostgreSQLRegression.test_bad_utf8_row_does_not_erase_good_rows)",
+      "PostgreSQL UTF8 rejects invalid text on insert; SQLite corruption test is separate"
+    ],
+    [
+      "test_material_history_only_canonical_terms (__main__.PostgreSQLRegression.test_material_history_only_canonical_terms)",
+      "Covered by SQLite real material CSV; PG E2E separately reads actual materials table"
+    ],
+    [
+      "test_recursive_hydration_isolates_driver_decode_error (__main__.PostgreSQLRegression.test_recursive_hydration_isolates_driver_decode_error)",
+      "Driver fault injection is explicitly a SQLite-backed unit test"
+    ]
+  ],
+  "scenarios": [
+    {
+      "backend": "SQLite",
+      "levels": [
+        "N5"
+      ],
+      "days": 30,
+      "history_source": "empty isolation fixture",
+      "initial_history_keys": 0,
+      "successful_days": 21
+    },
+    {
+      "backend": "SQLite",
+      "levels": [
+        "N5",
+        "N4",
+        "N3",
+        "N2",
+        "N1"
+      ],
+      "days": 7,
+      "history_source": "production GET lexical projection",
+      "initial_history_keys": 1169,
+      "successful_days": 2
+    },
+    {
+      "backend": "SQLite",
+      "levels": [
+        "N5",
+        "N4",
+        "N3",
+        "N2",
+        "N1"
+      ],
+      "days": 30,
+      "history_source": "production GET lexical projection",
+      "initial_history_keys": 1169,
+      "successful_days": 2
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "levels": [
+        "N5",
+        "N4",
+        "N3",
+        "N2",
+        "N1"
+      ],
+      "days": 7,
+      "history_source": "production GET lexical projection",
+      "initial_history_keys": 1169,
+      "successful_days": 2
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "levels": [
+        "N5",
+        "N4",
+        "N3",
+        "N2",
+        "N1"
+      ],
+      "days": 30,
+      "history_source": "production GET lexical projection",
+      "initial_history_keys": 1169,
+      "successful_days": 2
+    }
+  ],
+  "production_file_sha256": {
+    "app.py": "2e856e83c8a92fd65834c65e6821d17e902ff7255083fcda55ab9d56e536a388",
+    "services/verb_candidate_audit.py": "8eb4d901514a4d25d5c33ab26a0d367ff6b8d015029f33a93e66da0132761f38",
+    "services/candidate_selector.py": "e2d7aa9bfed8b609bae664613de53d5d7499165c6d8b8af65626031b94dc596f"
+  }
+}

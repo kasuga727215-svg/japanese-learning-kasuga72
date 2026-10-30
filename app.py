@@ -26,7 +26,7 @@ import pandas as pd
 from flask import Flask, has_request_context, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 from services.grammar_debugger import debug_grammar
-from services.verb_candidate_audit import verified_verb_evidence, verified_word_evidence
+from services.verb_candidate_audit import CLASSIFIER_VERSION, classify_lexeme, pos_contract, verified_verb_evidence, verified_word_evidence
 
 
 app = Flask(__name__, template_folder=".")
@@ -5820,18 +5820,10 @@ def is_daily_fresh_polite_phrase_surface(surface):
 
 
 def verb_pos_allows_candidate(pos):
-    text = simple_text(pos)
-    if not text:
+    kind = pos_contract(simple_text(pos))
+    if kind == "unknown":
         return None
-    lowered = text.lower()
-    parts = {p for p in re.split(r"[・/／,，、;\s]+", lowered) if p}
-    if parts & {token.lower() for token in DAILY_FRESH_VERB_ALLOWED_POS_TOKENS}:
-        return True
-    if re.match(r"^(動詞(?:-|$)|五段動詞|一段動詞|サ変動詞|v[1-5](?:[a-z-]*)(?:$|[,;]))", lowered):
-        return True
-    if any(token.lower() in lowered for token in DAILY_FRESH_VERB_BLOCKED_POS_TOKENS):
-        return False
-    return False
+    return kind == "verb"
 
 
 def is_probable_japanese_verb_surface(surface):
@@ -5857,11 +5849,15 @@ def audit_verb_candidate(candidate, row=None, log=False):
     text = simple_text(surface)
 
     def audit_result(accepted, reason="", suggested_type=""):
+        lexical = classify_lexeme(text)
+        structural_invalid = reason in {"empty_candidate", "variant_separator", "counter_or_number"}
         result = {
             "accepted": bool(accepted),
             "reason": reason,
-            "suggested_type": suggested_type,
+            "status": "rejected_invalid" if structural_invalid else lexical["status"],
+            "suggested_type": "word" if not structural_invalid and lexical["status"] == "verified_word" else "",
             "candidate": text,
+            **{key: lexical[key] for key in ("evidence", "source", "classifier_version", "source_fingerprint", "retryable", "verification_route")},
         }
         if log and not accepted and reason in {"known_non_verb", "polite_phrase_not_dictionary_form"}:
             print(
@@ -5879,12 +5875,16 @@ def audit_verb_candidate(candidate, row=None, log=False):
     if text in DAILY_FRESH_NON_VERB_SURFACES:
         return audit_result(False, "known_non_verb", "word")
     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
-    pos_allowed = verb_pos_allows_candidate(pos)
-    if pos_allowed is False:
-        return audit_result(False, "blocked_pos", "word")
-    evidence = verified_verb_evidence(text)
+    reading = first_text(source, ["reading_hiragana", "reading"]) or first_text(row, ["reading_hiragana", "reading"])
+    evidence = verified_verb_evidence(text, reading, pos)
     return {**audit_result(evidence["accepted"], evidence["reason"], evidence.get("suggested_type", "")),
-            "evidence": evidence.get("evidence", "")}
+            **{key: evidence[key] for key in ("status", "evidence", "source", "classifier_version", "source_fingerprint", "retryable", "verification_route")}}
+
+
+def classify_daily_fresh_pool_row(row):
+    return classify_lexeme(vocabulary_pool_candidate_surface(row),
+                           first_text(row, ["reading_hiragana", "reading"]),
+                           first_text(row, ["part_of_speech", "pos"]))
 
 
 def is_daily_fresh_word_pool_row(row):
@@ -5892,34 +5892,11 @@ def is_daily_fresh_word_pool_row(row):
     if has_variant_separator(surface):
         return False
     surface = re.split(r"[（(]", surface, maxsplit=1)[0].strip()
-    if verified_verb_evidence(surface)["accepted"]:
-        return False
-    pos = first_text(row, ["part_of_speech", "pos"]).strip()
-    pos_lower = pos.lower()
-    if pos:
-        return word_pos_allows_enriched_item(pos)
-    return verified_word_evidence(surface)
+    return classify_daily_fresh_pool_row({**row, "surface": surface})["status"] == "verified_word"
 
 
 def word_pos_allows_enriched_item(pos):
-    text = simple_text(pos)
-    if not text:
-        return True
-    lowered = text.lower()
-    if text in DAILY_FRESH_WORD_ALLOWED_POS or lowered in DAILY_FRESH_WORD_ALLOWED_POS:
-        return True
-    allowed_parts = [
-        part.strip()
-        for part in re.split(r"[・/／,，、\s]+", text)
-        if part.strip()
-    ]
-    if any(part in DAILY_FRESH_WORD_ALLOWED_POS or part.lower() in DAILY_FRESH_WORD_ALLOWED_POS for part in allowed_parts):
-        return True
-    if any(token in text for token in ["名詞", "形容詞", "形容動詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞", "助詞", "助数詞", "接頭辞", "接尾辞", "サ変接続"]):
-        return True
-    if text == "動詞" or lowered in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
-        return False
-    return True
+    return pos_contract(simple_text(pos)) == "word"
 
 
 def is_daily_fresh_verb_pool_row(row):
@@ -5960,18 +5937,25 @@ def is_daily_fresh_quality_pool_row(row, item_type):
 def build_daily_fresh_candidate_payload(row, item_type, level):
     surface = vocabulary_pool_candidate_surface(row)
     key = vocabulary_pool_candidate_key(row)
+    classification = {
+        "reading_hiragana": first_text(row, ["reading_hiragana", "reading"]),
+        "part_of_speech": first_text(row, ["part_of_speech", "pos"]),
+        "classification_evidence": classify_daily_fresh_pool_row(row),
+    }
     if item_type == "verb":
         return {
             "level": level,
             "d": surface,
             "normalized_key": key,
             "pool_id": row.get("id"),
+            **classification,
         }
     return {
         "level": level,
         "w": surface,
         "normalized_key": key,
         "pool_id": row.get("id"),
+        **classification,
     }
 
 
@@ -6063,9 +6047,14 @@ def daily_fresh_candidate_rejection_reason(row, item_type, level, excluded_keys)
     if item_type == "verb":
         audit = audit_verb_candidate(row, row=row, log=True)
         if not audit.get("accepted"):
+            if audit.get("status") == "unknown":
+                return f"classifier_unknown:{audit.get('reason') or 'unresolved'}"
             return f"non_verb:{audit.get('reason') or 'unknown'}"
         return ""
     if not is_daily_fresh_word_pool_row(row):
+        evidence = classify_daily_fresh_pool_row(row)
+        if evidence["status"] == "unknown":
+            return f"classifier_unknown:{evidence['reason']}"
         return "non_word"
     return ""
 
@@ -6170,12 +6159,14 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
     current = {normalize_vocab_key(k) for k in (current_batch_keys or []) if normalize_vocab_key(k)}
     state = source_state if isinstance(source_state, dict) else {}
     history_digest = hashlib.sha256(json.dumps(sorted(generated)).encode("ascii")).hexdigest()
-    context = [item_type, level, history_digest]
+    context = [item_type, level, history_digest, CLASSIFIER_VERSION]
     if state.get("context") != context:
         state.clear()
         state["context"] = context
     if state.get("source_exhausted"):
-        return [{"__selector_meta": True, "candidate_exhausted": True, "source_state": dict(state),
+        return [{"__selector_meta": True, "candidate_exhausted": not state.get("classifier_unknown_count"), "source_state": dict(state),
+                 "source_scan_complete": True,
+                 "classifier_unknown_count": int(state.get("classifier_unknown_count") or 0),
                  "rejected_by_filter": state.get("rejected_by_filter", {}), "rescanned_ids": 0}]
     deadline = min(deadline or time.perf_counter() + 4.0, time.perf_counter() + 4.0)
     print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
@@ -6400,6 +6391,7 @@ def select_daily_fresh_candidates(item_type, requested_by_level, material_histor
         "selector_failed": selector_failed,
         "selector_error": next((m.get("selector_error") for m in selector_meta_by_level.values() if m.get("selector_error")), ""),
         "candidate_validation_failed": any(m.get("candidate_validation_failed") for m in selector_meta_by_level.values()),
+        "classifier_unknown_count": sum(int(m.get("classifier_unknown_count") or 0) for m in selector_meta_by_level.values()),
         "preparation_complete": not selector_scan_incomplete and not selector_failed,
         "selector_meta_by_level": selector_meta_by_level,
         "material_history_keys": sorted(excluded_keys),
@@ -6819,6 +6811,7 @@ def ensure_daily_fresh_candidate_plan_contract(candidate_plan, quota_by_level, i
             primary_missing.append({"level": level, "requested": required, "available": available,
                                     "remaining": required - available,
                                     "candidate_exhausted": bool(meta.get("candidate_exhausted")),
+                                    "classifier_unknown_count": int(meta.get("classifier_unknown_count") or 0),
                                     "excluded_by_reason": meta.get("rejected_by_filter") or {}})
     reserve_shortages = []
     for level, requested in (candidate_plan.get("requested_by_level") or {}).items():
@@ -7108,6 +7101,7 @@ def cached_daily_fresh_candidate_plan(pack_state):
         "selector_failed",
         "selector_error",
         "candidate_validation_failed",
+        "classifier_unknown_count",
         "preparation_complete",
         "replacement_scan_pending",
     ]:
@@ -7177,12 +7171,16 @@ def gemini_daily_fresh_plan_error(candidate_plan, item_type, requested_total, be
         return "candidate_validation_failed"
     item_count = len(candidate_plan.get("items") or [])
     if item_type in {"word", "verb"} and item_count < int(requested_total or 0):
+        if any(row.get("classifier_unknown_count") for row in candidate_plan.get("missing") or []):
+            return "classifier_uncertainty"
         return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
     if item_type == "grammar" and not best_effort and item_count < int(requested_total or 0):
         return "fresh_candidate_pool_insufficient"
     if item_type == "grammar" and int(requested_total or 0) > 0 and item_count <= 0:
         return "fresh_candidate_pool_insufficient"
     if candidate_plan.get("missing") and item_type in {"word", "verb"}:
+        if any(row.get("classifier_unknown_count") for row in candidate_plan.get("missing") or []):
+            return "classifier_uncertainty"
         return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
     return ""
 
@@ -7193,6 +7191,7 @@ def gemini_daily_fresh_prepare_error_payload(job_id, pack_type, item_type, error
         "selector_scan_incomplete": "候選掃描尚未完成，已保存進度，未消耗 Gemini API",
         "candidate_pool_exhausted": "指定等級的合格候選已掃描完畢，數量不足，未消耗 Gemini API",
         "candidate_validation_failed": "候選資料驗證失敗，未消耗 Gemini API",
+        "classifier_uncertainty": "指定等級尚有詞性未確認候選，不能判定詞源耗盡，未消耗 Gemini API",
     }.get(error_code, "候選準備失敗，未消耗 Gemini API")
     if error_code == "fresh_candidate_decode_error":
         reason = "日文候選詞讀取失敗，未消耗 Gemini API"
@@ -7340,7 +7339,7 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 continue
         if item_type == "word":
             pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
-            if not word_pos_allows_enriched_item(pos):
+            if not word_pos_allows_enriched_item(pos) or classify_lexeme(surface)["status"] == "verified_verb":
                 stats["invalid_pos"] += 1
                 continue
         if item_type == "verb":
@@ -7361,7 +7360,7 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 print(
                     "[gemini-bank] candidate_rejected "
                     f"item_type=verb candidate={log_safe_text(surface)} "
-                    f"reason={audit.get('reason')} suggested_type={audit.get('suggested_type') or 'word'}"
+                    f"reason={audit.get('reason')} suggested_type={audit.get('suggested_type') or 'unknown'}"
                 )
                 if (audit.get("suggested_type") or "") == "word":
                     print(
@@ -11413,7 +11412,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                     candidate_text = candidate.get("d") or candidate.get("normalized_key") or audit.get("candidate")
                     reason = audit.get("reason") or "not_verb"
                     last_rejection_reason = reason
-                    suggested_type = audit.get("suggested_type") or "word"
+                    suggested_type = audit.get("suggested_type") or "unknown"
                     print(
                         "[gemini-bank] candidate_rejected "
                         f"item_type=verb candidate={log_safe_text(candidate_text)} "
@@ -11508,7 +11507,7 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
                 for rejected in rejected_items:
                     candidate_text = rejected.get("candidate") or ""
                     reason = rejected.get("reason") or "not_verb"
-                    suggested_type = rejected.get("suggested_type") or "word"
+                    suggested_type = rejected.get("suggested_type") or "unknown"
                     print(
                         "[gemini-bank] candidate_rejected "
                         f"item_type=verb candidate={log_safe_text(candidate_text)} "

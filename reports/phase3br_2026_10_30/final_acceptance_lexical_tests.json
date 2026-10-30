@@ -1,0 +1,6091 @@
+{
+  "tests_run": 24,
+  "failures": 0,
+  "errors": 0,
+  "skipped": [],
+  "successful": true,
+  "capacity": [
+    {
+      "backend": "SQLite",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history",
+      "production_inventory_verified": false,
+      "days": 7,
+      "successful_days": 7,
+      "capacity_acceptance": "PASS",
+      "real_gemini_calls": 0,
+      "daily": [
+        {
+          "day": "2026-10-01",
+          "before": {
+            "N5": {
+              "verified_word": 454,
+              "verified_verb": 105,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 375,
+              "verified_verb": 156,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1394,
+              "verified_verb": 224,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1253,
+              "verified_verb": 373,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2549,
+              "verified_verb": 477,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-02",
+          "before": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-03",
+          "before": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-04",
+          "before": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-05",
+          "before": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-06",
+          "before": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-07",
+          "before": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "backend": "SQLite",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history",
+      "production_inventory_verified": false,
+      "days": 30,
+      "successful_days": 30,
+      "capacity_acceptance": "PASS",
+      "real_gemini_calls": 0,
+      "daily": [
+        {
+          "day": "2026-10-01",
+          "before": {
+            "N5": {
+              "verified_word": 454,
+              "verified_verb": 105,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 375,
+              "verified_verb": 156,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1394,
+              "verified_verb": 224,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1253,
+              "verified_verb": 373,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2549,
+              "verified_verb": 477,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-02",
+          "before": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-03",
+          "before": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-04",
+          "before": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-05",
+          "before": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-06",
+          "before": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-07",
+          "before": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-08",
+          "before": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 438,
+              "verified_verb": 97,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 359,
+              "verified_verb": 148,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1378,
+              "verified_verb": 216,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1245,
+              "verified_verb": 365,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2541,
+              "verified_verb": 469,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-09",
+          "before": {
+            "N5": {
+              "verified_word": 438,
+              "verified_verb": 97,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 359,
+              "verified_verb": 148,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1378,
+              "verified_verb": 216,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1245,
+              "verified_verb": 365,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2541,
+              "verified_verb": 469,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 436,
+              "verified_verb": 96,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 357,
+              "verified_verb": 147,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1376,
+              "verified_verb": 215,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1244,
+              "verified_verb": 364,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2540,
+              "verified_verb": 468,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-10",
+          "before": {
+            "N5": {
+              "verified_word": 436,
+              "verified_verb": 96,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 357,
+              "verified_verb": 147,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1376,
+              "verified_verb": 215,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1244,
+              "verified_verb": 364,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2540,
+              "verified_verb": 468,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 434,
+              "verified_verb": 95,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 355,
+              "verified_verb": 146,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1374,
+              "verified_verb": 214,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1243,
+              "verified_verb": 363,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2539,
+              "verified_verb": 467,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-11",
+          "before": {
+            "N5": {
+              "verified_word": 434,
+              "verified_verb": 95,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 355,
+              "verified_verb": 146,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1374,
+              "verified_verb": 214,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1243,
+              "verified_verb": 363,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2539,
+              "verified_verb": 467,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 432,
+              "verified_verb": 94,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 353,
+              "verified_verb": 145,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1372,
+              "verified_verb": 213,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1242,
+              "verified_verb": 362,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2538,
+              "verified_verb": 466,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-12",
+          "before": {
+            "N5": {
+              "verified_word": 432,
+              "verified_verb": 94,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 353,
+              "verified_verb": 145,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1372,
+              "verified_verb": 213,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1242,
+              "verified_verb": 362,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2538,
+              "verified_verb": 466,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 430,
+              "verified_verb": 93,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 351,
+              "verified_verb": 144,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1370,
+              "verified_verb": 212,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1241,
+              "verified_verb": 361,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2537,
+              "verified_verb": 465,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-13",
+          "before": {
+            "N5": {
+              "verified_word": 430,
+              "verified_verb": 93,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 351,
+              "verified_verb": 144,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1370,
+              "verified_verb": 212,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1241,
+              "verified_verb": 361,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2537,
+              "verified_verb": 465,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 428,
+              "verified_verb": 92,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 349,
+              "verified_verb": 143,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1368,
+              "verified_verb": 211,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1240,
+              "verified_verb": 360,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2536,
+              "verified_verb": 464,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-14",
+          "before": {
+            "N5": {
+              "verified_word": 428,
+              "verified_verb": 92,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 349,
+              "verified_verb": 143,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1368,
+              "verified_verb": 211,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1240,
+              "verified_verb": 360,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2536,
+              "verified_verb": 464,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 426,
+              "verified_verb": 91,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 347,
+              "verified_verb": 142,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1366,
+              "verified_verb": 210,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1239,
+              "verified_verb": 359,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2535,
+              "verified_verb": 463,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-15",
+          "before": {
+            "N5": {
+              "verified_word": 426,
+              "verified_verb": 91,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 347,
+              "verified_verb": 142,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1366,
+              "verified_verb": 210,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1239,
+              "verified_verb": 359,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2535,
+              "verified_verb": 463,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 424,
+              "verified_verb": 90,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 345,
+              "verified_verb": 141,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1364,
+              "verified_verb": 209,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1238,
+              "verified_verb": 358,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2534,
+              "verified_verb": 462,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-16",
+          "before": {
+            "N5": {
+              "verified_word": 424,
+              "verified_verb": 90,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 345,
+              "verified_verb": 141,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1364,
+              "verified_verb": 209,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1238,
+              "verified_verb": 358,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2534,
+              "verified_verb": 462,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 422,
+              "verified_verb": 89,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 343,
+              "verified_verb": 140,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1362,
+              "verified_verb": 208,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1237,
+              "verified_verb": 357,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2533,
+              "verified_verb": 461,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-17",
+          "before": {
+            "N5": {
+              "verified_word": 422,
+              "verified_verb": 89,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 343,
+              "verified_verb": 140,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1362,
+              "verified_verb": 208,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1237,
+              "verified_verb": 357,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2533,
+              "verified_verb": 461,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 420,
+              "verified_verb": 88,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 341,
+              "verified_verb": 139,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1360,
+              "verified_verb": 207,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1236,
+              "verified_verb": 356,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2532,
+              "verified_verb": 460,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-18",
+          "before": {
+            "N5": {
+              "verified_word": 420,
+              "verified_verb": 88,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 341,
+              "verified_verb": 139,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1360,
+              "verified_verb": 207,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1236,
+              "verified_verb": 356,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2532,
+              "verified_verb": 460,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 418,
+              "verified_verb": 87,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 339,
+              "verified_verb": 138,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1358,
+              "verified_verb": 206,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1235,
+              "verified_verb": 355,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2531,
+              "verified_verb": 459,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-19",
+          "before": {
+            "N5": {
+              "verified_word": 418,
+              "verified_verb": 87,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 339,
+              "verified_verb": 138,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1358,
+              "verified_verb": 206,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1235,
+              "verified_verb": 355,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2531,
+              "verified_verb": 459,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 416,
+              "verified_verb": 86,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 337,
+              "verified_verb": 137,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1356,
+              "verified_verb": 205,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1234,
+              "verified_verb": 354,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2530,
+              "verified_verb": 458,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-20",
+          "before": {
+            "N5": {
+              "verified_word": 416,
+              "verified_verb": 86,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 337,
+              "verified_verb": 137,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1356,
+              "verified_verb": 205,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1234,
+              "verified_verb": 354,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2530,
+              "verified_verb": 458,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 13,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 414,
+              "verified_verb": 85,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 335,
+              "verified_verb": 136,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1354,
+              "verified_verb": 204,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1233,
+              "verified_verb": 353,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2529,
+              "verified_verb": 457,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-21",
+          "before": {
+            "N5": {
+              "verified_word": 414,
+              "verified_verb": 85,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 335,
+              "verified_verb": 136,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1354,
+              "verified_verb": 204,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1233,
+              "verified_verb": 353,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2529,
+              "verified_verb": 457,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 412,
+              "verified_verb": 84,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 333,
+              "verified_verb": 135,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1352,
+              "verified_verb": 203,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1232,
+              "verified_verb": 352,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2528,
+              "verified_verb": 456,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-22",
+          "before": {
+            "N5": {
+              "verified_word": 412,
+              "verified_verb": 84,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 333,
+              "verified_verb": 135,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1352,
+              "verified_verb": 203,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1232,
+              "verified_verb": 352,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2528,
+              "verified_verb": 456,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 410,
+              "verified_verb": 83,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 331,
+              "verified_verb": 134,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1350,
+              "verified_verb": 202,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1231,
+              "verified_verb": 351,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2527,
+              "verified_verb": 455,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-23",
+          "before": {
+            "N5": {
+              "verified_word": 410,
+              "verified_verb": 83,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 331,
+              "verified_verb": 134,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1350,
+              "verified_verb": 202,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1231,
+              "verified_verb": 351,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2527,
+              "verified_verb": 455,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 408,
+              "verified_verb": 82,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 329,
+              "verified_verb": 133,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1348,
+              "verified_verb": 201,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1230,
+              "verified_verb": 350,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2526,
+              "verified_verb": 454,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-24",
+          "before": {
+            "N5": {
+              "verified_word": 408,
+              "verified_verb": 82,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 329,
+              "verified_verb": 133,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1348,
+              "verified_verb": 201,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1230,
+              "verified_verb": 350,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2526,
+              "verified_verb": 454,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 406,
+              "verified_verb": 81,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 327,
+              "verified_verb": 132,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1346,
+              "verified_verb": 200,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1229,
+              "verified_verb": 349,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2525,
+              "verified_verb": 453,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-25",
+          "before": {
+            "N5": {
+              "verified_word": 406,
+              "verified_verb": 81,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 327,
+              "verified_verb": 132,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1346,
+              "verified_verb": 200,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1229,
+              "verified_verb": 349,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2525,
+              "verified_verb": 453,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 404,
+              "verified_verb": 80,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 325,
+              "verified_verb": 131,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1344,
+              "verified_verb": 199,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1228,
+              "verified_verb": 348,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2524,
+              "verified_verb": 452,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-26",
+          "before": {
+            "N5": {
+              "verified_word": 404,
+              "verified_verb": 80,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 325,
+              "verified_verb": 131,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1344,
+              "verified_verb": 199,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1228,
+              "verified_verb": 348,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2524,
+              "verified_verb": 452,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 402,
+              "verified_verb": 79,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 323,
+              "verified_verb": 130,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1342,
+              "verified_verb": 198,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1227,
+              "verified_verb": 347,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2523,
+              "verified_verb": 451,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-27",
+          "before": {
+            "N5": {
+              "verified_word": 402,
+              "verified_verb": 79,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 323,
+              "verified_verb": 130,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1342,
+              "verified_verb": 198,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1227,
+              "verified_verb": 347,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2523,
+              "verified_verb": 451,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 400,
+              "verified_verb": 78,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 321,
+              "verified_verb": 129,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1340,
+              "verified_verb": 197,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1226,
+              "verified_verb": 346,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2522,
+              "verified_verb": 450,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-28",
+          "before": {
+            "N5": {
+              "verified_word": 400,
+              "verified_verb": 78,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 321,
+              "verified_verb": 129,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1340,
+              "verified_verb": 197,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1226,
+              "verified_verb": 346,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2522,
+              "verified_verb": 450,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 398,
+              "verified_verb": 77,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 319,
+              "verified_verb": 128,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1338,
+              "verified_verb": 196,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1225,
+              "verified_verb": 345,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2521,
+              "verified_verb": 449,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-29",
+          "before": {
+            "N5": {
+              "verified_word": 398,
+              "verified_verb": 77,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 319,
+              "verified_verb": 128,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1338,
+              "verified_verb": 196,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1225,
+              "verified_verb": 345,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2521,
+              "verified_verb": 449,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 396,
+              "verified_verb": 76,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 317,
+              "verified_verb": 127,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1336,
+              "verified_verb": 195,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1224,
+              "verified_verb": 344,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2520,
+              "verified_verb": 448,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-30",
+          "before": {
+            "N5": {
+              "verified_word": 396,
+              "verified_verb": 76,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 317,
+              "verified_verb": 127,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1336,
+              "verified_verb": 195,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1224,
+              "verified_verb": 344,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2520,
+              "verified_verb": 448,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 394,
+              "verified_verb": 75,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 315,
+              "verified_verb": 126,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1334,
+              "verified_verb": 194,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1223,
+              "verified_verb": 343,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2519,
+              "verified_verb": 447,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history",
+      "production_inventory_verified": false,
+      "days": 7,
+      "successful_days": 7,
+      "capacity_acceptance": "PASS",
+      "real_gemini_calls": 0,
+      "daily": [
+        {
+          "day": "2026-10-01",
+          "before": {
+            "N5": {
+              "verified_word": 454,
+              "verified_verb": 105,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 375,
+              "verified_verb": 156,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1394,
+              "verified_verb": 224,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1253,
+              "verified_verb": 373,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2549,
+              "verified_verb": 477,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-02",
+          "before": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-03",
+          "before": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-04",
+          "before": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-05",
+          "before": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-06",
+          "before": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-07",
+          "before": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        }
+      ]
+    },
+    {
+      "backend": "PostgreSQL17-isolated",
+      "source": "checked-in OpenJLPT only, no additional candidates, empty initial history",
+      "production_inventory_verified": false,
+      "days": 30,
+      "successful_days": 30,
+      "capacity_acceptance": "PASS",
+      "real_gemini_calls": 0,
+      "daily": [
+        {
+          "day": "2026-10-01",
+          "before": {
+            "N5": {
+              "verified_word": 454,
+              "verified_verb": 105,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 375,
+              "verified_verb": 156,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1394,
+              "verified_verb": 224,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1253,
+              "verified_verb": 373,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2549,
+              "verified_verb": 477,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-02",
+          "before": {
+            "N5": {
+              "verified_word": 452,
+              "verified_verb": 104,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 373,
+              "verified_verb": 155,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1392,
+              "verified_verb": 223,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1252,
+              "verified_verb": 372,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2548,
+              "verified_verb": 476,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-03",
+          "before": {
+            "N5": {
+              "verified_word": 450,
+              "verified_verb": 103,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 371,
+              "verified_verb": 154,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1390,
+              "verified_verb": 222,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1251,
+              "verified_verb": 371,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2547,
+              "verified_verb": 475,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-04",
+          "before": {
+            "N5": {
+              "verified_word": 448,
+              "verified_verb": 102,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 369,
+              "verified_verb": 153,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1388,
+              "verified_verb": 221,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1250,
+              "verified_verb": 370,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2546,
+              "verified_verb": 474,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-05",
+          "before": {
+            "N5": {
+              "verified_word": 446,
+              "verified_verb": 101,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 367,
+              "verified_verb": 152,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1386,
+              "verified_verb": 220,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1249,
+              "verified_verb": 369,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2545,
+              "verified_verb": 473,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-06",
+          "before": {
+            "N5": {
+              "verified_word": 444,
+              "verified_verb": 100,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 365,
+              "verified_verb": 151,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1384,
+              "verified_verb": 219,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1248,
+              "verified_verb": 368,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2544,
+              "verified_verb": 472,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-07",
+          "before": {
+            "N5": {
+              "verified_word": 442,
+              "verified_verb": 99,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 363,
+              "verified_verb": 150,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1382,
+              "verified_verb": 218,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1247,
+              "verified_verb": 367,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2543,
+              "verified_verb": 471,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-08",
+          "before": {
+            "N5": {
+              "verified_word": 440,
+              "verified_verb": 98,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 361,
+              "verified_verb": 149,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1380,
+              "verified_verb": 217,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1246,
+              "verified_verb": 366,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2542,
+              "verified_verb": 470,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 438,
+              "verified_verb": 97,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 359,
+              "verified_verb": 148,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1378,
+              "verified_verb": 216,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1245,
+              "verified_verb": 365,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2541,
+              "verified_verb": 469,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-09",
+          "before": {
+            "N5": {
+              "verified_word": 438,
+              "verified_verb": 97,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 359,
+              "verified_verb": 148,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1378,
+              "verified_verb": 216,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1245,
+              "verified_verb": 365,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2541,
+              "verified_verb": 469,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 436,
+              "verified_verb": 96,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 357,
+              "verified_verb": 147,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1376,
+              "verified_verb": 215,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1244,
+              "verified_verb": 364,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2540,
+              "verified_verb": 468,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-10",
+          "before": {
+            "N5": {
+              "verified_word": 436,
+              "verified_verb": 96,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 357,
+              "verified_verb": 147,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1376,
+              "verified_verb": 215,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1244,
+              "verified_verb": 364,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2540,
+              "verified_verb": 468,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 434,
+              "verified_verb": 95,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 355,
+              "verified_verb": 146,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1374,
+              "verified_verb": 214,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1243,
+              "verified_verb": 363,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2539,
+              "verified_verb": 467,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-11",
+          "before": {
+            "N5": {
+              "verified_word": 434,
+              "verified_verb": 95,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 355,
+              "verified_verb": 146,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1374,
+              "verified_verb": 214,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1243,
+              "verified_verb": 363,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2539,
+              "verified_verb": 467,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 432,
+              "verified_verb": 94,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 353,
+              "verified_verb": 145,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1372,
+              "verified_verb": 213,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1242,
+              "verified_verb": 362,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2538,
+              "verified_verb": 466,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-12",
+          "before": {
+            "N5": {
+              "verified_word": 432,
+              "verified_verb": 94,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 353,
+              "verified_verb": 145,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1372,
+              "verified_verb": 213,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1242,
+              "verified_verb": 362,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2538,
+              "verified_verb": 466,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 430,
+              "verified_verb": 93,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 351,
+              "verified_verb": 144,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1370,
+              "verified_verb": 212,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1241,
+              "verified_verb": 361,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2537,
+              "verified_verb": 465,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-13",
+          "before": {
+            "N5": {
+              "verified_word": 430,
+              "verified_verb": 93,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 351,
+              "verified_verb": 144,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1370,
+              "verified_verb": 212,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1241,
+              "verified_verb": 361,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2537,
+              "verified_verb": 465,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 428,
+              "verified_verb": 92,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 349,
+              "verified_verb": 143,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1368,
+              "verified_verb": 211,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1240,
+              "verified_verb": 360,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2536,
+              "verified_verb": 464,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-14",
+          "before": {
+            "N5": {
+              "verified_word": 428,
+              "verified_verb": 92,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 349,
+              "verified_verb": 143,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1368,
+              "verified_verb": 211,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1240,
+              "verified_verb": 360,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2536,
+              "verified_verb": 464,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 426,
+              "verified_verb": 91,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 347,
+              "verified_verb": 142,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1366,
+              "verified_verb": 210,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1239,
+              "verified_verb": 359,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2535,
+              "verified_verb": 463,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-15",
+          "before": {
+            "N5": {
+              "verified_word": 426,
+              "verified_verb": 91,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 347,
+              "verified_verb": 142,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1366,
+              "verified_verb": 210,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1239,
+              "verified_verb": 359,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2535,
+              "verified_verb": 463,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 424,
+              "verified_verb": 90,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 345,
+              "verified_verb": 141,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1364,
+              "verified_verb": 209,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1238,
+              "verified_verb": 358,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2534,
+              "verified_verb": 462,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-16",
+          "before": {
+            "N5": {
+              "verified_word": 424,
+              "verified_verb": 90,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 345,
+              "verified_verb": 141,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1364,
+              "verified_verb": 209,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1238,
+              "verified_verb": 358,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2534,
+              "verified_verb": 462,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 422,
+              "verified_verb": 89,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 343,
+              "verified_verb": 140,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1362,
+              "verified_verb": 208,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1237,
+              "verified_verb": 357,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2533,
+              "verified_verb": 461,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-17",
+          "before": {
+            "N5": {
+              "verified_word": 422,
+              "verified_verb": 89,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 343,
+              "verified_verb": 140,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1362,
+              "verified_verb": 208,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1237,
+              "verified_verb": 357,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2533,
+              "verified_verb": 461,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 420,
+              "verified_verb": 88,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 341,
+              "verified_verb": 139,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1360,
+              "verified_verb": 207,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1236,
+              "verified_verb": 356,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2532,
+              "verified_verb": 460,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-18",
+          "before": {
+            "N5": {
+              "verified_word": 420,
+              "verified_verb": 88,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 341,
+              "verified_verb": 139,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1360,
+              "verified_verb": 207,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1236,
+              "verified_verb": 356,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2532,
+              "verified_verb": 460,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 418,
+              "verified_verb": 87,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 339,
+              "verified_verb": 138,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1358,
+              "verified_verb": 206,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1235,
+              "verified_verb": 355,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2531,
+              "verified_verb": 459,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-19",
+          "before": {
+            "N5": {
+              "verified_word": 418,
+              "verified_verb": 87,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 339,
+              "verified_verb": 138,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1358,
+              "verified_verb": 206,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1235,
+              "verified_verb": 355,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2531,
+              "verified_verb": 459,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 14,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 416,
+              "verified_verb": 86,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 337,
+              "verified_verb": 137,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1356,
+              "verified_verb": 205,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1234,
+              "verified_verb": 354,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2530,
+              "verified_verb": 458,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-20",
+          "before": {
+            "N5": {
+              "verified_word": 416,
+              "verified_verb": 86,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 337,
+              "verified_verb": 137,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1356,
+              "verified_verb": 205,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1234,
+              "verified_verb": 354,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2530,
+              "verified_verb": 458,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 13,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 414,
+              "verified_verb": 85,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 335,
+              "verified_verb": 136,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1354,
+              "verified_verb": 204,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1233,
+              "verified_verb": 353,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2529,
+              "verified_verb": 457,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-21",
+          "before": {
+            "N5": {
+              "verified_word": 414,
+              "verified_verb": 85,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 335,
+              "verified_verb": 136,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1354,
+              "verified_verb": 204,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1233,
+              "verified_verb": 353,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2529,
+              "verified_verb": 457,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 412,
+              "verified_verb": 84,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 333,
+              "verified_verb": 135,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1352,
+              "verified_verb": 203,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1232,
+              "verified_verb": 352,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2528,
+              "verified_verb": 456,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-22",
+          "before": {
+            "N5": {
+              "verified_word": 412,
+              "verified_verb": 84,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 333,
+              "verified_verb": 135,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1352,
+              "verified_verb": 203,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1232,
+              "verified_verb": 352,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2528,
+              "verified_verb": 456,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 410,
+              "verified_verb": 83,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 331,
+              "verified_verb": 134,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1350,
+              "verified_verb": 202,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1231,
+              "verified_verb": 351,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2527,
+              "verified_verb": 455,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-23",
+          "before": {
+            "N5": {
+              "verified_word": 410,
+              "verified_verb": 83,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 331,
+              "verified_verb": 134,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1350,
+              "verified_verb": 202,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1231,
+              "verified_verb": 351,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2527,
+              "verified_verb": 455,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 408,
+              "verified_verb": 82,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 329,
+              "verified_verb": 133,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1348,
+              "verified_verb": 201,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1230,
+              "verified_verb": 350,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2526,
+              "verified_verb": 454,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-24",
+          "before": {
+            "N5": {
+              "verified_word": 408,
+              "verified_verb": 82,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 329,
+              "verified_verb": 133,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1348,
+              "verified_verb": 201,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1230,
+              "verified_verb": 350,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2526,
+              "verified_verb": 454,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 406,
+              "verified_verb": 81,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 327,
+              "verified_verb": 132,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1346,
+              "verified_verb": 200,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1229,
+              "verified_verb": 349,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2525,
+              "verified_verb": 453,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-25",
+          "before": {
+            "N5": {
+              "verified_word": 406,
+              "verified_verb": 81,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 327,
+              "verified_verb": 132,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1346,
+              "verified_verb": 200,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1229,
+              "verified_verb": 349,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2525,
+              "verified_verb": 453,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 404,
+              "verified_verb": 80,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 325,
+              "verified_verb": 131,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1344,
+              "verified_verb": 199,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1228,
+              "verified_verb": 348,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2524,
+              "verified_verb": 452,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-26",
+          "before": {
+            "N5": {
+              "verified_word": 404,
+              "verified_verb": 80,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 325,
+              "verified_verb": 131,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1344,
+              "verified_verb": 199,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1228,
+              "verified_verb": 348,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2524,
+              "verified_verb": 452,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 402,
+              "verified_verb": 79,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 323,
+              "verified_verb": 130,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1342,
+              "verified_verb": 198,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1227,
+              "verified_verb": 347,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2523,
+              "verified_verb": 451,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-27",
+          "before": {
+            "N5": {
+              "verified_word": 402,
+              "verified_verb": 79,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 323,
+              "verified_verb": 130,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1342,
+              "verified_verb": 198,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1227,
+              "verified_verb": 347,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2523,
+              "verified_verb": 451,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 400,
+              "verified_verb": 78,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 321,
+              "verified_verb": 129,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1340,
+              "verified_verb": 197,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1226,
+              "verified_verb": 346,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2522,
+              "verified_verb": 450,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-28",
+          "before": {
+            "N5": {
+              "verified_word": 400,
+              "verified_verb": 78,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 321,
+              "verified_verb": 129,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1340,
+              "verified_verb": 197,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1226,
+              "verified_verb": 346,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2522,
+              "verified_verb": 450,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 398,
+              "verified_verb": 77,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 319,
+              "verified_verb": 128,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1338,
+              "verified_verb": 196,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1225,
+              "verified_verb": 345,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2521,
+              "verified_verb": 449,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-29",
+          "before": {
+            "N5": {
+              "verified_word": 398,
+              "verified_verb": 77,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 319,
+              "verified_verb": 128,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1338,
+              "verified_verb": 196,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1225,
+              "verified_verb": 345,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2521,
+              "verified_verb": 449,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 396,
+              "verified_verb": 76,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 317,
+              "verified_verb": 127,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1336,
+              "verified_verb": 195,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1224,
+              "verified_verb": 344,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2520,
+              "verified_verb": 448,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        },
+        {
+          "day": "2026-10-30",
+          "before": {
+            "N5": {
+              "verified_word": 396,
+              "verified_verb": 76,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 317,
+              "verified_verb": 127,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1336,
+              "verified_verb": 195,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1224,
+              "verified_verb": 344,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2520,
+              "verified_verb": 448,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          },
+          "ok": true,
+          "error": null,
+          "mock_calls": 9,
+          "missing": [],
+          "quota": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5
+          },
+          "fallback": 0,
+          "after": {
+            "N5": {
+              "verified_word": 394,
+              "verified_verb": 75,
+              "unknown": 102,
+              "rejected_invalid": 1
+            },
+            "N4": {
+              "verified_word": 315,
+              "verified_verb": 126,
+              "unknown": 96,
+              "rejected_invalid": 3
+            },
+            "N3": {
+              "verified_word": 1334,
+              "verified_verb": 194,
+              "unknown": 89,
+              "rejected_invalid": 2
+            },
+            "N2": {
+              "verified_word": 1223,
+              "verified_verb": 343,
+              "unknown": 154,
+              "rejected_invalid": 5
+            },
+            "N1": {
+              "verified_word": 2519,
+              "verified_verb": 447,
+              "unknown": 271,
+              "rejected_invalid": 6
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "production_postgres_verified": false,
+  "real_gemini_calls": 0,
+  "evidence": {
+    "SQLite.test_attested_verbs_not_suffix_guesses": [],
+    "SQLite.test_candidate_cache_preserves_source_sense_evidence": [],
+    "SQLite.test_capacity_seven_days": [
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N3\", \"count\": 1, \"keys\": [\"n3:ことになっている\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N3 selected=1 batch=b6925c8f780242a08ae5495c244cc767",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N2\", \"daily_batch_id\": \"b6925c8f780242a08ae5495c244cc767\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 125, \"key\": \"n2:にかかわらず\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:にかかわらず\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=b6925c8f780242a08ae5495c244cc767",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"b6925c8f780242a08ae5495c244cc767\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 126, \"key\": \"n1:に堪えない\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:に堪えない\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=b6925c8f780242a08ae5495c244cc767",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-07 material_key=2026-10-07-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-07-1",
+      "[gemini-stage] finalized job_id=b6925c8f780242a08ae5495c244cc767 material_key=2026-10-07-1 elapsed_ms=350"
+    ],
+    "SQLite.test_capacity_thirty_days": [
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N3\", \"count\": 1, \"keys\": [\"n3:たびに\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N3 selected=1 batch=7976903881704c67bf801aae05948cb7",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N2\", \"daily_batch_id\": \"7976903881704c67bf801aae05948cb7\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 179, \"key\": \"n2:を通して\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:を通して\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=7976903881704c67bf801aae05948cb7",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"7976903881704c67bf801aae05948cb7\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 180, \"key\": \"n1:ともなると\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:ともなると\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=7976903881704c67bf801aae05948cb7",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=7976903881704c67bf801aae05948cb7 material_key=2026-10-30-1 elapsed_ms=606"
+    ],
+    "SQLite.test_gemini_rejection_without_suggested_type_stays_unknown": [
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N3\", \"count\": 1, \"keys\": [\"n3:ようだ\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N3 selected=1 batch=28344e1c60f243c28f3f29c925b3c619",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N2\", \"daily_batch_id\": \"28344e1c60f243c28f3f29c925b3c619\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 17, \"key\": \"n2:に応じて\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:に応じて\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=28344e1c60f243c28f3f29c925b3c619",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"28344e1c60f243c28f3f29c925b3c619\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 18, \"key\": \"n1:を皮切りに\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:を皮切りに\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=28344e1c60f243c28f3f29c925b3c619",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=28344e1c60f243c28f3f29c925b3c619 material_key=2026-10-30-1 elapsed_ms=254"
+    ],
+    "SQLite.test_missing_reserve_does_not_change_primary_quota": [
+      "[vocabulary-pool] selector_excluded_generated=1 selector_excluded_current_batch=0 selector_excluded_bank=0",
+      "[vocabulary-pool] selector_sql_mode=id_batch_safe_hydration",
+      "[vocabulary-pool] candidate_id_fetch_sql_mode=id_only",
+      "[vocabulary-pool] selector_sql_filters blocked_categories=['advanced', 'archaic', 'brand', 'business', 'classical', 'company', 'finance', 'financial', 'generated_compound', 'legal', 'medical', 'named_entity', 'person_name', 'place_name', 'proper_noun', 'sensitive', 'specialized', 'technical', 'typo_or_noise', 'unknown'] blocked_sources=['auto_generated', 'generated', 'seed_advanced_synthetic', 'synthetic'] preferred_source=openjlpt",
+      "[vocabulary-pool] selector_id_query_ms=1.13 item_type=verb level=N5",
+      "[vocabulary-pool] selector_hydration_ms=0.16 item_type=verb level=N5",
+      "[vocabulary-pool] selector_selected=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_scanned_ids=1 item_type=verb level=N5",
+      "[vocabulary-pool] selector_bad_rows=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_rejected_by_filter={'excluded_material_history_or_current_batch': 1} item_type=verb level=N5",
+      "[vocabulary-pool] classifier_unknown_count=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_elapsed_ms=1.64 item_type=verb level=N5",
+      "[vocabulary-pool] selector_cursor source_tier=2 last_id=0",
+      "[vocabulary-pool] selector_scan_incomplete=false progress_saved=true",
+      "[vocabulary-pool] candidate_fetch_success item_type=verb level=N5 selected=0",
+      "[vocabulary-pool] candidate_exhausted=true item_type=verb level=N5",
+      "[vocabulary-pool] candidate_fetch_success item_type=verb level=N5 selected=0",
+      "[fresh-candidate] source=vocabulary_pool pack=verb selected=0",
+      "[fresh-candidate] levels={'N5': 0}",
+      "[fresh-candidate] candidates pack=verb items=[]",
+      "[vocabulary-pool] verb_candidate_audit selected=0 rejected=0",
+      "[vocabulary-pool] skipped_bad_encoding count=0",
+      "[fresh-candidate] insufficient source=vocabulary_pool pack=verb item_type=verb missing=[{'level': 'N5', 'requested': 1, 'available': 0, 'remaining': 1, 'candidate_exhausted': True}]",
+      "[daily-fresh-candidates] primary_reserve pack=verb item_type=verb primary=0 reserve=0",
+      "[daily-fresh-candidates] primary_levels={} reserve_levels={}"
+    ],
+    "SQLite.test_nonverbs_keep_their_attested_senses": [],
+    "SQLite.test_pos_contract_does_not_accept_unknown_or_verb_aliases_as_word": [],
+    "SQLite.test_protected_functions_unchanged": [],
+    "SQLite.test_same_level_rejected_verb_and_truncated_grammar": [
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N3\", \"count\": 1, \"keys\": [\"n3:ようだ\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N3 selected=1 batch=15d2865199684137b8e80715a405ca65",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N2\", \"daily_batch_id\": \"15d2865199684137b8e80715a405ca65\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 16, \"key\": \"n2:に応じて\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:に応じて\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=15d2865199684137b8e80715a405ca65",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"15d2865199684137b8e80715a405ca65\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 17, \"key\": \"n1:を皮切りに\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:を皮切りに\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=15d2865199684137b8e80715a405ca65",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=15d2865199684137b8e80715a405ca65 material_key=2026-10-30-1 elapsed_ms=276"
+    ],
+    "SQLite.test_unknown_not_suggested_word_and_reading_is_not_identity": [],
+    "SQLite.test_unknown_selector_keeps_ids_without_false_exhaustion": [
+      "[vocabulary-pool] selector_id_query_ms=0.98 item_type=word level=N4",
+      "[vocabulary-pool] selector_hydration_ms=0.0 item_type=word level=N4",
+      "[vocabulary-pool] selector_selected=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_scanned_ids=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_bad_rows=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_rejected_by_filter={} item_type=word level=N4",
+      "[vocabulary-pool] classifier_unknown_count=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_elapsed_ms=1.2 item_type=word level=N4",
+      "[vocabulary-pool] selector_cursor source_tier=2 last_id=0",
+      "[vocabulary-pool] selector_scan_incomplete=false progress_saved=true",
+      "[vocabulary-pool] candidate_fetch_success item_type=word level=N4 selected=0",
+      "[vocabulary-pool] candidate_exhausted=true item_type=word level=N4",
+      "[vocabulary-pool] candidate_fetch_success item_type=word level=N4 selected=0",
+      "[fresh-candidate] shortage_not_exhausted item_type=word level=N5 remaining=4",
+      "[fresh-candidate] source=vocabulary_pool pack=word_basic selected=0",
+      "[fresh-candidate] levels={'N5': 0, 'N4': 0}",
+      "[fresh-candidate] candidates pack=word_basic items=[]",
+      "[vocabulary-pool] skipped_bad_encoding count=0",
+      "[fresh-candidate] insufficient source=vocabulary_pool pack=word_basic item_type=word missing=[{'level': 'N4', 'requested': 4, 'available': 0, 'remaining': 4, 'candidate_exhausted': True}]",
+      "[daily-fresh-candidates] reserve_shortage item_type=word level=N5 available=0 requested=2 redistributed=false",
+      "[daily-fresh-candidates] reserve_shortage item_type=word level=N4 available=0 requested=2 redistributed=false",
+      "[daily-fresh-candidates] primary_reserve pack=word_basic item_type=word primary=0 reserve=0",
+      "[daily-fresh-candidates] primary_levels={} reserve_levels={}",
+      "[gemini-flow] prepare_all_candidates_failed pack=word_basic error=classifier_uncertainty",
+      "[gemini-cost] job_failed_before_enrich gemini_call_count=0"
+    ],
+    "PostgreSQL17-isolated.test_attested_verbs_not_suffix_guesses": [],
+    "PostgreSQL17-isolated.test_candidate_cache_preserves_source_sense_evidence": [],
+    "PostgreSQL17-isolated.test_capacity_seven_days": [
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 125, \"key\": \"n2:にかかわらず\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:にかかわらず\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=8b07bbd5573b4db9af7b130ab7555180",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"8b07bbd5573b4db9af7b130ab7555180\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 126, \"key\": \"n1:に堪えない\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:に堪えない\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=8b07bbd5573b4db9af7b130ab7555180",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-07 material_key=2026-10-07-1",
+      "[vocab-selector] selection log deferred selected_for=word material_key=2026-10-07-1",
+      "[vocab-selector] selection log deferred selected_for=verb material_key=2026-10-07-1",
+      "[grammar-selector] selection log deferred material_key=2026-10-07-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-07-1",
+      "[gemini-stage] finalized job_id=8b07bbd5573b4db9af7b130ab7555180 material_key=2026-10-07-1 elapsed_ms=1187"
+    ],
+    "PostgreSQL17-isolated.test_capacity_thirty_days": [
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 179, \"key\": \"n2:を通して\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:を通して\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=3d4d7aedadaf40a1bfcb74e0494bb196",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"3d4d7aedadaf40a1bfcb74e0494bb196\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 180, \"key\": \"n1:ともなると\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:ともなると\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=3d4d7aedadaf40a1bfcb74e0494bb196",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=word material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=verb material_key=2026-10-30-1",
+      "[grammar-selector] selection log deferred material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=3d4d7aedadaf40a1bfcb74e0494bb196 material_key=2026-10-30-1 elapsed_ms=1387"
+    ],
+    "PostgreSQL17-isolated.test_gemini_rejection_without_suggested_type_stays_unknown": [
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 17, \"key\": \"n2:に応じて\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:に応じて\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=d355119bce6441719c4ede973aa8d7ab",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"d355119bce6441719c4ede973aa8d7ab\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 18, \"key\": \"n1:を皮切りに\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:を皮切りに\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=d355119bce6441719c4ede973aa8d7ab",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=word material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=verb material_key=2026-10-30-1",
+      "[grammar-selector] selection log deferred material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=d355119bce6441719c4ede973aa8d7ab material_key=2026-10-30-1 elapsed_ms=1392"
+    ],
+    "PostgreSQL17-isolated.test_missing_reserve_does_not_change_primary_quota": [
+      "[vocabulary-pool] selector_excluded_generated=1 selector_excluded_current_batch=0 selector_excluded_bank=0",
+      "[vocabulary-pool] selector_sql_mode=id_batch_safe_hydration",
+      "[vocabulary-pool] candidate_id_fetch_sql_mode=id_only",
+      "[vocabulary-pool] selector_sql_filters blocked_categories=['advanced', 'archaic', 'brand', 'business', 'classical', 'company', 'finance', 'financial', 'generated_compound', 'legal', 'medical', 'named_entity', 'person_name', 'place_name', 'proper_noun', 'sensitive', 'specialized', 'technical', 'typo_or_noise', 'unknown'] blocked_sources=['auto_generated', 'generated', 'seed_advanced_synthetic', 'synthetic'] preferred_source=openjlpt",
+      "[vocabulary-pool] selector_id_query_ms=11.13 item_type=verb level=N5",
+      "[vocabulary-pool] selector_hydration_ms=0.85 item_type=verb level=N5",
+      "[vocabulary-pool] selector_selected=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_scanned_ids=1 item_type=verb level=N5",
+      "[vocabulary-pool] selector_bad_rows=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_rejected_by_filter={'excluded_material_history_or_current_batch': 1} item_type=verb level=N5",
+      "[vocabulary-pool] classifier_unknown_count=0 item_type=verb level=N5",
+      "[vocabulary-pool] selector_elapsed_ms=13.01 item_type=verb level=N5",
+      "[vocabulary-pool] selector_cursor source_tier=2 last_id=0",
+      "[vocabulary-pool] selector_scan_incomplete=false progress_saved=true",
+      "[vocabulary-pool] candidate_fetch_success item_type=verb level=N5 selected=0",
+      "[vocabulary-pool] candidate_exhausted=true item_type=verb level=N5",
+      "[vocabulary-pool] candidate_fetch_success item_type=verb level=N5 selected=0",
+      "[fresh-candidate] source=vocabulary_pool pack=verb selected=0",
+      "[fresh-candidate] levels={'N5': 0}",
+      "[fresh-candidate] candidates pack=verb items=[]",
+      "[vocabulary-pool] verb_candidate_audit selected=0 rejected=0",
+      "[vocabulary-pool] skipped_bad_encoding count=0",
+      "[fresh-candidate] insufficient source=vocabulary_pool pack=verb item_type=verb missing=[{'level': 'N5', 'requested': 1, 'available': 0, 'remaining': 1, 'candidate_exhausted': True}]",
+      "[daily-fresh-candidates] primary_reserve pack=verb item_type=verb primary=0 reserve=0",
+      "[daily-fresh-candidates] primary_levels={} reserve_levels={}"
+    ],
+    "PostgreSQL17-isolated.test_nonverbs_keep_their_attested_senses": [],
+    "PostgreSQL17-isolated.test_pos_contract_does_not_accept_unknown_or_verb_aliases_as_word": [],
+    "PostgreSQL17-isolated.test_protected_functions_unchanged": [],
+    "PostgreSQL17-isolated.test_same_level_rejected_verb_and_truncated_grammar": [
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 16, \"key\": \"n2:に応じて\", \"level\": \"N2\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N2\", \"count\": 1, \"keys\": [\"n2:に応じて\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N2 selected=1 batch=cfde0ae143684786bd4951af669be69a",
+      "[gemini-finalize-debug] grammar_select_query_filters={\"item_type\": \"grammar\", \"level\": \"N1\", \"daily_batch_id\": \"cfde0ae143684786bd4951af669be69a\", \"statuses\": [\"unused\", \"available\", \"active\", \"reserved\"], \"recent_exclusion_count\": 0, \"limit\": 1}",
+      "[gemini-finalize-debug] grammar_select_raw_candidates=[{\"id\": 17, \"key\": \"n1:を皮切りに\", \"level\": \"N1\", \"status\": \"reserved\"}]",
+      "[gemini-finalize-debug] grammar_select_selected={\"level\": \"N1\", \"count\": 1, \"keys\": [\"n1:を皮切りに\"]}",
+      "[gemini-bank] select_daily_batch item_type=grammar level=N1 selected=1 batch=cfde0ae143684786bd4951af669be69a",
+      "[gemini-finalize] initial selected_counts_by_level={'word': {'N5': 2, 'N4': 2, 'N3': 2, 'N2': 1, 'N1': 1}, 'verb': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}, 'grammar': {'N5': 1, 'N4': 1, 'N3': 1, 'N2': 1, 'N1': 1}}",
+      "[gemini-finalize] grammar_rotation_selected N5=1 N4=1 N3=1 N2=1 N1=1",
+      "[gemini-finalize] bank_fallback_allowed=false",
+      "[gemini-finalize] selected duplicate_recent=false recent_exclusion_days=7",
+      "[gemini-finalize] material_from_light_bank word=8 verb=5 grammar=5",
+      "[gemini-finalize] daily_batch_selected word=8 verb=5 grammar=5",
+      "[gemini-finalize] fallback_selected word=0 verb=0 grammar=0",
+      "[gemini-finalize] final selected word=8 verb=5 grammar=5",
+      "[history-protection] append material version date=2026-10-30 material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=word material_key=2026-10-30-1",
+      "[vocab-selector] selection log deferred selected_for=verb material_key=2026-10-30-1",
+      "[grammar-selector] selection log deferred material_key=2026-10-30-1",
+      "[archive-dates-cache] invalidated: daily material saved",
+      "[grammar-pool] rotation_mark_used count=5",
+      "[gemini-bank] mark_used count=18",
+      "[dashboard-cache] invalidated: gemini staged material generated",
+      "[gemini-bank] finalize material_key=2026-10-30-1",
+      "[gemini-stage] finalized job_id=cfde0ae143684786bd4951af669be69a material_key=2026-10-30-1 elapsed_ms=1378"
+    ],
+    "PostgreSQL17-isolated.test_unknown_not_suggested_word_and_reading_is_not_identity": [],
+    "PostgreSQL17-isolated.test_unknown_selector_keeps_ids_without_false_exhaustion": [
+      "[vocabulary-pool] selector_id_query_ms=10.28 item_type=word level=N4",
+      "[vocabulary-pool] selector_hydration_ms=0.0 item_type=word level=N4",
+      "[vocabulary-pool] selector_selected=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_scanned_ids=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_bad_rows=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_rejected_by_filter={} item_type=word level=N4",
+      "[vocabulary-pool] classifier_unknown_count=0 item_type=word level=N4",
+      "[vocabulary-pool] selector_elapsed_ms=11.11 item_type=word level=N4",
+      "[vocabulary-pool] selector_cursor source_tier=2 last_id=0",
+      "[vocabulary-pool] selector_scan_incomplete=false progress_saved=true",
+      "[vocabulary-pool] candidate_fetch_success item_type=word level=N4 selected=0",
+      "[vocabulary-pool] candidate_exhausted=true item_type=word level=N4",
+      "[vocabulary-pool] candidate_fetch_success item_type=word level=N4 selected=0",
+      "[fresh-candidate] shortage_not_exhausted item_type=word level=N5 remaining=4",
+      "[fresh-candidate] source=vocabulary_pool pack=word_basic selected=0",
+      "[fresh-candidate] levels={'N5': 0, 'N4': 0}",
+      "[fresh-candidate] candidates pack=word_basic items=[]",
+      "[vocabulary-pool] skipped_bad_encoding count=0",
+      "[fresh-candidate] insufficient source=vocabulary_pool pack=word_basic item_type=word missing=[{'level': 'N4', 'requested': 4, 'available': 0, 'remaining': 4, 'candidate_exhausted': True}]",
+      "[daily-fresh-candidates] reserve_shortage item_type=word level=N5 available=0 requested=2 redistributed=false",
+      "[daily-fresh-candidates] reserve_shortage item_type=word level=N4 available=0 requested=2 redistributed=false",
+      "[daily-fresh-candidates] primary_reserve pack=word_basic item_type=word primary=0 reserve=0",
+      "[daily-fresh-candidates] primary_levels={} reserve_levels={}",
+      "[gemini-flow] prepare_all_candidates_failed pack=word_basic error=classifier_uncertainty",
+      "[gemini-cost] job_failed_before_enrich gemini_call_count=0"
+    ]
+  }
+}

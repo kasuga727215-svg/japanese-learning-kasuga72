@@ -1,0 +1,521 @@
+﻿backend,scenario_days,history_source,day,level,initial_effective_verb,consumed_verb,remaining_effective_verb,unknown,history_excluded,history_excluded_verified_verb,quota_satisfied,error
+SQLite,30,empty isolation fixture,2026-11-01,N5,105,5,100,102,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-01,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-01,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-01,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-01,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-02,N5,100,5,95,102,13,5,True,
+SQLite,30,empty isolation fixture,2026-11-02,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-02,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-02,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-02,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-03,N5,95,5,90,102,26,10,True,
+SQLite,30,empty isolation fixture,2026-11-03,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-03,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-03,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-03,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-04,N5,90,5,85,102,39,15,True,
+SQLite,30,empty isolation fixture,2026-11-04,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-04,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-04,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-04,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-05,N5,85,5,80,102,52,20,True,
+SQLite,30,empty isolation fixture,2026-11-05,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-05,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-05,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-05,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-06,N5,80,5,75,102,65,25,True,
+SQLite,30,empty isolation fixture,2026-11-06,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-06,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-06,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-06,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-07,N5,75,5,70,102,78,30,True,
+SQLite,30,empty isolation fixture,2026-11-07,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-07,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-07,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-07,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-08,N5,70,5,65,102,91,35,True,
+SQLite,30,empty isolation fixture,2026-11-08,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-08,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-08,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-08,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-09,N5,65,5,60,102,104,40,True,
+SQLite,30,empty isolation fixture,2026-11-09,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-09,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-09,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-09,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-10,N5,60,5,55,102,117,45,True,
+SQLite,30,empty isolation fixture,2026-11-10,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-10,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-10,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-10,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-11,N5,55,5,50,102,130,50,True,
+SQLite,30,empty isolation fixture,2026-11-11,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-11,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-11,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-11,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-12,N5,50,5,45,102,143,55,True,
+SQLite,30,empty isolation fixture,2026-11-12,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-12,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-12,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-12,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-13,N5,45,5,40,102,156,60,True,
+SQLite,30,empty isolation fixture,2026-11-13,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-13,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-13,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-13,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-14,N5,40,5,35,102,169,65,True,
+SQLite,30,empty isolation fixture,2026-11-14,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-14,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-14,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-14,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-15,N5,35,5,30,102,182,70,True,
+SQLite,30,empty isolation fixture,2026-11-15,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-15,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-15,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-15,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-16,N5,30,5,25,102,195,75,True,
+SQLite,30,empty isolation fixture,2026-11-16,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-16,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-16,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-16,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-17,N5,25,5,20,102,208,80,True,
+SQLite,30,empty isolation fixture,2026-11-17,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-17,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-17,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-17,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-18,N5,20,5,15,102,221,85,True,
+SQLite,30,empty isolation fixture,2026-11-18,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-18,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-18,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-18,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-19,N5,15,5,10,102,234,90,True,
+SQLite,30,empty isolation fixture,2026-11-19,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-19,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-19,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-19,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-20,N5,10,5,5,102,247,95,True,
+SQLite,30,empty isolation fixture,2026-11-20,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-20,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-20,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-20,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-21,N5,5,5,0,102,260,100,True,
+SQLite,30,empty isolation fixture,2026-11-21,N4,156,0,156,96,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-21,N3,224,0,224,89,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-21,N2,373,0,373,154,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-21,N1,477,0,477,271,0,0,True,
+SQLite,30,empty isolation fixture,2026-11-22,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-22,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-22,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-22,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-22,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-23,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-23,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-23,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-23,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-23,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-24,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-24,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-24,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-24,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-24,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-25,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-25,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-25,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-25,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-25,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-26,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-26,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-26,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-26,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-26,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-27,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-27,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-27,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-27,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-27,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-28,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-28,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-28,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-28,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-28,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-29,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-29,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-29,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-29,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-29,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-30,N5,0,0,0,102,273,105,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-30,N4,156,0,156,96,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-30,N3,224,0,224,89,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-30,N2,373,0,373,154,0,0,False,classifier_uncertainty
+SQLite,30,empty isolation fixture,2026-11-30,N1,477,0,477,271,0,0,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-01,N5,2,1,1,61,367,103,True,
+SQLite,7,production GET lexical projection,2026-11-01,N4,63,1,62,70,225,93,True,
+SQLite,7,production GET lexical projection,2026-11-01,N3,151,1,150,71,173,73,True,
+SQLite,7,production GET lexical projection,2026-11-01,N2,318,1,317,149,107,55,True,
+SQLite,7,production GET lexical projection,2026-11-01,N1,382,1,381,260,167,95,True,
+SQLite,7,production GET lexical projection,2026-11-02,N5,1,1,0,61,370,104,True,
+SQLite,7,production GET lexical projection,2026-11-02,N4,62,1,61,70,228,94,True,
+SQLite,7,production GET lexical projection,2026-11-02,N3,150,1,149,71,176,74,True,
+SQLite,7,production GET lexical projection,2026-11-02,N2,317,1,316,149,109,56,True,
+SQLite,7,production GET lexical projection,2026-11-02,N1,381,1,380,260,169,96,True,
+SQLite,7,production GET lexical projection,2026-11-03,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-03,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-03,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-03,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-03,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-04,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-04,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-04,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-04,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-04,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-05,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-05,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-05,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-05,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-05,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-06,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-06,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-06,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-06,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-06,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-07,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-07,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-07,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-07,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,7,production GET lexical projection,2026-11-07,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-01,N5,2,1,1,61,367,103,True,
+SQLite,30,production GET lexical projection,2026-11-01,N4,63,1,62,70,225,93,True,
+SQLite,30,production GET lexical projection,2026-11-01,N3,151,1,150,71,173,73,True,
+SQLite,30,production GET lexical projection,2026-11-01,N2,318,1,317,149,107,55,True,
+SQLite,30,production GET lexical projection,2026-11-01,N1,382,1,381,260,167,95,True,
+SQLite,30,production GET lexical projection,2026-11-02,N5,1,1,0,61,370,104,True,
+SQLite,30,production GET lexical projection,2026-11-02,N4,62,1,61,70,228,94,True,
+SQLite,30,production GET lexical projection,2026-11-02,N3,150,1,149,71,176,74,True,
+SQLite,30,production GET lexical projection,2026-11-02,N2,317,1,316,149,109,56,True,
+SQLite,30,production GET lexical projection,2026-11-02,N1,381,1,380,260,169,96,True,
+SQLite,30,production GET lexical projection,2026-11-03,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-03,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-03,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-03,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-03,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-04,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-04,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-04,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-04,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-04,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-05,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-05,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-05,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-05,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-05,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-06,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-06,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-06,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-06,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-06,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-07,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-07,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-07,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-07,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-07,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-08,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-08,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-08,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-08,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-08,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-09,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-09,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-09,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-09,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-09,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-10,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-10,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-10,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-10,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-10,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-11,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-11,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-11,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-11,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-11,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-12,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-12,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-12,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-12,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-12,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-13,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-13,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-13,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-13,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-13,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-14,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-14,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-14,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-14,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-14,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-15,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-15,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-15,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-15,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-15,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-16,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-16,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-16,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-16,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-16,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-17,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-17,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-17,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-17,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-17,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-18,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-18,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-18,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-18,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-18,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-19,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-19,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-19,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-19,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-19,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-20,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-20,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-20,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-20,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-20,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-21,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-21,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-21,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-21,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-21,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-22,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-22,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-22,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-22,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-22,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-23,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-23,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-23,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-23,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-23,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-24,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-24,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-24,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-24,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-24,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-25,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-25,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-25,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-25,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-25,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-26,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-26,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-26,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-26,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-26,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-27,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-27,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-27,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-27,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-27,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-28,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-28,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-28,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-28,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-28,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-29,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-29,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-29,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-29,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-29,N1,380,0,380,260,171,97,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-30,N5,0,0,0,61,373,105,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-30,N4,61,0,61,70,231,95,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-30,N3,149,0,149,71,179,75,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-30,N2,316,0,316,149,111,57,False,classifier_uncertainty
+SQLite,30,production GET lexical projection,2026-11-30,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-01,N5,2,1,1,61,367,103,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-01,N4,63,1,62,70,225,93,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-01,N3,151,1,150,71,173,73,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-01,N2,318,1,317,149,107,55,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-01,N1,382,1,381,260,167,95,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-02,N5,1,1,0,61,370,104,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-02,N4,62,1,61,70,228,94,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-02,N3,150,1,149,71,176,74,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-02,N2,317,1,316,149,109,56,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-02,N1,381,1,380,260,169,96,True,
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-03,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-03,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-03,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-03,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-03,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-04,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-04,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-04,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-04,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-04,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-05,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-05,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-05,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-05,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-05,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-06,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-06,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-06,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-06,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-06,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-07,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-07,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-07,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-07,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,7,production GET lexical projection,2026-11-07,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-01,N5,2,1,1,61,367,103,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-01,N4,63,1,62,70,225,93,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-01,N3,151,1,150,71,173,73,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-01,N2,318,1,317,149,107,55,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-01,N1,382,1,381,260,167,95,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-02,N5,1,1,0,61,370,104,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-02,N4,62,1,61,70,228,94,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-02,N3,150,1,149,71,176,74,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-02,N2,317,1,316,149,109,56,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-02,N1,381,1,380,260,169,96,True,
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-03,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-03,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-03,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-03,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-03,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-04,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-04,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-04,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-04,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-04,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-05,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-05,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-05,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-05,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-05,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-06,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-06,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-06,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-06,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-06,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-07,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-07,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-07,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-07,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-07,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-08,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-08,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-08,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-08,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-08,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-09,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-09,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-09,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-09,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-09,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-10,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-10,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-10,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-10,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-10,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-11,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-11,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-11,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-11,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-11,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-12,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-12,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-12,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-12,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-12,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-13,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-13,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-13,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-13,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-13,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-14,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-14,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-14,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-14,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-14,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-15,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-15,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-15,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-15,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-15,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-16,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-16,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-16,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-16,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-16,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-17,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-17,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-17,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-17,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-17,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-18,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-18,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-18,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-18,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-18,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-19,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-19,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-19,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-19,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-19,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-20,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-20,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-20,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-20,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-20,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-21,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-21,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-21,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-21,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-21,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-22,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-22,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-22,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-22,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-22,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-23,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-23,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-23,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-23,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-23,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-24,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-24,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-24,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-24,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-24,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-25,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-25,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-25,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-25,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-25,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-26,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-26,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-26,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-26,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-26,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-27,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-27,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-27,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-27,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-27,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-28,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-28,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-28,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-28,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-28,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-29,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-29,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-29,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-29,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-29,N1,380,0,380,260,171,97,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-30,N5,0,0,0,61,373,105,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-30,N4,61,0,61,70,231,95,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-30,N3,149,0,149,71,179,75,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-30,N2,316,0,316,149,111,57,False,classifier_uncertainty
+PostgreSQL17-isolated,30,production GET lexical projection,2026-11-30,N1,380,0,380,260,171,97,False,classifier_uncertainty

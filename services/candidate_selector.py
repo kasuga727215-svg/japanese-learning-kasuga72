@@ -35,6 +35,7 @@ def select_slice(conn, *, postgres, item_type, level, limit, state, excluded,
     categories, sources = sorted(blocked_categories), sorted(blocked_sources)
     p = "%s" if postgres else "?"
     rows, bad = [], set(state.get("bad_rows") or [])
+    unknown_ids = set(state.get("unknown_candidate_ids") or [])
     rejected = Counter(state.get("rejected_by_filter") or {})
     scanned = 0
     id_ms = hydration_ms = 0.0
@@ -116,6 +117,8 @@ def select_slice(conn, *, postgres, item_type, level, limit, state, excluded,
                             reason = reject(row, item_type, level, excluded)
                             if reason:
                                 rejected[reason] += 1
+                                if reason.startswith("classifier_unknown:"):
+                                    unknown_ids.add(int(row_id))
                             else:
                                 rows.append(row)
                                 excluded.add(candidate_key(row))
@@ -159,6 +162,8 @@ def select_slice(conn, *, postgres, item_type, level, limit, state, excluded,
         if not postgres:
             conn.set_progress_handler(None, 0)
     state["bad_rows"] = sorted(bad)
+    state["unknown_candidate_ids"] = sorted(unknown_ids)
+    state["classifier_unknown_count"] = len(unknown_ids)
     state["rejected_by_filter"] = dict(rejected)
     state["scanned_ids"] = int(state.get("scanned_ids") or 0) + scanned
     state["source_exhausted"] = int(state.get("source_tier") or 0) >= 2 and bool(state.get("sql_diagnostics_done"))
@@ -169,16 +174,20 @@ def select_slice(conn, *, postgres, item_type, level, limit, state, excluded,
         ("selector_id_query_ms", round(id_ms, 2)), ("selector_hydration_ms", round(hydration_ms, 2)),
         ("selector_selected", len(rows)), ("selector_scanned_ids", state["scanned_ids"]),
         ("selector_bad_rows", len(bad)), ("selector_rejected_by_filter", dict(rejected)),
+        ("classifier_unknown_count", len(unknown_ids)),
         ("selector_elapsed_ms", round((clock() - slice_started) * 1000, 2)),
     ):
         print(f"[vocabulary-pool] {name}={value} item_type={item_type} level={level}")
     print(f"[vocabulary-pool] selector_cursor source_tier={state.get('source_tier', 0)} last_id={state.get('last_id', 0)}")
     print(f"[vocabulary-pool] selector_scan_incomplete={str(incomplete).lower()} progress_saved=true")
     print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(rows)}")
-    if state["source_exhausted"] and len(rows) < limit:
+    if state["source_exhausted"] and len(rows) < limit and not unknown_ids:
         print(f"[vocabulary-pool] candidate_exhausted=true item_type={item_type} level={level}")
+    if state["source_exhausted"] and len(rows) < limit and unknown_ids:
+        print(f"[vocabulary-pool] classifier_uncertainty=true item_type={item_type} level={level} unknown={len(unknown_ids)} source_scan_complete=true")
     rows.append({
-        "__selector_meta": True, "candidate_exhausted": state["source_exhausted"],
+        "__selector_meta": True, "candidate_exhausted": state["source_exhausted"] and not unknown_ids,
+        "classifier_unknown_count": len(unknown_ids), "source_scan_complete": state["source_exhausted"],
         "selector_scan_incomplete": incomplete, "selector_timeout_warning": timed_out,
         "selector_error": error, "candidate_validation_failed": bool(bad) and state["source_exhausted"] and len(rows) < limit,
         "timeout_kind": timeout_kind,

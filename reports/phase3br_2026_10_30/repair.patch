@@ -1,0 +1,932 @@
+--- a/app.py
++++ b/app.py
+@@ -26,7 +26,7 @@
+ from flask import Flask, has_request_context, jsonify, render_template, request
+ from werkzeug.exceptions import HTTPException
+ from services.grammar_debugger import debug_grammar
+-from services.verb_candidate_audit import verified_verb_evidence, verified_word_evidence
++from services.verb_candidate_audit import CLASSIFIER_VERSION, classify_lexeme, pos_contract, verified_verb_evidence, verified_word_evidence
+
+
+ app = Flask(__name__, template_folder=".")
+@@ -5820,18 +5820,10 @@
+
+
+ def verb_pos_allows_candidate(pos):
+-    text = simple_text(pos)
+-    if not text:
++    kind = pos_contract(simple_text(pos))
++    if kind == "unknown":
+         return None
+-    lowered = text.lower()
+-    parts = {p for p in re.split(r"[・/／,，、;\s]+", lowered) if p}
+-    if parts & {token.lower() for token in DAILY_FRESH_VERB_ALLOWED_POS_TOKENS}:
+-        return True
+-    if re.match(r"^(動詞(?:-|$)|五段動詞|一段動詞|サ変動詞|v[1-5](?:[a-z-]*)(?:$|[,;]))", lowered):
+-        return True
+-    if any(token.lower() in lowered for token in DAILY_FRESH_VERB_BLOCKED_POS_TOKENS):
+-        return False
+-    return False
++    return kind == "verb"
+
+
+ def is_probable_japanese_verb_surface(surface):
+@@ -5857,11 +5849,15 @@
+     text = simple_text(surface)
+
+     def audit_result(accepted, reason="", suggested_type=""):
++        lexical = classify_lexeme(text)
++        structural_invalid = reason in {"empty_candidate", "variant_separator", "counter_or_number"}
+         result = {
+             "accepted": bool(accepted),
+             "reason": reason,
+-            "suggested_type": suggested_type,
++            "status": "rejected_invalid" if structural_invalid else lexical["status"],
++            "suggested_type": "word" if not structural_invalid and lexical["status"] == "verified_word" else "",
+             "candidate": text,
++            **{key: lexical[key] for key in ("evidence", "source", "classifier_version", "source_fingerprint", "retryable", "verification_route")},
+         }
+         if log and not accepted and reason in {"known_non_verb", "polite_phrase_not_dictionary_form"}:
+             print(
+@@ -5879,12 +5875,16 @@
+     if text in DAILY_FRESH_NON_VERB_SURFACES:
+         return audit_result(False, "known_non_verb", "word")
+     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
+-    pos_allowed = verb_pos_allows_candidate(pos)
+-    if pos_allowed is False:
+-        return audit_result(False, "blocked_pos", "word")
+-    evidence = verified_verb_evidence(text)
++    reading = first_text(source, ["reading_hiragana", "reading"]) or first_text(row, ["reading_hiragana", "reading"])
++    evidence = verified_verb_evidence(text, reading, pos)
+     return {**audit_result(evidence["accepted"], evidence["reason"], evidence.get("suggested_type", "")),
+-            "evidence": evidence.get("evidence", "")}
++            **{key: evidence[key] for key in ("status", "evidence", "source", "classifier_version", "source_fingerprint", "retryable", "verification_route")}}
++
++
++def classify_daily_fresh_pool_row(row):
++    return classify_lexeme(vocabulary_pool_candidate_surface(row),
++                           first_text(row, ["reading_hiragana", "reading"]),
++                           first_text(row, ["part_of_speech", "pos"]))
+
+
+ def is_daily_fresh_word_pool_row(row):
+@@ -5892,34 +5892,11 @@
+     if has_variant_separator(surface):
+         return False
+     surface = re.split(r"[（(]", surface, maxsplit=1)[0].strip()
+-    if verified_verb_evidence(surface)["accepted"]:
+-        return False
+-    pos = first_text(row, ["part_of_speech", "pos"]).strip()
+-    pos_lower = pos.lower()
+-    if pos:
+-        return word_pos_allows_enriched_item(pos)
+-    return verified_word_evidence(surface)
++    return classify_daily_fresh_pool_row({**row, "surface": surface})["status"] == "verified_word"
+
+
+ def word_pos_allows_enriched_item(pos):
+-    text = simple_text(pos)
+-    if not text:
+-        return True
+-    lowered = text.lower()
+-    if text in DAILY_FRESH_WORD_ALLOWED_POS or lowered in DAILY_FRESH_WORD_ALLOWED_POS:
+-        return True
+-    allowed_parts = [
+-        part.strip()
+-        for part in re.split(r"[・/／,，、\s]+", text)
+-        if part.strip()
+-    ]
+-    if any(part in DAILY_FRESH_WORD_ALLOWED_POS or part.lower() in DAILY_FRESH_WORD_ALLOWED_POS for part in allowed_parts):
+-        return True
+-    if any(token in text for token in ["名詞", "形容詞", "形容動詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞", "助詞", "助数詞", "接頭辞", "接尾辞", "サ変接続"]):
+-        return True
+-    if text == "動詞" or lowered in {"verb", "verb_godan", "verb_ichidan", "suru_verb", "kuru_verb"}:
+-        return False
+-    return True
++    return pos_contract(simple_text(pos)) == "word"
+
+
+ def is_daily_fresh_verb_pool_row(row):
+@@ -5960,18 +5937,25 @@
+ def build_daily_fresh_candidate_payload(row, item_type, level):
+     surface = vocabulary_pool_candidate_surface(row)
+     key = vocabulary_pool_candidate_key(row)
++    classification = {
++        "reading_hiragana": first_text(row, ["reading_hiragana", "reading"]),
++        "part_of_speech": first_text(row, ["part_of_speech", "pos"]),
++        "classification_evidence": classify_daily_fresh_pool_row(row),
++    }
+     if item_type == "verb":
+         return {
+             "level": level,
+             "d": surface,
+             "normalized_key": key,
+             "pool_id": row.get("id"),
++            **classification,
+         }
+     return {
+         "level": level,
+         "w": surface,
+         "normalized_key": key,
+         "pool_id": row.get("id"),
++        **classification,
+     }
+
+
+@@ -6063,9 +6047,14 @@
+     if item_type == "verb":
+         audit = audit_verb_candidate(row, row=row, log=True)
+         if not audit.get("accepted"):
++            if audit.get("status") == "unknown":
++                return f"classifier_unknown:{audit.get('reason') or 'unresolved'}"
+             return f"non_verb:{audit.get('reason') or 'unknown'}"
+         return ""
+     if not is_daily_fresh_word_pool_row(row):
++        evidence = classify_daily_fresh_pool_row(row)
++        if evidence["status"] == "unknown":
++            return f"classifier_unknown:{evidence['reason']}"
+         return "non_word"
+     return ""
+
+@@ -6170,12 +6159,14 @@
+     current = {normalize_vocab_key(k) for k in (current_batch_keys or []) if normalize_vocab_key(k)}
+     state = source_state if isinstance(source_state, dict) else {}
+     history_digest = hashlib.sha256(json.dumps(sorted(generated)).encode("ascii")).hexdigest()
+-    context = [item_type, level, history_digest]
++    context = [item_type, level, history_digest, CLASSIFIER_VERSION]
+     if state.get("context") != context:
+         state.clear()
+         state["context"] = context
+     if state.get("source_exhausted"):
+-        return [{"__selector_meta": True, "candidate_exhausted": True, "source_state": dict(state),
++        return [{"__selector_meta": True, "candidate_exhausted": not state.get("classifier_unknown_count"), "source_state": dict(state),
++                 "source_scan_complete": True,
++                 "classifier_unknown_count": int(state.get("classifier_unknown_count") or 0),
+                  "rejected_by_filter": state.get("rejected_by_filter", {}), "rescanned_ids": 0}]
+     deadline = min(deadline or time.perf_counter() + 4.0, time.perf_counter() + 4.0)
+     print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
+@@ -6400,6 +6391,7 @@
+         "selector_failed": selector_failed,
+         "selector_error": next((m.get("selector_error") for m in selector_meta_by_level.values() if m.get("selector_error")), ""),
+         "candidate_validation_failed": any(m.get("candidate_validation_failed") for m in selector_meta_by_level.values()),
++        "classifier_unknown_count": sum(int(m.get("classifier_unknown_count") or 0) for m in selector_meta_by_level.values()),
+         "preparation_complete": not selector_scan_incomplete and not selector_failed,
+         "selector_meta_by_level": selector_meta_by_level,
+         "material_history_keys": sorted(excluded_keys),
+@@ -6819,6 +6811,7 @@
+             primary_missing.append({"level": level, "requested": required, "available": available,
+                                     "remaining": required - available,
+                                     "candidate_exhausted": bool(meta.get("candidate_exhausted")),
++                                    "classifier_unknown_count": int(meta.get("classifier_unknown_count") or 0),
+                                     "excluded_by_reason": meta.get("rejected_by_filter") or {}})
+     reserve_shortages = []
+     for level, requested in (candidate_plan.get("requested_by_level") or {}).items():
+@@ -7108,6 +7101,7 @@
+         "selector_failed",
+         "selector_error",
+         "candidate_validation_failed",
++        "classifier_unknown_count",
+         "preparation_complete",
+         "replacement_scan_pending",
+     ]:
+@@ -7177,12 +7171,16 @@
+         return "candidate_validation_failed"
+     item_count = len(candidate_plan.get("items") or [])
+     if item_type in {"word", "verb"} and item_count < int(requested_total or 0):
++        if any(row.get("classifier_unknown_count") for row in candidate_plan.get("missing") or []):
++            return "classifier_uncertainty"
+         return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
+     if item_type == "grammar" and not best_effort and item_count < int(requested_total or 0):
+         return "fresh_candidate_pool_insufficient"
+     if item_type == "grammar" and int(requested_total or 0) > 0 and item_count <= 0:
+         return "fresh_candidate_pool_insufficient"
+     if candidate_plan.get("missing") and item_type in {"word", "verb"}:
++        if any(row.get("classifier_unknown_count") for row in candidate_plan.get("missing") or []):
++            return "classifier_uncertainty"
+         return "candidate_validation_failed" if candidate_plan.get("candidate_validation_failed") else "candidate_pool_exhausted"
+     return ""
+
+@@ -7193,6 +7191,7 @@
+         "selector_scan_incomplete": "候選掃描尚未完成，已保存進度，未消耗 Gemini API",
+         "candidate_pool_exhausted": "指定等級的合格候選已掃描完畢，數量不足，未消耗 Gemini API",
+         "candidate_validation_failed": "候選資料驗證失敗，未消耗 Gemini API",
++        "classifier_uncertainty": "指定等級尚有詞性未確認候選，不能判定詞源耗盡，未消耗 Gemini API",
+     }.get(error_code, "候選準備失敗，未消耗 Gemini API")
+     if error_code == "fresh_candidate_decode_error":
+         reason = "日文候選詞讀取失敗，未消耗 Gemini API"
+@@ -7340,7 +7339,7 @@
+                 continue
+         if item_type == "word":
+             pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
+-            if not word_pos_allows_enriched_item(pos):
++            if not word_pos_allows_enriched_item(pos) or classify_lexeme(surface)["status"] == "verified_verb":
+                 stats["invalid_pos"] += 1
+                 continue
+         if item_type == "verb":
+@@ -7361,7 +7360,7 @@
+                 print(
+                     "[gemini-bank] candidate_rejected "
+                     f"item_type=verb candidate={log_safe_text(surface)} "
+-                    f"reason={audit.get('reason')} suggested_type={audit.get('suggested_type') or 'word'}"
++                    f"reason={audit.get('reason')} suggested_type={audit.get('suggested_type') or 'unknown'}"
+                 )
+                 if (audit.get("suggested_type") or "") == "word":
+                     print(
+@@ -11413,7 +11412,7 @@
+                     candidate_text = candidate.get("d") or candidate.get("normalized_key") or audit.get("candidate")
+                     reason = audit.get("reason") or "not_verb"
+                     last_rejection_reason = reason
+-                    suggested_type = audit.get("suggested_type") or "word"
++                    suggested_type = audit.get("suggested_type") or "unknown"
+                     print(
+                         "[gemini-bank] candidate_rejected "
+                         f"item_type=verb candidate={log_safe_text(candidate_text)} "
+@@ -11508,7 +11507,7 @@
+                 for rejected in rejected_items:
+                     candidate_text = rejected.get("candidate") or ""
+                     reason = rejected.get("reason") or "not_verb"
+-                    suggested_type = rejected.get("suggested_type") or "word"
++                    suggested_type = rejected.get("suggested_type") or "unknown"
+                     print(
+                         "[gemini-bank] candidate_rejected "
+                         f"item_type=verb candidate={log_safe_text(candidate_text)} "
+--- a/services/verb_candidate_audit.py
++++ b/services/verb_candidate_audit.py
+@@ -1,16 +1,19 @@
+ """Dictionary-backed verb evidence; this never adds words or assigns JLPT levels."""
+
+ import csv
++import hashlib
++import json
+ import os
++import re
+ import threading
+ import unicodedata
+ from functools import lru_cache
+
+
+ _local = threading.local()
+-# UniDic's best path splits this kana spelling into two auxiliaries.
+-# Verify the attested orthographic entry and its reading instead of a suffix rule.
+-_ORTHOGRAPHIC_ALIASES = {"だます": ("騙す", "ダマス")}
++CLASSIFIER_VERSION = "unidic-lattice-contract-v2"
++DICTIONARY_VERSION = "unidic-lite:1.0.8/mecab-python3:1.0.12"
++WORD_POS = {"名詞", "形容詞", "形状詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞", "助詞", "接頭辞", "接尾辞"}
+
+
+ def _tagger():
+@@ -44,36 +47,100 @@
+     )
+
+
+-@lru_cache(maxsize=32768)
+-def verified_verb_evidence(surface):
+-    text = unicodedata.normalize("NFKC", str(surface or "")).strip()
+-    nodes = _nodes(text)
+-    if len(nodes) == 1 and _dictionary_form(nodes[0]):
+-        return {"accepted": True, "reason": "verified_dictionary_form", "evidence": "unidic-lite:1.0.8"}
+-    # Noun + suru is accepted only when the dictionary marks the stem サ変可能.
+-    if len(nodes) >= 2 and text.endswith(("する", "ずる")) and _dictionary_form(nodes[-1]):
+-        stems = nodes[:-1]
+-        if all(stat == 0 and f[0] == "名詞" for _, stat, f in stems) and any(
+-            "サ変" in field for _, _, f in stems for field in f[:4]
+-        ):
+-            return {"accepted": True, "reason": "verified_suru_stem", "evidence": "unidic-lite:1.0.8"}
+-    if text in _ORTHOGRAPHIC_ALIASES:
+-        orthography, reading = _ORTHOGRAPHIC_ALIASES[text]
+-        alias_nodes = _nodes(orthography)
+-        if len(alias_nodes) == 1 and _dictionary_form(alias_nodes[0]) and alias_nodes[0][2][6] == reading:
+-            return {"accepted": True, "reason": "verified_dictionary_alias", "evidence": f"unidic-lite:1.0.8:{orthography}"}
+-    return {"accepted": False, "reason": "not_verified_dictionary_verb", "suggested_type": "word"}
++def _full_entries(text):
++    import MeCab
++
++    lattice = MeCab.Lattice()
++    lattice.set_sentence(text)
++    _tagger().parse(lattice)
++    node = lattice.begin_nodes(0)
++    entries = []
++    # The best path is context-dependent (あびる/かける can be personal names).
++    # Inspect all attested entries spanning the exact input, not guessed readings.
++    while node:
++        if node.surface == text and node.stat == 0:
++            entries.append((node.surface, node.stat, next(csv.reader([node.feature]))))
++        node = node.bnext
++    return entries
++
++
++def _reading(text):
++    text = unicodedata.normalize("NFKC", str(text or "")).strip()
++    return "".join(chr(ord(c) - 0x60) if "ァ" <= c <= "ヶ" else c for c in text)
++
++
++def pos_contract(pos):
++    """POS is supporting evidence, never a suffix-based lexical classifier."""
++    text = unicodedata.normalize("NFKC", str(pos or "")).strip().lower()
++    if not text or text in {"general", "unknown", "*", "未確認"}:
++        return "unknown"
++    parts = [p for p in re.split(r"[・/／,，、;\s]+", text) if p]
++    verb = any(re.match(r"^(?:動詞|自動詞|他動詞|五段|一段|サ変(?:動詞|$)|サ行変格|する動詞|ずる動詞|verb|godan|ichidan|suru_verb|kuru_verb|v[1-5]|vs|vz|vk|v$)", p) for p in parts)
++    word = any(re.match(r"^(?:名詞|普通名詞|形容詞|[いイなナ]形容詞|形容動詞|形状詞|副詞|接続詞|接續詞|連体詞|感動詞|代名詞|助詞|助数詞|接頭辞|接尾辞|noun|adjective|[ina]+-adjective|adverb|conjunction|interjection|pronoun|adj-|adv$|n$)", p) for p in parts)
++    if verb and word:
++        return "ambiguous"
++    return "verb" if verb else "word" if word else "unknown"
++
++
++def _entry_evidence(node):
++    surface, _, f = node
++    return {"surface": surface, "pos": f[:4], "conjugation_type": f[4], "conjugation_form": f[5],
++            "lemma_reading": f[6], "lemma": f[7], "orthBase": f[10], "reading": f[11]}
+
+
+ @lru_cache(maxsize=32768)
+-def verified_word_evidence(surface):
++def classify_lexeme(surface, reading="", source_pos=""):
+     text = unicodedata.normalize("NFKC", str(surface or "")).strip()
+-    if verified_verb_evidence(text)["accepted"]:
+-        return False
+-    nodes = _nodes(text)
+-    allowed = {"名詞", "形容詞", "形状詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞"}
+-    # Verify whole lexical entries, not a guessed kana suffix (e.g. いす).
+-    if len(nodes) == 1:
+-        _, stat, fields = nodes[0]
+-        return stat == 0 and fields[0] in allowed
+-    return bool(nodes) and all(stat == 0 and fields[0] in allowed for _, stat, fields in nodes)
++    fingerprint = hashlib.sha256(json.dumps([text, reading, source_pos, CLASSIFIER_VERSION], ensure_ascii=False).encode()).hexdigest()
++    def result(status, reason, entries=()):
++        return {"status": status, "reason": reason, "source": DICTIONARY_VERSION,
++                "classifier_version": CLASSIFIER_VERSION, "source_fingerprint": fingerprint,
++                "evidence": [_entry_evidence(n) for n in entries],
++                "retryable": status == "unknown", "verification_route": "source_pos_or_dictionary_review" if status == "unknown" else ""}
++    if not text:
++        return result("rejected_invalid", "empty_candidate")
++    try:
++        entries = _full_entries(text)
++        if reading:
++            entries = [n for n in entries if _reading(reading) in {_reading(n[2][6]), _reading(n[2][9]), _reading(n[2][11])}]
++        verbs = [n for n in entries if _dictionary_form(n)]
++        words = [n for n in entries if len(n[2]) > 11 and n[2][0] in WORD_POS and "固有名詞" not in n[2][:4]
++                 and (n[2][0] != "形容詞" or n[2][10] == text)]
++        if not verbs and text.endswith(("する", "ずる")):
++            nodes = _nodes(text)
++            stems = nodes[:-1]
++            if (len(nodes) >= 2 and _dictionary_form(nodes[-1])
++                    and all(stat == 0 and f[0] == "名詞" and "固有名詞" not in f[:4] for _, stat, f in stems)
++                    and any("サ変" in field for _, _, f in stems for field in f[:4])
++                    and (not reading or _reading(reading) == _reading("".join(f[9] for _, _, f in nodes)))):
++                return result("verified_verb", "verified_suru_stem", nodes)
++        pos = pos_contract(source_pos)
++        if verbs and words and pos not in {"word", "verb"}:
++            return result("unknown", "ambiguous_word_verb_sense", verbs + words)
++        if verbs and words and pos == "word":
++            return result("verified_word", "source_pos_resolves_attested_word_sense", words)
++        if verbs:
++            if pos == "word":
++                return result("unknown", "source_pos_dictionary_conflict", verbs)
++            return result("verified_verb", "verified_dictionary_form", verbs)
++        if words:
++            if pos == "verb":
++                return result("unknown", "source_pos_dictionary_conflict", words)
++            return result("verified_word", "verified_nonverb_lexeme", words)
++        if entries and all("固有名詞" in n[2][:4] for n in entries):
++            return result("rejected_invalid", "proper_noun_only", entries)
++        return result("unknown", "reading_or_segmentation_unresolved" if reading else "pos_or_segmentation_unresolved", entries)
++    except (ImportError, RuntimeError) as exc:
++        data = result("unknown", "dictionary_unavailable")
++        data["error_type"] = type(exc).__name__
++        return data
++
++
++def verified_verb_evidence(surface, reading="", source_pos=""):
++    data = classify_lexeme(surface, reading, source_pos)
++    return {**data, "accepted": data["status"] == "verified_verb",
++            "suggested_type": "word" if data["status"] == "verified_word" else ""}
++
++
++def verified_word_evidence(surface, reading="", source_pos=""):
++    return classify_lexeme(surface, reading, source_pos)["status"] == "verified_word"
+--- a/services/candidate_selector.py
++++ b/services/candidate_selector.py
+@@ -35,6 +35,7 @@
+     categories, sources = sorted(blocked_categories), sorted(blocked_sources)
+     p = "%s" if postgres else "?"
+     rows, bad = [], set(state.get("bad_rows") or [])
++    unknown_ids = set(state.get("unknown_candidate_ids") or [])
+     rejected = Counter(state.get("rejected_by_filter") or {})
+     scanned = 0
+     id_ms = hydration_ms = 0.0
+@@ -116,6 +117,8 @@
+                             reason = reject(row, item_type, level, excluded)
+                             if reason:
+                                 rejected[reason] += 1
++                                if reason.startswith("classifier_unknown:"):
++                                    unknown_ids.add(int(row_id))
+                             else:
+                                 rows.append(row)
+                                 excluded.add(candidate_key(row))
+@@ -159,6 +162,8 @@
+         if not postgres:
+             conn.set_progress_handler(None, 0)
+     state["bad_rows"] = sorted(bad)
++    state["unknown_candidate_ids"] = sorted(unknown_ids)
++    state["classifier_unknown_count"] = len(unknown_ids)
+     state["rejected_by_filter"] = dict(rejected)
+     state["scanned_ids"] = int(state.get("scanned_ids") or 0) + scanned
+     state["source_exhausted"] = int(state.get("source_tier") or 0) >= 2 and bool(state.get("sql_diagnostics_done"))
+@@ -169,16 +174,20 @@
+         ("selector_id_query_ms", round(id_ms, 2)), ("selector_hydration_ms", round(hydration_ms, 2)),
+         ("selector_selected", len(rows)), ("selector_scanned_ids", state["scanned_ids"]),
+         ("selector_bad_rows", len(bad)), ("selector_rejected_by_filter", dict(rejected)),
++        ("classifier_unknown_count", len(unknown_ids)),
+         ("selector_elapsed_ms", round((clock() - slice_started) * 1000, 2)),
+     ):
+         print(f"[vocabulary-pool] {name}={value} item_type={item_type} level={level}")
+     print(f"[vocabulary-pool] selector_cursor source_tier={state.get('source_tier', 0)} last_id={state.get('last_id', 0)}")
+     print(f"[vocabulary-pool] selector_scan_incomplete={str(incomplete).lower()} progress_saved=true")
+     print(f"[vocabulary-pool] candidate_fetch_success item_type={item_type} level={level} selected={len(rows)}")
+-    if state["source_exhausted"] and len(rows) < limit:
++    if state["source_exhausted"] and len(rows) < limit and not unknown_ids:
+         print(f"[vocabulary-pool] candidate_exhausted=true item_type={item_type} level={level}")
++    if state["source_exhausted"] and len(rows) < limit and unknown_ids:
++        print(f"[vocabulary-pool] classifier_uncertainty=true item_type={item_type} level={level} unknown={len(unknown_ids)} source_scan_complete=true")
+     rows.append({
+-        "__selector_meta": True, "candidate_exhausted": state["source_exhausted"],
++        "__selector_meta": True, "candidate_exhausted": state["source_exhausted"] and not unknown_ids,
++        "classifier_unknown_count": len(unknown_ids), "source_scan_complete": state["source_exhausted"],
+         "selector_scan_incomplete": incomplete, "selector_timeout_warning": timed_out,
+         "selector_error": error, "candidate_validation_failed": bool(bad) and state["source_exhausted"] and len(rows) < limit,
+         "timeout_kind": timeout_kind,
+--- a/scripts/test_daily_fresh_generation.py
++++ b/scripts/test_daily_fresh_generation.py
+@@ -76,9 +76,9 @@
+                             continue
+                         seen.add(key)
+                         conn.execute("""INSERT INTO vocabulary_pool
+-                            (surface,base_form,normalized_key,jlpt_level,part_of_speech,category,source,status,is_active,priority)
+-                            VALUES (?,?,?,?,?,'general','openjlpt','active',1,1)""",
+-                                     (surface, surface, key, level, ""))
++                            (surface,base_form,normalized_key,jlpt_level,part_of_speech,reading_hiragana,category,source,status,is_active,priority)
++                            VALUES (?,?,?,?,?,?,'general','openjlpt','active',1,1)""",
++                                     (surface, surface, key, level, "", row.get("reading", "")))
+             for row in json.loads((ROOT / "data" / "grammar_seed_n5_n1.json").read_text(encoding="utf-8")):
+                 conn.execute("""INSERT INTO grammar_pool
+                     (grammar_key,pattern,display_name,jlpt_level,meaning_seed,connection_seed,category,source,status,used_count)
+@@ -184,6 +184,7 @@
+     def sequence(self, levels, days, allow_exhaustion=False):
+         histories = {"word": set(), "verb": set()}
+         succeeded = 0
++        errors_by_code = Counter()
+         calls_at_start = len(self.h.calls)
+         for index in range(days):
+             job, steps = self.h.job(levels, (dt.date(2026, 10, 1) + dt.timedelta(days=index)).isoformat())
+@@ -191,7 +192,10 @@
+             payload = self.h.complete(job, steps)
+             if not payload.get("ok"):
+                 self.assertTrue(allow_exhaustion, payload)
+-                self.assertEqual(payload["error"], "candidate_pool_exhausted", payload)
++                self.assertIn(payload["error"], {"candidate_pool_exhausted", "classifier_uncertainty"}, payload)
++                if payload["error"] == "classifier_uncertainty":
++                    self.assertTrue(any(row.get("classifier_unknown_count") for row in payload["missing"]))
++                errors_by_code[payload["error"]] += 1
+                 self.assertEqual(len(self.h.calls), before, "exhaustion must be caught before enrichment")
+                 self.assertTrue(payload.get("missing"), payload)
+                 continue
+@@ -204,7 +208,9 @@
+                 histories[item_type].update(usage[item_type])
+             succeeded += 1
+         SCENARIOS.append({"levels": levels, "attempted_days": days, "successful_days": succeeded,
+-                          "exhausted_days": days - succeeded, "external_gemini_calls": 0,
++                          "uncompleted_days": days - succeeded, "exhausted_days": errors_by_code["candidate_pool_exhausted"],
++                          "classifier_uncertainty_days": errors_by_code["classifier_uncertainty"],
++                          "errors_by_code": dict(errors_by_code), "external_gemini_calls": 0,
+                           "mock_calls_by_type": dict(Counter(t for t, _ in self.h.calls[calls_at_start:]))})
+         return succeeded
+
+@@ -220,17 +226,17 @@
+     def test_D_thirty_days_with_real_source_exhaustion(self):
+         completed = self.sequence(["N5"], 30, allow_exhaustion=True)
+         self.assertGreaterEqual(completed, 3)
+-        print(f"[regression] thirty_day_n5 completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
++        print(f"[regression] thirty_day_n5 completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
+
+     def test_D_all_levels_thirty_days(self):
+         completed = self.sequence(LEVELS, 30, allow_exhaustion=True)
+         self.assertGreaterEqual(completed, 3)
+-        print(f"[regression] thirty_day_all_levels completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
++        print(f"[regression] thirty_day_all_levels completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
+
+     def test_D_n1_thirty_days(self):
+         completed = self.sequence(["N1"], 30, allow_exhaustion=True)
+         self.assertGreaterEqual(completed, 3)
+-        print(f"[regression] thirty_day_n1 completed={completed} exhausted={completed < 30}", file=sys.__stdout__)
++        print(f"[regression] thirty_day_n1 completed={completed} incomplete={completed < 30}", file=sys.__stdout__)
+
+     def test_E_primary_rejected_same_level_reserve(self):
+         self.h.reject_once.add(("verb", "N5"))
+--- a/scripts/test_selector_scan_regression.py
++++ b/scripts/test_selector_scan_regression.py
+@@ -118,7 +118,9 @@
+         self.assertFalse(app.gemini_daily_fresh_all_candidates_ready(saved))
+         # A continued scan will discover missing required verbs, still before API use.
+         result = self.h.complete(job, steps)
+-        self.assertEqual(result["error"], "candidate_pool_exhausted", result)
++        self.assertEqual(result["error"], "classifier_uncertainty", result)
++        self.assertFalse(result["missing"][0]["candidate_exhausted"])
++        self.assertEqual(result["missing"][0]["classifier_unknown_count"], 4000)
+         self.assertEqual(result["gemini_call_count"], 0)
+         self.assertEqual(self.h.calls, [])
+
+--- /dev/null
++++ b/scripts/test_lexical_contracts.py
+@@ -0,0 +1,250 @@
++"""Real dictionary/source/selector regressions, isolated persistence, no Gemini quota."""
++
++import argparse
++import contextlib
++import datetime as dt
++import io
++import json
++import os
++import sys
++import unittest
++from unittest.mock import patch
++from collections import Counter, defaultdict
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++sys.path.insert(0, str(ROOT / "scripts"))
++from audit_lexical_contracts import protected_hashes
++from test_daily_fresh_generation import Harness, LEVELS, app
++from test_selector_scan_regression import PostgreSQLRegression
++from services.verb_candidate_audit import CLASSIFIER_VERSION, classify_lexeme, _full_entries, _dictionary_form
++
++EVIDENCE = {}
++CAPACITY = []
++
++
++class LexicalContracts(unittest.TestCase):
++    backend = "SQLite"
++
++    def setUp(self):
++        self.output = io.StringIO()
++        redirect = contextlib.redirect_stdout(self.output)
++        redirect.__enter__()
++        self.addCleanup(redirect.__exit__, None, None, None)
++        self.h = Harness()
++        self.addCleanup(self.h.close)
++
++    def tearDown(self):
++        EVIDENCE[f"{self.backend}.{self._testMethodName}"] = self.output.getvalue().splitlines()[-25:]
++
++    def test_attested_verbs_not_suffix_guesses(self):
++        expected_lemmas = {"あびる": "浴びる", "かける": "掛ける", "だます": "騙す", "いただく": "頂く",
++                           "コピーする": "コピー-copy", "あいさつする": "挨拶", "引っ掻く": "引っ掻く"}
++        for surface in ("あびる", "かける", "だます", "いただく", "コピーする", "あいさつする", "引っ掻く"):
++            with self.subTest(surface=surface):
++                result = classify_lexeme(surface)
++                self.assertEqual(result["status"], "verified_verb", result)
++                self.assertTrue(result["evidence"])
++                self.assertTrue(any(e["pos"][0] == "動詞" for e in result["evidence"]))
++                self.assertIn(expected_lemmas[surface], {e["lemma"] for e in result["evidence"]})
++                self.assertEqual(result["classifier_version"], CLASSIFIER_VERSION)
++                self.assertFalse(app.is_daily_fresh_word_pool_row({"surface": surface}))
++                self.assertTrue(app.audit_verb_candidate(surface)["accepted"])
++        # The dictionary has exact kana entries; no handcrafted kana -> kanji alias.
++        self.assertTrue(any(_dictionary_form(n) for n in _full_entries("だます")))
++
++    def test_nonverbs_keep_their_attested_senses(self):
++        expected_pos = {"いす": "名詞", "向こう": "名詞", "遠く": "名詞", "こんにちは": "感動詞",
++                        "或る": "連体詞", "ずるずる": "副詞", "大切": "形状詞", "不便": "名詞"}
++        for surface in ("いす", "向こう", "遠く", "こんにちは", "或る", "ずるずる", "大切", "不便"):
++            with self.subTest(surface=surface):
++                result = classify_lexeme(surface)
++                self.assertEqual(result["status"], "verified_word", result)
++                self.assertIn(expected_pos[surface], {e["pos"][0] for e in result["evidence"]})
++                self.assertFalse(app.audit_verb_candidate(surface)["accepted"])
++                self.assertTrue(app.is_daily_fresh_word_pool_row({"surface": surface}))
++        self.assertIn("形状詞可能", classify_lexeme("不便")["evidence"][0]["pos"])
++        self.assertEqual(classify_lexeme("どうぞ宜しく")["status"], "unknown")
++
++    def test_unknown_not_suggested_word_and_reading_is_not_identity(self):
++        result = app.audit_verb_candidate("unattested_lexeme_123")
++        self.assertEqual(result["status"], "unknown")
++        self.assertEqual(result["suggested_type"], "")
++        self.assertTrue(result["retryable"])
++        self.assertFalse(app.is_daily_fresh_word_pool_row({"surface": "unattested_lexeme_123"}))
++        self.assertEqual(classify_lexeme("いす", "イス")["status"], "verified_word")
++        self.assertEqual(classify_lexeme("いす", "あびる")["status"], "unknown")
++        self.assertEqual(classify_lexeme("ある")["status"], "unknown")
++        self.assertEqual(classify_lexeme("ある", source_pos="動詞")["status"], "verified_verb")
++        self.assertEqual(classify_lexeme("あびる", source_pos="名詞")["status"], "unknown")
++
++    def test_pos_contract_does_not_accept_unknown_or_verb_aliases_as_word(self):
++        for pos in ("動詞", "五段動詞", "動詞（自動詞）", "他動詞", "verb_godan", "名詞/動詞", "unknown", "general", ""):
++            self.assertFalse(app.word_pos_allows_enriched_item(pos), pos)
++        for pos in ("形容動詞", "形容詞", "名詞・形容動詞", "名詞・サ変接続", "副詞", "連体詞", "na-adjective"):
++            self.assertTrue(app.word_pos_allows_enriched_item(pos), pos)
++
++    def test_unknown_selector_keeps_ids_without_false_exhaustion(self):
++        self.h.sql("DELETE FROM vocabulary_pool")
++        self.h.sql("""INSERT INTO vocabulary_pool (surface,base_form,normalized_key,jlpt_level,category,source,status,is_active)
++                      VALUES ('unattested_lexeme_123','unattested_lexeme_123','unknown','N5','general','openjlpt','active',TRUE)""")
++        state = {}
++        rows = app.fetch_daily_fresh_candidate_rows("verb", "N5", 1, set(), source_state=state)
++        self.assertEqual(len(rows), 1)
++        meta = rows[-1]
++        self.assertFalse(meta["candidate_exhausted"])
++        self.assertTrue(meta["source_scan_complete"])
++        self.assertEqual(meta["classifier_unknown_count"], 1)
++        self.assertEqual(len(state["unknown_candidate_ids"]), 1)
++        replay = app.fetch_daily_fresh_candidate_rows("verb", "N5", 1, set(), source_state=state)[-1]
++        self.assertEqual(replay["rescanned_ids"], 0)
++        job, steps = self.h.job(LEVELS, "2026-10-30")
++        result = self.h.complete(job, steps)
++        self.assertEqual(result["error"], "classifier_uncertainty")
++        self.assertEqual(self.h.calls, [])
++        self.assertEqual(self.h.saved, [])
++
++    def test_missing_reserve_does_not_change_primary_quota(self):
++        plan = app.select_daily_fresh_candidates("verb", {"N5": 1}, set(), "verb")
++        candidate = plan["items"][0]
++        self.h.sql("DELETE FROM vocabulary_pool WHERE normalized_key<>?", (candidate["normalized_key"],))
++        plan = app.select_daily_fresh_candidates("verb", {"N5": 3}, set(), "verb")
++        plan = app.ensure_daily_fresh_candidate_plan_contract(plan, {"N5": 1}, "verb", "verb")
++        self.assertEqual(plan["effective_quota_by_level"], {"N5": 1})
++        self.assertEqual(len(plan["primary_items"]), 1)
++        self.assertEqual(plan["reserve_items"], [])
++        self.assertTrue(plan["reserve_shortages"])
++        self.assertEqual(app.gemini_daily_fresh_plan_error(plan, "verb", 1), "")
++        # Once the sole verified entry is saved, this fixture is genuinely exhausted.
++        exhausted = app.select_daily_fresh_candidates("verb", {"N5": 1}, {candidate["normalized_key"]}, "verb")
++        exhausted = app.ensure_daily_fresh_candidate_plan_contract(exhausted, {"N5": 1}, "verb", "verb")
++        self.assertEqual(app.gemini_daily_fresh_plan_error(exhausted, "verb", 1), "candidate_pool_exhausted")
++        self.assertEqual(self.h.calls, [])
++
++    def test_candidate_cache_preserves_source_sense_evidence(self):
++        row = {"id": 123, "surface": "ある", "normalized_key": "ある", "jlpt_level": "N5",
++               "part_of_speech": "動詞", "reading_hiragana": "ある"}
++        self.assertEqual(app.classify_daily_fresh_pool_row(row)["status"], "verified_verb")
++        candidate = app.build_daily_fresh_candidate_payload(row, "verb", "N5")
++        candidate = json.loads(json.dumps(candidate))
++        self.assertTrue(app.audit_verb_candidate(candidate)["accepted"])
++        self.assertEqual(candidate["classification_evidence"]["classifier_version"], CLASSIFIER_VERSION)
++        fingerprint = candidate["classification_evidence"]["source_fingerprint"]
++        candidate["part_of_speech"] = "名詞"
++        self.assertNotEqual(app.classify_daily_fresh_pool_row({**candidate, "surface": candidate["d"]})["source_fingerprint"],
++                            fingerprint)
++
++    def test_gemini_rejection_without_suggested_type_stays_unknown(self):
++        original = app.call_gemini
++        rejected = []
++        def mock_response(prompt, **config):
++            inputs = json.JSONDecoder().raw_decode(prompt.split("Input candidates: ", 1)[1])[0]["items"]
++            if not rejected and "d" in inputs[0] and inputs[0]["level"] == "N5":
++                rejected.append(inputs[0]["d"])
++                self.h.calls.append(("verb", inputs))
++                return json.dumps({"items": [], "rejected": [[rejected[0], "uncertain", "", ""]]})
++            return original(prompt, **config)
++        job, steps = self.h.job(LEVELS, "2026-10-30")
++        with patch.object(app, "call_gemini", mock_response):
++            result = self.h.complete(job, steps)
++        self.assertTrue(result["ok"], result)
++        self.assertTrue(rejected)
++        self.assertIn(f"candidate={rejected[0]} reason=uncertain suggested_type=unknown", self.output.getvalue())
++        self.assertNotIn(f"candidate={rejected[0]} from=verb to=word", self.output.getvalue())
++
++    def test_same_level_rejected_verb_and_truncated_grammar(self):
++        self.h.reject_once.add(("verb", "N5"))
++        self.h.truncate_once.add(("grammar", "N4"))
++        job, steps = self.h.job(LEVELS, "2026-10-30")
++        result = self.h.complete(job, steps)
++        self.assertTrue(result["ok"], result)
++        self.assertIn("[verb-replacement] use_reserve level=N5", self.output.getvalue())
++        self.assertIn("[grammar-replacement] use_reserve level=N4", self.output.getvalue())
++        self.assertEqual([len(self.h.saved[-1][k]) for k in ("vocab", "verbs", "grammar_points")], [8, 5, 5])
++        self.assertEqual(self.h.saved[-1]["metadata"]["fallback_count"], {"word": 0, "verb": 0, "grammar": 0})
++        self.assertEqual(app.gemini_daily_batch_summary(job["job_id"])["verb"], dict.fromkeys(LEVELS, 1))
++
++    def test_protected_functions_unchanged(self):
++        before = json.loads((ROOT / "reports/phase3br_2026_10_30/before.json").read_text(encoding="utf-8"))
++        self.assertEqual(protected_hashes(), before["protected_function_hashes"])
++
++    def inventory(self, pool, used):
++        counts = {level: Counter() for level in LEVELS}
++        for row, evidence in pool:
++            key = app.vocabulary_pool_candidate_key(row)
++            if key not in used:
++                counts[row["jlpt_level"]][evidence["status"]] += 1
++        return {level: {status: counts[level][status] for status in ("verified_word", "verified_verb", "unknown", "rejected_invalid")}
++                for level in LEVELS}
++
++    def simulate(self, days):
++        pool = [(row, app.classify_daily_fresh_pool_row(row)) for row in self.h.sql("SELECT * FROM vocabulary_pool ORDER BY id")]
++        used, daily, success = set(), [], 0
++        for index in range(days):
++            before = self.inventory(pool, used)
++            calls_before = len(self.h.calls)
++            day = (dt.date(2026, 10, 1) + dt.timedelta(days=index)).isoformat()
++            job, steps = self.h.job(LEVELS, day)
++            result = self.h.complete(job, steps)
++            record = {"day": day, "before": before, "ok": result["ok"], "error": result.get("error"),
++                      "mock_calls": len(self.h.calls) - calls_before, "missing": result.get("missing", [])}
++            if result["ok"]:
++                material = self.h.saved[-1]
++                self.assertEqual([len(material[k]) for k in ("vocab", "verbs", "grammar_points")], [8, 5, 5])
++                self.assertEqual(material["metadata"]["fallback_count"], {"word": 0, "verb": 0, "grammar": 0})
++                self.assertFalse(material["metadata"]["bank_fallback_allowed"])
++                usage = app.gemini_bank_extract_material_usage_keys(material)
++                today = usage["word"] | usage["verb"]
++                self.assertFalse(today & used)
++                self.assertEqual(Counter(r["jlpt_level"] for r in material["verbs"]), Counter(dict.fromkeys(LEVELS, 1)))
++                self.assertEqual(Counter(r["jlpt_level"] for r in material["grammar_points"]), Counter(dict.fromkeys(LEVELS, 1)))
++                for row in material["vocab"]:
++                    self.assertEqual(classify_lexeme(row["word"])["status"], "verified_word", row)
++                for row in material["verbs"]:
++                    self.assertEqual(classify_lexeme(row["dictionary_form"])["status"], "verified_verb", row)
++                used.update(today)
++                record["quota"] = {"word": 8, "verb": 5, "grammar": 5}
++                record["fallback"] = 0
++                success += 1
++                reload = app.material_by_key(result["material_key"])
++                self.assertEqual([len(reload[k]) for k in ("vocabulary", "verbs", "grammar_points")], [8, 5, 5])
++            else:
++                self.assertIn(result["error"], {"candidate_pool_exhausted", "classifier_uncertainty"})
++                self.assertEqual(len(self.h.calls), calls_before)
++                self.assertEqual(len(self.h.saved), success)
++            record["after"] = self.inventory(pool, used)
++            daily.append(record)
++        CAPACITY.append({"backend": self.backend, "source": "checked-in OpenJLPT only, no additional candidates, empty initial history",
++                         "production_inventory_verified": False, "days": days, "successful_days": success,
++                         "capacity_acceptance": "PASS" if success == days else "FAIL", "real_gemini_calls": 0, "daily": daily})
++
++    def test_capacity_seven_days(self):
++        self.simulate(7)
++
++    def test_capacity_thirty_days(self):
++        self.simulate(30)
++
++
++class PostgreSQLLexicalContracts(LexicalContracts):
++    backend = "PostgreSQL17-isolated"
++
++    def setUp(self):
++        fixture = PostgreSQLRegression("test_real_prepare_enrich_finalize_save_reload")
++        fixture.setUp()
++        self.addCleanup(fixture.doCleanups)
++        self.h, self.output = fixture.h, fixture.output
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser()
++    parser.add_argument("--report", type=Path, required=True)
++    args, remaining = parser.parse_known_args()
++    program = unittest.main(argv=[sys.argv[0], *remaining], verbosity=2, exit=False)
++    args.report.parent.mkdir(parents=True, exist_ok=True)
++    args.report.write_text(json.dumps({"tests_run": program.result.testsRun, "failures": len(program.result.failures),
++                                      "errors": len(program.result.errors), "skipped": [(str(t), r) for t, r in program.result.skipped],
++                                      "successful": program.result.wasSuccessful(), "capacity": CAPACITY,
++                                      "production_postgres_verified": False, "real_gemini_calls": 0, "evidence": EVIDENCE},
++                                     ensure_ascii=False, indent=2), encoding="utf-8")
++    sys.exit(0 if program.result.wasSuccessful() else 1)
+--- /dev/null
++++ b/scripts/audit_lexical_contracts.py
+@@ -0,0 +1,138 @@
++"""Offline, reproducible lexical evidence audit. Never connects to production."""
++
++import argparse
++import ast
++import csv
++import difflib
++import hashlib
++import json
++import sys
++import unicodedata
++from collections import Counter, defaultdict
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++from services import verb_candidate_audit as classifier
++
++CASES = ["あびる", "かける", "だます", "いただく", "コピーする", "あいさつする",
++         "引っ掻く", "いす", "向こう", "遠く", "こんにちは", "或る", "ずるずる", "どうぞ宜しく"]
++
++
++def protected_hashes():
++    tree = ast.parse((ROOT / "app.py").read_text(encoding="utf-8-sig"))
++    names = {"call_gemini", "call_gemini_json_enrich", "save_material_for_date", "api_materials",
++             "build_gemini_daily_enrich_prompt", "prepare_all_gemini_daily_fresh_candidates",
++             "finalize_gemini_generation_job", "gemini_bank_material_history_keys_for_item_type"}
++    return {node.name: hashlib.sha256(ast.dump(node, include_attributes=False).encode()).hexdigest()
++            for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names}
++
++
++def audit(output):
++    records, seen = [], set()
++    totals = defaultdict(Counter)
++    for level in ("N5", "N4", "N3", "N2", "N1"):
++        path = ROOT / "data" / "external_lexicon" / f"openjlpt-vocab-{level.lower()}.csv"
++        with path.open(encoding="utf-8-sig", newline="") as handle:
++            for line, row in enumerate(csv.DictReader(handle), 2):
++                word = row["word"].strip()
++                key = unicodedata.normalize("NFKC", word).lower()
++                if not key or key in seen:
++                    continue
++                seen.add(key)
++                verb = classifier.verified_verb_evidence(word)
++                word_ok = classifier.verified_word_evidence(word)
++                evidence = (classifier.classify_lexeme(word, row.get("reading", ""))
++                            if hasattr(classifier, "classify_lexeme") else None)
++                status = evidence["status"] if evidence else "verified_verb" if verb["accepted"] else "verified_word" if word_ok else "unknown"
++                totals[level][status] += 1
++                records.append({"source": str(path.relative_to(ROOT)), "line": line, "level": level,
++                                "surface": word, "reading": row.get("reading", ""), "meaning": row.get("meanings", ""),
++                                "canonical_key": key, "verb": verb, "word_accepted": word_ok, "classification": evidence})
++    cases = [{"surface": word, "best_path": classifier._nodes(word),
++              "verb": classifier.verified_verb_evidence(word), "word_accepted": classifier.verified_word_evidence(word),
++              "classification": classifier.classify_lexeme(word) if hasattr(classifier, "classify_lexeme") else None}
++             for word in CASES]
++    result = {"scope": "checked-in OpenJLPT CSV only; empty isolated history; NOT production inventory",
++              "production_postgresql": "NOT VERIFIED", "production_244_rows": "NOT AVAILABLE",
++              "production_374_history_matches": "NOT AVAILABLE", "by_level": totals,
++              "protected_function_hashes": protected_hashes(), "cases": cases, "records": records}
++    output.parent.mkdir(parents=True, exist_ok=True)
++    output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
++    print(json.dumps({"scope": result["scope"], "by_level": totals, "output": str(output)}, ensure_ascii=False))
++
++
++def summarize(directory):
++    read = lambda name: json.loads((directory / name).read_text(encoding="utf-8"))
++    before, after = read("before.json"), read("after.json")
++    gold = {word: "verified_verb" for word in CASES[:7]}
++    gold.update({word: "verified_word" for word in CASES[7:13]})
++    gold["どうぞ宜しく"] = "unknown"
++    matrices = {}
++    for name, data in (("before", before), ("after", after)):
++        matrix = Counter()
++        for row in data["cases"]:
++            predicted = (row["classification"]["status"] if row.get("classification") else
++                         "verified_verb" if row["verb"]["accepted"] else "verified_word" if row["word_accepted"] else "unknown")
++            matrix[f"{gold[row['surface']]} -> {predicted}"] += 1
++        matrices[name] = dict(matrix)
++    files = ["app.py", "services/verb_candidate_audit.py", "services/candidate_selector.py",
++             "scripts/test_daily_fresh_generation.py", "scripts/test_selector_scan_regression.py",
++             "scripts/test_lexical_contracts.py", "scripts/audit_lexical_contracts.py"]
++    patch, changed_functions = [], {}
++    for file in files:
++        current = (ROOT / file).read_text(encoding="utf-8-sig")
++        baseline = ROOT / "tmp-starter-db/phase3br-baseline" / file
++        original = baseline.read_text(encoding="utf-8-sig") if baseline.exists() else ""
++        patch.extend(difflib.unified_diff(original.splitlines(True), current.splitlines(True),
++                                         fromfile=f"a/{file}" if baseline.exists() else "/dev/null", tofile=f"b/{file}"))
++        if baseline.exists():
++            def functions(text):
++                return {n.name: ast.dump(n, include_attributes=False) for n in ast.parse(text).body
++                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
++            old, new = functions(original), functions(current)
++            changed_functions[file] = [name for name in new if old.get(name) != new[name]]
++    (directory / "repair.patch").write_text("".join(patch), encoding="utf-8")
++    tests = {name: read(name) for name in ("generation_tests.json", "selector_tests.json", "lexical_tests.json", "lexical_final_checks.json")}
++    with (directory / "daily_inventory.csv").open("w", encoding="utf-8-sig", newline="") as handle:
++        writer = csv.writer(handle)
++        writer.writerow(["backend", "scenario_days", "day", "level", "status", "before", "after", "generation_ok", "error"])
++        for scenario in tests["lexical_tests.json"]["capacity"]:
++            for day in scenario["daily"]:
++                for level in day["before"]:
++                    for status in day["before"][level]:
++                        writer.writerow([scenario["backend"], scenario["days"], day["day"], level, status,
++                                         day["before"][level][status], day["after"][level][status], day["ok"], day["error"]])
++    summary = {"baseline": "69207c261d84a0fdb21f967a68cfa2e643713951",
++               "production_inventory": "NOT VERIFIED", "production_244_analysis": "NOT VERIFIED",
++               "production_history_374_audit": "NOT VERIFIED", "production_capacity_7_30": "NOT VERIFIED",
++               "local_source_before": before["by_level"], "local_source_after": after["by_level"],
++               "curated_sense_matrix_only_not_full_pool_gold": matrices, "changed_functions": changed_functions,
++               "protected_functions_unchanged": before["protected_function_hashes"] == protected_hashes(),
++               "tests": {name: {key: data.get(key) for key in ("tests_run", "failures", "errors", "skipped", "successful")}
++                         for name, data in tests.items()},
++               "new_contract_unique_cases": len(set(tests["lexical_tests.json"]["evidence"]) | set(tests["lexical_final_checks.json"]["evidence"])),
++               "isolated_capacity": [{key: s[key] for key in ("backend", "days", "successful_days", "capacity_acceptance", "source")}
++                                     for s in tests["lexical_tests.json"]["capacity"]],
++               "real_gemini_calls": 0, "formal_database_writes": 0, "committed": False, "deployed": False}
++    identities = defaultdict(set)
++    for row in after["records"]:
++        evidence = row.get("classification") or {}
++        if evidence.get("status") != "verified_verb" or evidence.get("reason") == "verified_suru_stem":
++            continue
++        for entry in evidence.get("evidence") or []:
++            identities[(row["level"], entry["lemma"], entry["lemma_reading"])].add(row["surface"])
++    summary["possible_variant_collisions_not_auto_merged"] = [
++        {"level": level, "lemma": lemma, "reading": reading, "surfaces": sorted(surfaces)}
++        for (level, lemma, reading), surfaces in identities.items() if len(surfaces) > 1]
++    (directory / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
++    print(json.dumps(summary, ensure_ascii=False, indent=2))
++
++
++if __name__ == "__main__":
++    parser = argparse.ArgumentParser()
++    group = parser.add_mutually_exclusive_group(required=True)
++    group.add_argument("--output", type=Path)
++    group.add_argument("--summarize", type=Path)
++    args = parser.parse_args()
++    summarize(args.summarize) if args.summarize else audit(args.output)

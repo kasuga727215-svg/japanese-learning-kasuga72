@@ -1,0 +1,42 @@
+{
+  "scope": "Save-only GitHub branch; not a production release",
+  "branch": "codex/phase3br-n5-classification-20261030",
+  "parent_baseline": "69207c261d84a0fdb21f967a68cfa2e643713951",
+  "tests": {
+    "generation": {"pass": 18, "skip": 0, "fail": 0},
+    "selector": {"pass": 20, "skip": 3, "fail": 0},
+    "lexical": {"pass": 24, "skip": 0, "fail": 0},
+    "total": {"pass": 62, "skip": 3, "fail": 0}
+  },
+  "new_production_logic_changes_this_preservation": false,
+  "existing_phase3br_repair_preserved": true,
+  "original_dirty_workspace_preserved": true,
+  "formal_pool_inventory": "NOT VERIFIED",
+  "formal_7_30_day_capacity": "NOT VERIFIED",
+  "formal_readonly_access": "Unavailable; user confirmed save-first",
+  "isolated_capacity_with_existing_history": {
+    "SQLite": {"seven_days_successful": 2, "thirty_days_successful": 2},
+    "PostgreSQL17": {"seven_days_successful": 2, "thirty_days_successful": 2},
+    "capacity_acceptance": "FAIL",
+    "daily_saved_counts_on_success": {"word": 8, "verb": 5, "grammar": 5, "fallback": 0},
+    "history_not_reset": true,
+    "cross_level_substitution": false,
+    "gemini_calls_on_failed_days": 0,
+    "scope_limitation": "Local OpenJLPT pool + captured formal history keys; existing surface-canonical contract, not full sense/variant deduplication"
+  },
+  "local_n5_unknown_review": {
+    "rows": 102,
+    "sense_ambiguity": 3,
+    "pos_or_segmentation_unresolved": 23,
+    "reading_or_segmentation_unresolved": 76,
+    "approved_as_verbs": 0,
+    "review_complete": false
+  },
+  "raw_formal_history_published": false,
+  "production_database_writes": 0,
+  "real_gemini_calls": 0,
+  "merge_main": false,
+  "pull_request_created": false,
+  "render_deployment": false,
+  "release_recommendation": "NOT READY"
+}
