@@ -1,0 +1,71 @@
+{
+  "baseline": "3c6b2a6e08364b3bc11c90aced1f81ff47139a41",
+  "readiness": "NOT READY",
+  "snapshot_sha256": "334ea156d466a359b8297b100e8e29c28208ce8e6d7cdc2c65c52c6c33420b7a",
+  "available_verified_fresh_N5_verbs": 1,
+  "regression": {
+    "generation": {
+      "run": 18,
+      "passed": 18,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "selector": {
+      "run": 23,
+      "passed": 20,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 3
+    },
+    "lexical": {
+      "run": 24,
+      "passed": 24,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "snapshot": {
+      "run": 15,
+      "passed": 15,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "tests_passed": 77,
+  "tests_skipped": 3,
+  "capacity": [
+    {
+      "backend": "SQLite",
+      "days": 7,
+      "successful_days": 1,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "SQLite",
+      "days": 30,
+      "successful_days": 1,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "PostgreSQL17",
+      "days": 7,
+      "successful_days": 1,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "PostgreSQL17",
+      "days": 30,
+      "successful_days": 1,
+      "capacity_acceptance": "FAIL"
+    }
+  ],
+  "capacity_scope": "Formal N5 export + saved formal history; other JLPT levels are public fixtures, not formal inventories",
+  "formal_postgres_live_inventory": "NOT VERIFIED; no direct read-only DSN",
+  "formal_live_commit": "NOT VERIFIED; last known user-provided deployed baseline 69207c2",
+  "real_gemini_calls": 0,
+  "formal_writes": 0,
+  "formal_backfill": false,
+  "render_deployed": false
+}

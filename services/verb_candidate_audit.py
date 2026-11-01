@@ -11,7 +11,7 @@ from functools import lru_cache
 
 
 _local = threading.local()
-CLASSIFIER_VERSION = "unidic-lattice-contract-v2"
+CLASSIFIER_VERSION = "unidic-lattice-contract-v3-source-sense"
 DICTIONARY_VERSION = "unidic-lite:1.0.8/mecab-python3:1.0.12"
 WORD_POS = {"名詞", "形容詞", "形状詞", "副詞", "接続詞", "連体詞", "感動詞", "代名詞", "助詞", "接頭辞", "接尾辞"}
 

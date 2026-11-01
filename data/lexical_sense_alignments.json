@@ -1,0 +1,9 @@
+{
+  "version": "reviewed-source-paraphrases-v1",
+  "dictionary_sha256": "c25f1594482fcb55d02f66609584367a04136af9e4cfaa15c207eb41500bc0d3",
+  "alignments": [
+    {"surface": "あびる", "source_gloss": "to bathe; to shower", "entry_id": "1547450", "sense": 1, "dictionary_gloss": "to take (e.g. shower)", "reason": "Source shower/bathe corresponds to the washing sense, not suffering criticism."},
+    {"surface": "かける", "source_gloss": "to call by phone", "entry_id": "1207610", "sense": 4, "dictionary_gloss": "to make (a call)", "reason": "Source explicitly specifies a phone call, not hanging, running or wagering."},
+    {"surface": "かかる", "source_gloss": "to take time or money", "entry_id": "1207590", "sense": 1, "dictionary_gloss": "to take (a resource, e.g. time or money)", "reason": "The resource/time/money sense is distinct from the attributive word such."}
+  ]
+}

@@ -115,12 +115,17 @@ class Harness:
         invalid_pos = failure_key in self.invalid_pos_once
         self.invalid_pos_once.discard(failure_key)
         items = []
+        hints = {}
+        if "Source sense hints: " in prompt:
+            hints = {row["surface"]: row for row in json.loads(prompt.split("Source sense hints: ", 1)[1])}
         for candidate in inputs:
+            surface = candidate.get("w") or candidate.get("d")
+            reading = (hints.get(surface, {}).get("readings") or ["よみ"])[0]
             if item_type == "word":
-                items.append([candidate["w"], "よみ", "意思", "動詞" if invalid_pos else "名詞・形容動詞", "短い例です。", "簡短例句。"])
+                items.append([candidate["w"], reading, "意思", "動詞" if invalid_pos else "名詞・形容動詞", "短い例です。", "簡短例句。"])
             elif item_type == "verb":
                 d = candidate["d"]
-                items.append([d, "よみ", "意思", 1, d + "ます", d + "て", d + "ない", d + "た", "短い例です。", "簡短例句。"])
+                items.append([d, reading, "意思", 1, d + "ます", d + "て", d + "ない", d + "た", "短い例です。", "簡短例句。"])
             else:
                 k = candidate["grammar_key"]
                 items.append([k, candidate.get("pattern") or k, "意思", "接續", "結構", "用法", "短い例です。", "みじかいれいです。", "簡短例句。", "注意"])
@@ -307,7 +312,10 @@ class DailyFreshRegression(unittest.TestCase):
             self.assertTrue(app.word_pos_allows_enriched_item(pos))
         plan = app.select_daily_fresh_candidates("word", {"N5": 1}, set(), "word_basic")
         candidate = plan["items"][0]
-        payload = json.dumps({"items": [[candidate["w"], "よみ", "意思", "名詞", "例です。", "例句。"]]}, ensure_ascii=False)
+        from services.lexical_evidence import source_sense_hints
+        hints = source_sense_hints([candidate])
+        reading = hints[0]["readings"][0] if hints else "よみ"
+        payload = json.dumps({"items": [[candidate["w"], reading, "意思", "名詞", "例です。", "例句。"]]}, ensure_ascii=False)
         rows, _ = app.parse_gemini_bank_items_with_stats("word", "N5", payload)
         app.upsert_gemini_bank_items(rows)
         second = app.select_daily_fresh_candidates("word", {"N5": 1}, set(), "word_basic")

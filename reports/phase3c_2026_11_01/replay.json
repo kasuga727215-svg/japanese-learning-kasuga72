@@ -1,0 +1,79 @@
+{
+  "snapshot_sha256": "334ea156d466a359b8297b100e8e29c28208ce8e6d7cdc2c65c52c6c33420b7a",
+  "snapshot_rows": 1950,
+  "sql_eligible": 669,
+  "old_exclusions": {
+    "sql_category": 1281,
+    "excluded_material_history_or_current_batch": 374,
+    "non_verb:not_verified_dictionary_verb": 244,
+    "non_verb:variant_separator": 11,
+    "non_verb:known_non_verb": 4,
+    "non_verb:counter_or_number": 36
+  },
+  "new_exclusions": {
+    "sql_category": 1281,
+    "excluded_material_history_or_current_batch": 374,
+    "classifier_unknown:history_lexical_identity_uncertain": 9,
+    "non_verb:variant_separator": 11,
+    "non_verb:verified_source_dictionary_sense": 204,
+    "non_verb:verified_nonverb_lexeme": 23,
+    "classifier_unknown:pos_or_segmentation_unresolved": 4,
+    "non_verb:known_non_verb": 4,
+    "selected": 1,
+    "non_verb:counter_or_number": 36,
+    "classifier_unknown:reading_or_segmentation_unresolved": 3
+  },
+  "available": [
+    {
+      "surface": "はく",
+      "reading": "",
+      "source": "openjlpt",
+      "verified_readings": [
+        "はく"
+      ],
+      "evidence_reason": "verified_source_dictionary_sense"
+    }
+  ],
+  "repair_parent_exclusions": {
+    "sql_category": 1281,
+    "excluded_material_history_or_current_batch": 374,
+    "selected": 2,
+    "non_verb:variant_separator": 11,
+    "classifier_unknown:pos_or_segmentation_unresolved": 11,
+    "non_verb:verified_nonverb_lexeme": 214,
+    "non_verb:known_non_verb": 4,
+    "classifier_unknown:ambiguous_word_verb_sense": 1,
+    "classifier_unknown:reading_or_segmentation_unresolved": 16,
+    "non_verb:counter_or_number": 36
+  },
+  "eligible_classification_before_source_sense": {
+    "verified_word": 456,
+    "unknown": 104,
+    "verified_verb": 108,
+    "rejected_invalid": 1
+  },
+  "eligible_classification_after_source_sense": {
+    "verified_word": 521,
+    "unknown": 37,
+    "verified_verb": 111
+  },
+  "old244_current_classification": {
+    "verified_verb": 3,
+    "verified_word": 234,
+    "unknown": 7
+  },
+  "available_count": 1,
+  "historical_log_targets": {
+    "sql_category": 1281,
+    "history": 374,
+    "not_verified_dictionary_verb": 244
+  },
+  "transaction_consistency": "Pool exported 2026-11-01; history captured 2026-10-30, archive unchanged 2026-11-01; NOT one transaction snapshot",
+  "raw_row_audit_committed": false,
+  "history_keys": 1169,
+  "material_versions": 151,
+  "formal_writes": 0,
+  "real_gemini_calls": 0,
+  "deployment": "NOT AUTHORIZED",
+  "release": "NOT READY"
+}

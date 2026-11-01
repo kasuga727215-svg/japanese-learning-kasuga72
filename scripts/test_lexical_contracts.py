@@ -180,6 +180,7 @@ class LexicalContracts(unittest.TestCase):
 
     def simulate(self, days):
         pool = [(row, app.classify_daily_fresh_pool_row(row)) for row in self.h.sql("SELECT * FROM vocabulary_pool ORDER BY id")]
+        by_surface_level = {(app.vocabulary_pool_candidate_surface(row), row["jlpt_level"]): evidence for row, evidence in pool}
         used, daily, success = set(), [], 0
         for index in range(days):
             before = self.inventory(pool, used)
@@ -200,9 +201,11 @@ class LexicalContracts(unittest.TestCase):
                 self.assertEqual(Counter(r["jlpt_level"] for r in material["verbs"]), Counter(dict.fromkeys(LEVELS, 1)))
                 self.assertEqual(Counter(r["jlpt_level"] for r in material["grammar_points"]), Counter(dict.fromkeys(LEVELS, 1)))
                 for row in material["vocab"]:
-                    self.assertEqual(classify_lexeme(row["word"])["status"], "verified_word", row)
+                    self.assertEqual(by_surface_level[(row["word"], row["jlpt_level"])]["status"], "verified_word", row)
                 for row in material["verbs"]:
-                    self.assertEqual(classify_lexeme(row["dictionary_form"])["status"], "verified_verb", row)
+                    evidence = by_surface_level[(row["dictionary_form"], row["jlpt_level"])]
+                    self.assertEqual(evidence["status"], "verified_verb", row)
+                    self.assertTrue(evidence.get("source_sense_evidence") or any(e["pos"][0] == "動詞" for e in evidence["evidence"]))
                 used.update(today)
                 record["quota"] = {"word": 8, "verb": 5, "grammar": 5}
                 record["fallback"] = 0

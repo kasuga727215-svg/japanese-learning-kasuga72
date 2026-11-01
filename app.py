@@ -5876,15 +5876,21 @@ def audit_verb_candidate(candidate, row=None, log=False):
         return audit_result(False, "known_non_verb", "word")
     pos = first_text(source, ["part_of_speech", "pos"]) or first_text(row, ["part_of_speech", "pos"])
     reading = first_text(source, ["reading_hiragana", "reading"]) or first_text(row, ["reading_hiragana", "reading"])
-    evidence = verified_verb_evidence(text, reading, pos)
+    evidence = classify_daily_fresh_pool_row({**row, **source, "surface": text,
+                                             "source": first_text(row, ["source"]) or first_text(source, ["source"]),
+                                             "reading_hiragana": reading, "part_of_speech": pos})
+    evidence = {**evidence, "accepted": evidence["status"] == "verified_verb",
+                "suggested_type": "word" if evidence["status"] == "verified_word" else ""}
     return {**audit_result(evidence["accepted"], evidence["reason"], evidence.get("suggested_type", "")),
+            **({"source_sense_evidence": evidence["source_sense_evidence"]} if "source_sense_evidence" in evidence else {}),
             **{key: evidence[key] for key in ("status", "evidence", "source", "classifier_version", "source_fingerprint", "retryable", "verification_route")}}
 
 
 def classify_daily_fresh_pool_row(row):
-    return classify_lexeme(vocabulary_pool_candidate_surface(row),
-                           first_text(row, ["reading_hiragana", "reading"]),
-                           first_text(row, ["part_of_speech", "pos"]))
+    from services.lexical_evidence import classify_source_row
+    return classify_source_row(row, classify_lexeme(vocabulary_pool_candidate_surface(row),
+                               first_text(row, ["reading_hiragana", "reading"]),
+                               first_text(row, ["part_of_speech", "pos"])))
 
 
 def is_daily_fresh_word_pool_row(row):
@@ -5938,6 +5944,7 @@ def build_daily_fresh_candidate_payload(row, item_type, level):
     surface = vocabulary_pool_candidate_surface(row)
     key = vocabulary_pool_candidate_key(row)
     classification = {
+        "source": first_text(row, ["source"]),
         "reading_hiragana": first_text(row, ["reading_hiragana", "reading"]),
         "part_of_speech": first_text(row, ["part_of_speech", "pos"]),
         "classification_evidence": classify_daily_fresh_pool_row(row),
@@ -6023,6 +6030,10 @@ def daily_fresh_candidate_rejection_reason(row, item_type, level, excluded_keys)
     )
     if history_aliases & excluded_keys:
         return "excluded_material_history_or_current_batch"
+    from services.lexical_evidence import history_overlap
+    overlap = history_overlap(row, excluded_keys)
+    if overlap:
+        return ("classifier_unknown:" if overlap["reason"].endswith("uncertain") else "") + overlap["reason"]
     category = first_text(row, ["category"]).lower() or "general"
     source = first_text(row, ["source"]).lower()
     quality = first_text(row, ["quality"]).lower() or "normal"
@@ -6149,8 +6160,28 @@ def daily_fresh_bank_key_count(item_type, level):
         return 0
 
 
+def daily_fresh_history_readings(keys):
+    readings = {}
+    if not keys:
+        return readings
+    frame = read_database()
+    for raw in frame.get("material_json", []):
+        try:
+            material = json.loads(safe_text(raw))
+        except (ValueError, TypeError):
+            continue
+        for item in (material.get("vocab") or material.get("vocabulary") or []) + (material.get("verbs") or []):
+            surface = first_text(item, ["dictionary_form", "word", "surface", "base_form", "term", "base"])
+            key = normalize_vocab_key(re.split(r"[（(｜|]| - ", surface, maxsplit=1)[0].strip())
+            reading = first_text(item, ["reading_hiragana", "reading"])
+            if key in keys and reading:
+                readings.setdefault(key, set()).add(reading)
+    return {key: sorted(values) for key, values in readings.items()}
+
+
 def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, current_batch_keys=None, source_state=None, deadline=None):
     from services.candidate_selector import select_slice
+    from services.lexical_evidence import ExclusionKeys
 
     ensure_vocabulary_pool_store()
     level = normalize_gemini_bank_level(level, item_type)
@@ -6171,9 +6202,11 @@ def fetch_daily_fresh_candidate_rows(item_type, level, limit, excluded_keys, cur
     deadline = min(deadline or time.perf_counter() + 4.0, time.perf_counter() + 4.0)
     print(f"[vocabulary-pool] candidate_fetch_start item_type={item_type} level={level} requested={limit}")
     print(f"[vocabulary-pool] selector_excluded_generated={len(generated)} selector_excluded_current_batch={len(current)} selector_excluded_bank=0")
+    if level == "N5" and "history_readings" not in state:
+        state["history_readings"] = daily_fresh_history_readings(generated)
     options = dict(
         postgres=bool(DATABASE_URL), item_type=item_type, level=level, limit=limit, state=state,
-        excluded=generated | current, blocked_categories=DAILY_FRESH_BLOCKED_CATEGORIES,
+        excluded=ExclusionKeys(generated | current, state.get("history_readings")), blocked_categories=DAILY_FRESH_BLOCKED_CATEGORIES,
         blocked_sources=DAILY_FRESH_BLOCKED_SOURCES, min_commonness=VOCABULARY_POOL_MIN_COMMONNESS_SCORE,
         sanitize=sanitize_vocabulary_pool_candidate_row, reject=daily_fresh_candidate_rejection_reason,
         candidate_key=vocabulary_pool_candidate_key, deadline=deadline,
@@ -7331,6 +7364,12 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
             stats["mismatch"] += 1
             continue
         payload = json.loads(item.get("payload_json") or "{}")
+        if item_type in {"word", "verb"}:
+            from services.lexical_evidence import enrichment_reading_matches
+            if not enrichment_reading_matches(payload, candidate):
+                stats["mismatch"] += 1
+                print(f"[gemini-bank] source_sense_reading_mismatch item_type={item_type} candidate={log_safe_text(surface)}")
+                continue
         if item_type == "grammar":
             expected_key = candidate.get("grammar_key") or candidate.get("k") or candidate.get("pattern")
             actual_key = payload.get("grammar_key") or payload.get("k") or item.get("normalized_key")
@@ -7339,7 +7378,7 @@ def filter_enriched_items_to_candidates(items, item_type, candidates):
                 continue
         if item_type == "word":
             pos = simple_text(payload.get("part_of_speech") or payload.get("p"))
-            if not word_pos_allows_enriched_item(pos) or classify_lexeme(surface)["status"] == "verified_verb":
+            if not word_pos_allows_enriched_item(pos) or classify_daily_fresh_pool_row({**candidate, "surface": surface})["status"] != "verified_word":
                 stats["invalid_pos"] += 1
                 continue
         if item_type == "verb":
@@ -11469,6 +11508,9 @@ def run_gemini_daily_fresh_pack(job_id, pack_type):
             chunk_candidates_by_level = daily_fresh_candidates_by_level(chunk_candidates)
             requested_count = len(chunk_candidates)
             prompt = build_gemini_daily_enrich_prompt(pack_type, item_type, chunk_candidates_by_level)
+            if item_type in {"word", "verb"}:
+                from services.lexical_evidence import append_source_sense_hints
+                prompt = append_source_sense_hints(prompt, chunk_candidates)
             print(
                 f"[gemini-enrich] chunk_start pack={pack_type} item_type={item_type} "
                 f"chunk={chunk_label} size={requested_count}"

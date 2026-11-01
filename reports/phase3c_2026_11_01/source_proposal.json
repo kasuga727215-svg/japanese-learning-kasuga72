@@ -1,0 +1,54 @@
+{
+  "upstream_commit": "bf4e1eecd5d11406aaecdee910464507aef7fcdc",
+  "upstream_sha256": "cbb221c9a3a92108fcd02fb088d9afacc70bc8c96570d5730425de0a49dad5f3",
+  "url": "https://github.com/evanclan/OpenJLPT/blob/bf4e1eecd5d11406aaecdee910464507aef7fcdc/data/json/vocab/n5.json",
+  "license": "CC BY-SA 4.0",
+  "upstream_rows": 674,
+  "dictionary_form_verbs": 109,
+  "old_public_rows": 662,
+  "old_public_surfaces_missing_from_formal_pool": 0,
+  "new_verb_surfaces": [
+    {
+      "word": "いる",
+      "reading": "いる",
+      "meanings": [
+        "to be",
+        "to have (used for people and animals)"
+      ],
+      "pos": [
+        "aux-v",
+        "v1"
+      ],
+      "jmdict_id": 1577980,
+      "level": "N5",
+      "present_in_formal_pool": false,
+      "history_alias_hold": true,
+      "approved_for_import": false
+    },
+    {
+      "word": "見る",
+      "reading": "みる",
+      "meanings": [
+        "to see",
+        "to watch"
+      ],
+      "pos": [
+        "v1",
+        "vt"
+      ],
+      "jmdict_id": 1259290,
+      "level": "N5",
+      "present_in_formal_pool": true,
+      "history_alias_hold": true,
+      "approved_for_import": false
+    }
+  ],
+  "new_confirmed_history_fresh_verbs_from_update": 0,
+  "import_performed": false,
+  "proposal": "Do not reimport the same source to claim extra capacity. Review additional licensed N5 curriculum evidence and historical senses first.",
+  "required_additional_verified_fresh_verbs": {
+    "seven_days": 6,
+    "thirty_days": 29
+  },
+  "basis": "One confirmed fresh existing-pool verb; one N5 verb consumed daily in the all-level configuration. Reserve failures require additional headroom."
+}

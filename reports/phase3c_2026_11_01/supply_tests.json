@@ -1,0 +1,3161 @@
+{
+  "snapshot_sha256": "334ea156d466a359b8297b100e8e29c28208ce8e6d7cdc2c65c52c6c33420b7a",
+  "snapshot_rows": 1950,
+  "sql_eligible": 669,
+  "old_exclusions": {
+    "sql_category": 1281,
+    "excluded_material_history_or_current_batch": 374,
+    "non_verb:not_verified_dictionary_verb": 244,
+    "non_verb:variant_separator": 11,
+    "non_verb:known_non_verb": 4,
+    "non_verb:counter_or_number": 36
+  },
+  "new_exclusions": {
+    "sql_category": 1281,
+    "excluded_material_history_or_current_batch": 374,
+    "classifier_unknown:history_lexical_identity_uncertain": 9,
+    "non_verb:variant_separator": 11,
+    "non_verb:verified_source_dictionary_sense": 204,
+    "non_verb:verified_nonverb_lexeme": 23,
+    "classifier_unknown:pos_or_segmentation_unresolved": 4,
+    "non_verb:known_non_verb": 4,
+    "selected": 1,
+    "non_verb:counter_or_number": 36,
+    "classifier_unknown:reading_or_segmentation_unresolved": 3
+  },
+  "available": [
+    {
+      "surface": "はく",
+      "reading": "",
+      "source": "openjlpt",
+      "verified_readings": [
+        "はく"
+      ],
+      "evidence_reason": "verified_source_dictionary_sense"
+    }
+  ],
+  "eligible_classification_before_source_sense": {
+    "verified_word": 456,
+    "unknown": 104,
+    "verified_verb": 108,
+    "rejected_invalid": 1
+  },
+  "eligible_classification_after_source_sense": {
+    "verified_word": 521,
+    "unknown": 37,
+    "verified_verb": 111
+  },
+  "old244_current_classification": {
+    "verified_verb": 3,
+    "verified_word": 234,
+    "unknown": 7
+  },
+  "available_count": 1,
+  "historical_log_targets": {
+    "sql_category": 1281,
+    "history": 374,
+    "not_verified_dictionary_verb": 244
+  },
+  "transaction_consistency": "Pool exported 2026-11-01; history captured 2026-10-30, archive unchanged 2026-11-01; NOT one transaction snapshot",
+  "raw_row_audit_committed": false,
+  "supply": [
+    {
+      "backend": "SQLite",
+      "days": 7,
+      "successful_days": 1,
+      "daily": [
+        {
+          "day": "2026-11-01",
+          "ok": true,
+          "error": null,
+          "missing": [],
+          "mock_calls": 14,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 1,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 374,
+            "saved_history_key_count": 1169
+          },
+          "counts": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5,
+            "fallback": 0
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-02",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-03",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-04",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-05",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-06",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-07",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        }
+      ],
+      "N5_source": "formal SHA-verified export",
+      "other_levels_source": "public CSV fixtures, NOT formal snapshots",
+      "real_gemini_calls": 0,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "SQLite",
+      "days": 30,
+      "successful_days": 1,
+      "daily": [
+        {
+          "day": "2026-11-01",
+          "ok": true,
+          "error": null,
+          "missing": [],
+          "mock_calls": 14,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 1,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 374,
+            "saved_history_key_count": 1169
+          },
+          "counts": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5,
+            "fallback": 0
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-02",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-03",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-04",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-05",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-06",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-07",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-08",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-09",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-10",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-11",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-12",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-13",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-14",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-15",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-16",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-17",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-18",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-19",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-20",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-21",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-22",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-23",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-24",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-25",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-26",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-27",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-28",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-29",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-30",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        }
+      ],
+      "N5_source": "formal SHA-verified export",
+      "other_levels_source": "public CSV fixtures, NOT formal snapshots",
+      "real_gemini_calls": 0,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "PostgreSQL17",
+      "days": 7,
+      "successful_days": 1,
+      "daily": [
+        {
+          "day": "2026-11-01",
+          "ok": true,
+          "error": null,
+          "missing": [],
+          "mock_calls": 14,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 1,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 374,
+            "saved_history_key_count": 1169
+          },
+          "counts": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5,
+            "fallback": 0
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-02",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-03",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-04",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-05",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-06",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-07",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        }
+      ],
+      "N5_source": "formal SHA-verified export",
+      "other_levels_source": "public CSV fixtures, NOT formal snapshots",
+      "real_gemini_calls": 0,
+      "capacity_acceptance": "FAIL"
+    },
+    {
+      "backend": "PostgreSQL17",
+      "days": 30,
+      "successful_days": 1,
+      "daily": [
+        {
+          "day": "2026-11-01",
+          "ok": true,
+          "error": null,
+          "missing": [],
+          "mock_calls": 14,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 1,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 374,
+            "saved_history_key_count": 1169
+          },
+          "counts": {
+            "word": 8,
+            "verb": 5,
+            "grammar": 5,
+            "fallback": 0
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-02",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-03",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-04",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-05",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-06",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-07",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-08",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-09",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-10",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-11",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-12",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-13",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-14",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-15",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-16",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-17",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-18",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-19",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-20",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-21",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-22",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-23",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-24",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-25",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-26",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-27",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-28",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-29",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        },
+        {
+          "day": "2026-11-30",
+          "ok": false,
+          "error": "classifier_uncertainty",
+          "missing": [
+            {
+              "level": "N5",
+              "requested": 1,
+              "available": 0,
+              "remaining": 1,
+              "candidate_exhausted": false,
+              "classifier_unknown_count": 16,
+              "excluded_by_reason": {
+                "excluded_material_history_or_current_batch": 377,
+                "classifier_unknown:history_lexical_identity_uncertain": 9,
+                "non_verb:variant_separator": 11,
+                "non_verb:verified_source_dictionary_sense": 202,
+                "non_verb:verified_nonverb_lexeme": 23,
+                "classifier_unknown:pos_or_segmentation_unresolved": 4,
+                "non_verb:known_non_verb": 4,
+                "non_verb:counter_or_number": 36,
+                "classifier_unknown:reading_or_segmentation_unresolved": 3,
+                "sql_category": 1281
+              }
+            }
+          ],
+          "mock_calls": 0,
+          "inventory_before": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          },
+          "inventory_after": {
+            "verified_fresh_N5_verbs": 0,
+            "unknown_pos_N5": 7,
+            "history_identity_pending_N5": 9,
+            "exact_history_excluded_N5": 377,
+            "saved_history_key_count": 1182
+          }
+        }
+      ],
+      "N5_source": "formal SHA-verified export",
+      "other_levels_source": "public CSV fixtures, NOT formal snapshots",
+      "real_gemini_calls": 0,
+      "capacity_acceptance": "FAIL"
+    }
+  ],
+  "history_keys": 1169,
+  "material_versions": 151,
+  "formal_writes": 0,
+  "real_gemini_calls": 0,
+  "deployment": "NOT AUTHORIZED",
+  "release": "NOT READY"
+}

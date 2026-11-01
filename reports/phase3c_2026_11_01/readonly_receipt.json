@@ -1,0 +1,47 @@
+{
+  "checked_at_utc": "2026-11-01T07:00:47.988369+00:00",
+  "method": "GET only",
+  "archive_versions": 151,
+  "archive_matches_saved_snapshot": true,
+  "latest_material_key": "2026-10-28-1",
+  "new_material_versions": 0,
+  "historical_reading_samples_fetched": 4,
+  "missing_recent_dates": [
+    "2026-10-29",
+    "2026-10-30",
+    "2026-10-31",
+    "2026-11-01"
+  ],
+  "today_still_pending": true,
+  "receipts": [
+    {
+      "path": "/api/archive-dates",
+      "http_status": 200,
+      "sha256": "096aefc924c8fe9fe6b9e6abcb98ab6fe14259619ef2782f799afa59a2acfd7c"
+    },
+    {
+      "path": "/api/materials",
+      "http_status": 200,
+      "sha256": "677159640b89d97f5ac048326acd85d18b2d66805f0ea7f617d1948157b8247c"
+    },
+    {
+      "path": "/api/materials",
+      "http_status": 200,
+      "sha256": "8000037cc48b05f5d1ddbd2587529b9a78c19c402fdd26e92606faf963e50fbd"
+    },
+    {
+      "path": "/api/materials",
+      "http_status": 200,
+      "sha256": "29bd550852c870ab08f3dcfcbc594b0370ff486dd4bb4b2bd7da9d4ce591d448"
+    },
+    {
+      "path": "/api/materials",
+      "http_status": 200,
+      "sha256": "dcfe016fcda1300bbd939a7811e7d0e1de3fa9645c3bfe3e04af24c71a51a8ea"
+    }
+  ],
+  "formal_writes": 0,
+  "gemini_calls": 0,
+  "live_commit": "NOT VERIFIED; no authenticated Render deployment metadata available",
+  "transaction_consistent_snapshot": false
+}
